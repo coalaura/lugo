@@ -1,6 +1,6 @@
 {
     "name": "lugo-vscode",
-    "displayName": "Lugo Language Server",
+    "displayName": "Lugo - Lua LSP",
     "description": " A high-performance, zero-allocation Lua 5.4 parser and Language Server (LSP).",
     "publisher": "coalaura",
     "icon": "logo.png",
