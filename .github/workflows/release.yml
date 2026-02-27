@@ -118,9 +118,6 @@ jobs:
     - name: Install vsce
       run: npm install -g @vscode/vsce
 
-    - name: Install dependencies
-      run: npm install
-
     - name: Download Release Artifacts
       uses: actions/download-artifact@v4
       with:
@@ -128,26 +125,32 @@ jobs:
         path: release_artifacts
         merge-multiple: true
 
-    - name: Download Extension Artifacts
+    - name: Download Extension Artifacts (into /vscode/bin)
       uses: actions/download-artifact@v4
       with:
         pattern: ext_*
-        path: bin
+        path: vscode/bin
         merge-multiple: true
 
+    - name: Install dependencies
+      working-directory: ./vscode
+      run: npm install
+
     - name: Package VS Code Extension
+      working-directory: ./vscode
       run: |
         chmod +x bin/* || true
         
+        cp ../README.md .
+        cp ../logo.png .
+
         rm -f .gitignore
-        
-        if [ ! -f README.md ]; then echo "# Lugo LSP" > README.md; fi
         
         VERSION="${{ github.ref_name }}"
         VERSION="${VERSION#v}"
         npm version $VERSION --allow-same-version --no-git-tag-version || true
         
-        vsce package -o lugo-${{ github.ref_name }}.vsix
+        vsce package -o ../lugo-${{ github.ref_name }}.vsix
 
     - name: Prepare Final Release Files
       run: |
