@@ -38,14 +38,15 @@ type InitializeResult struct {
 }
 
 type ServerCapabilities struct {
-	TextDocumentSync        int                `json:"textDocumentSync"`
-	DefinitionProvider      bool               `json:"definitionProvider"`
-	HoverProvider           bool               `json:"hoverProvider"`
-	RenameProvider          bool               `json:"renameProvider"`
-	ReferencesProvider      bool               `json:"referencesProvider"`
-	DocumentSymbolProvider  bool               `json:"documentSymbolProvider"`
-	WorkspaceSymbolProvider bool               `json:"workspaceSymbolProvider"`
-	CompletionProvider      *CompletionOptions `json:"completionProvider,omitempty"`
+	TextDocumentSync        int                   `json:"textDocumentSync"`
+	DefinitionProvider      bool                  `json:"definitionProvider"`
+	HoverProvider           bool                  `json:"hoverProvider"`
+	RenameProvider          bool                  `json:"renameProvider"`
+	ReferencesProvider      bool                  `json:"referencesProvider"`
+	DocumentSymbolProvider  bool                  `json:"documentSymbolProvider"`
+	WorkspaceSymbolProvider bool                  `json:"workspaceSymbolProvider"`
+	SignatureHelpProvider   *SignatureHelpOptions `json:"signatureHelpProvider,omitempty"`
+	CompletionProvider      *CompletionOptions    `json:"completionProvider,omitempty"`
 }
 
 type TextDocumentItem struct {
@@ -232,4 +233,30 @@ type ReadStdParams struct {
 
 type ReadStdResult struct {
 	Content string `json:"content"`
+}
+
+type SignatureHelpOptions struct {
+	TriggerCharacters []string `json:"triggerCharacters,omitempty"`
+}
+
+type SignatureHelpParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type SignatureHelp struct {
+	Signatures      []SignatureInformation `json:"signatures"`
+	ActiveSignature int                    `json:"activeSignature"`
+	ActiveParameter int                    `json:"activeParameter"`
+}
+
+type SignatureInformation struct {
+	Label         string                 `json:"label"`
+	Documentation *MarkupContent         `json:"documentation,omitempty"`
+	Parameters    []ParameterInformation `json:"parameters,omitempty"`
+}
+
+type ParameterInformation struct {
+	Label         string         `json:"label"`
+	Documentation *MarkupContent `json:"documentation,omitempty"`
 }

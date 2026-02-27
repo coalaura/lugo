@@ -183,6 +183,9 @@ func (s *Server) handleMessage(req Request) {
 				ReferencesProvider:      true,
 				DocumentSymbolProvider:  true,
 				WorkspaceSymbolProvider: true,
+				SignatureHelpProvider: &SignatureHelpOptions{
+					TriggerCharacters: []string{"(", ","},
+				},
 				CompletionProvider: &CompletionOptions{
 					TriggerCharacters: []string{".", ":"},
 				},
@@ -1198,6 +1201,149 @@ func (s *Server) handleMessage(req Request) {
 			ID:  req.ID,
 			Result: WorkspaceEdit{
 				Changes: changes,
+			},
+		})
+	case "textDocument/signatureHelp":
+		var params SignatureHelpParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
+
+		var callID ast.NodeID = ast.InvalidNode
+
+		curr := doc.Tree.NodeAt(offset)
+
+		for curr != ast.InvalidNode {
+			node := doc.Tree.Nodes[curr]
+
+			if node.Kind == ast.KindCallExpr || node.Kind == ast.KindMethodCall {
+				if offset > doc.Tree.Nodes[node.Left].End {
+					callID = curr
+
+					break
+				}
+			}
+
+			curr = node.Parent
+		}
+
+		if callID == ast.InvalidNode {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		callNode := doc.Tree.Nodes[callID]
+
+		var funcIdentID ast.NodeID
+
+		if callNode.Kind == ast.KindMethodCall {
+			funcIdentID = callNode.Right
+		} else {
+			funcIdentID = callNode.Left
+		}
+
+		ctx := s.resolveSymbolAt(uri, doc.Tree.Nodes[funcIdentID].Start)
+		if ctx == nil || ctx.TargetDoc == nil || ctx.TargetDefID == ast.InvalidNode {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
+		if valID == ast.InvalidNode || ctx.TargetDoc.Tree.Nodes[valID].Kind != ast.KindFunctionExpr {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		luadoc := parseLuaDoc(ctx.TargetDoc.getCommentsAbove(ctx.TargetDefID))
+		funcNode := ctx.TargetDoc.Tree.Nodes[valID]
+
+		var (
+			paramsInfo []ParameterInformation
+			labels     []string
+		)
+
+		paramDocs := make(map[string]LuaDocParam)
+
+		for _, p := range luadoc.Params {
+			paramDocs[p.Name] = p
+		}
+
+		for i := uint16(0); i < funcNode.Count; i++ {
+			pID := ctx.TargetDoc.Tree.ExtraList[funcNode.Extra+uint32(i)]
+			pNode := ctx.TargetDoc.Tree.Nodes[pID]
+			pName := string(ctx.TargetDoc.Source[pNode.Start:pNode.End])
+
+			label := pName
+
+			var docContent *MarkupContent
+
+			if pDoc, ok := paramDocs[pName]; ok {
+				if pDoc.Type != "" {
+					label += ": " + pDoc.Type
+				}
+
+				if pDoc.Desc != "" {
+					docContent = &MarkupContent{Kind: "markdown", Value: pDoc.Desc}
+				}
+			}
+
+			labels = append(labels, label)
+			paramsInfo = append(paramsInfo, ParameterInformation{
+				Label:         label,
+				Documentation: docContent,
+			})
+		}
+
+		var activeParam int
+
+		for i := uint16(0); i < callNode.Count; i++ {
+			argID := doc.Tree.ExtraList[callNode.Extra+uint32(i)]
+			argNode := doc.Tree.Nodes[argID]
+
+			if offset > argNode.End {
+				activeParam = int(i) + 1
+			} else {
+				activeParam = int(i)
+
+				break
+			}
+		}
+
+		var funcDoc *MarkupContent
+
+		if luadoc.Description != "" {
+			funcDoc = &MarkupContent{Kind: "markdown", Value: luadoc.Description}
+		}
+
+		sigInfo := SignatureInformation{
+			Label:         ctx.DisplayName + "(" + strings.Join(labels, ", ") + ")",
+			Documentation: funcDoc,
+			Parameters:    paramsInfo,
+		}
+
+		WriteMessage(s.Writer, Response{
+			RPC: "2.0",
+			ID:  req.ID,
+			Result: SignatureHelp{
+				Signatures:      []SignatureInformation{sigInfo},
+				ActiveSignature: 0,
+				ActiveParameter: activeParam,
 			},
 		})
 	}
