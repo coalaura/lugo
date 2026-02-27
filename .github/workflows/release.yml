@@ -145,12 +145,18 @@ jobs:
         cp ../LICENSE .
         cp ../logo.png .
 
+        npm run build
+
+        rm -f ./extension.js
+        mv ./dist/extension.js ./extension.js
+        rmdir ./dist || true
+
         rm -f .gitignore
         
         VERSION="${{ github.ref_name }}"
         VERSION="${VERSION#v}"
         npm version $VERSION --allow-same-version --no-git-tag-version || true
-        
+
         vsce package -o ../lugo-${{ github.ref_name }}.vsix
 
     - name: Prepare Final Release Files
