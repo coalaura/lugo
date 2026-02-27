@@ -1,6 +1,6 @@
 *.json
 *.log
 *.exe
-!/vscode/package.json
+!vscode/package.json
 node_modules
 bin

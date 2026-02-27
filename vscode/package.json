@@ -64,6 +64,21 @@
                         "Citizen"
                     ],
                     "description": "List of global variables to ignore when reporting undefined globals."
+                },
+                "lugo.diagnostics.undefinedGlobals": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable diagnostics for undefined global variables."
+                },
+                "lugo.diagnostics.unusedVariables": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable diagnostics for unused local variables."
+                },
+                "lugo.diagnostics.shadowing": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable diagnostics when a local variable shadows a global or outer local."
                 }
             }
         }

@@ -33,6 +33,7 @@ async function activate(context) {
 				if (client) {
 					await client.stop();
 				}
+
 				await startClient(context);
 			}
 		})
@@ -50,6 +51,10 @@ async function startClient(context) {
 		libraryPaths = config.get("libraryPaths") || [],
 		knownGlobals = config.get("knownGlobals") || [];
 
+	const diagUndefinedGlobals = config.get("diagnostics.undefinedGlobals") !== false,
+		diagUnusedVariables = config.get("diagnostics.unusedVariables") !== false,
+		diagShadowing = config.get("diagnostics.shadowing") !== false;
+
 	const filesConfig = vscode.workspace.getConfiguration("files"),
 		searchConfig = vscode.workspace.getConfiguration("search");
 
@@ -66,7 +71,6 @@ async function startClient(context) {
 		}
 	}
 
-	// Deduplicate the list
 	ignoreGlobs = [...new Set(ignoreGlobs)];
 
 	const platform = os.platform(),
@@ -96,6 +100,10 @@ async function startClient(context) {
 			libraryPaths: libraryPaths,
 			knownGlobals: knownGlobals,
 			ignoreGlobs: ignoreGlobs,
+
+			diagnosticsUndefinedGlobals: diagUndefinedGlobals,
+			diagnosticsUnusedVariables: diagUnusedVariables,
+			diagnosticsShadowing: diagShadowing,
 		},
 	};
 

@@ -31,6 +31,10 @@ type InitializationOptions struct {
 	LibraryPaths []string `json:"libraryPaths,omitempty"`
 	KnownGlobals []string `json:"knownGlobals,omitempty"`
 	IgnoreGlobs  []string `json:"ignoreGlobs,omitempty"`
+
+	DiagnosticsUndefinedGlobals bool `json:"diagnosticsUndefinedGlobals"`
+	DiagnosticsUnusedVariables  bool `json:"diagnosticsUnusedVariables"`
+	DiagnosticsShadowing        bool `json:"diagnosticsShadowing"`
 }
 
 type InitializeResult struct {
