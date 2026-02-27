@@ -72,6 +72,8 @@ type Server struct {
 	DiagUndefinedGlobals bool
 	DiagUnusedVariables  bool
 	DiagShadowing        bool
+	DiagUnreachableCode  bool
+	DiagAmbiguousReturns bool
 	InlayParamHints      bool
 }
 
@@ -181,6 +183,8 @@ func (s *Server) handleMessage(req Request) {
 			s.DiagUndefinedGlobals = params.InitializationOptions.DiagnosticsUndefinedGlobals
 			s.DiagUnusedVariables = params.InitializationOptions.DiagnosticsUnusedVariables
 			s.DiagShadowing = params.InitializationOptions.DiagnosticsShadowing
+			s.DiagUnreachableCode = params.InitializationOptions.DiagnosticsUnreachableCode
+			s.DiagAmbiguousReturns = params.InitializationOptions.DiagnosticsAmbiguousReturns
 			s.InlayParamHints = params.InitializationOptions.InlayHintsParameterNames
 		}
 
@@ -1895,6 +1899,74 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 	}
 
+	if s.DiagUnreachableCode || s.DiagAmbiguousReturns {
+		for i := 1; i < len(doc.Tree.Nodes); i++ {
+			node := doc.Tree.Nodes[i]
+
+			if s.DiagAmbiguousReturns && node.Kind == ast.KindReturn && node.Left != ast.InvalidNode {
+				exprList := doc.Tree.Nodes[node.Left]
+				if exprList.Count > 0 {
+					firstExprID := doc.Tree.ExtraList[exprList.Extra]
+					firstExprNode := doc.Tree.Nodes[firstExprID]
+
+					retLine, _ := doc.Tree.Position(node.Start)
+					exprLine, _ := doc.Tree.Position(firstExprNode.Start)
+
+					if exprLine > retLine {
+						sLine, sCol := doc.Tree.Position(firstExprNode.Start)
+
+						lastExprID := doc.Tree.ExtraList[exprList.Extra+uint32(exprList.Count-1)]
+						lastExprNode := doc.Tree.Nodes[lastExprID]
+						eLine, eCol := doc.Tree.Position(lastExprNode.End)
+
+						diagnostics = append(diagnostics, Diagnostic{
+							Range: Range{
+								Start: Position{Line: sLine, Character: sCol},
+								End:   Position{Line: eLine, Character: eCol},
+							},
+							Severity: SeverityWarning,
+							Message:  "Ambiguous return: this executes as the return value because Lua ignores newlines. Use 'return;' if you meant to leave this as unreachable code.",
+						})
+					}
+				}
+			}
+
+			if s.DiagUnreachableCode && node.Kind == ast.KindBlock || node.Kind == ast.KindFile {
+				var terminalFound bool
+
+				for j := uint16(0); j < node.Count; j++ {
+					stmtID := doc.Tree.ExtraList[node.Extra+uint32(j)]
+
+					if terminalFound {
+						lastStmtID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
+
+						startNode := doc.Tree.Nodes[stmtID]
+						endNode := doc.Tree.Nodes[lastStmtID]
+
+						sLine, sCol := doc.Tree.Position(startNode.Start)
+						eLine, eCol := doc.Tree.Position(endNode.End)
+
+						diagnostics = append(diagnostics, Diagnostic{
+							Range: Range{
+								Start: Position{Line: sLine, Character: sCol},
+								End:   Position{Line: eLine, Character: eCol},
+							},
+							Severity: SeverityHint,
+							Tags:     []DiagnosticTag{Unnecessary},
+							Message:  "Unreachable code detected.",
+						})
+
+						break
+					}
+
+					if isTerminal(doc.Tree, stmtID) {
+						terminalFound = true
+					}
+				}
+			}
+		}
+	}
+
 	if diagnostics == nil {
 		diagnostics = []Diagnostic{}
 	}
@@ -2224,6 +2296,57 @@ func (s *Server) isKnownGlobal(name []byte) bool {
 		if matched, _ := filepath.Match(glob, strName); matched {
 			return true
 		}
+	}
+
+	return false
+}
+
+func isTerminal(tree *ast.Tree, id ast.NodeID) bool {
+	if id == ast.InvalidNode {
+		return false
+	}
+
+	node := tree.Nodes[id]
+
+	switch node.Kind {
+	case ast.KindReturn, ast.KindBreak, ast.KindGoto:
+		return true
+	case ast.KindDo:
+		return isTerminal(tree, node.Left)
+	case ast.KindBlock:
+		for i := uint16(0); i < node.Count; i++ {
+			if isTerminal(tree, tree.ExtraList[node.Extra+uint32(i)]) {
+				return true
+			}
+		}
+
+		return false
+	case ast.KindIf:
+		if !isTerminal(tree, node.Right) {
+			return false
+		}
+
+		hasElse := false
+
+		for i := uint16(0); i < node.Count; i++ {
+			childID := tree.ExtraList[node.Extra+uint32(i)]
+			childNode := tree.Nodes[childID]
+
+			switch childNode.Kind {
+			case ast.KindElseIf:
+				if !isTerminal(tree, childNode.Right) {
+					return false
+				}
+			case ast.KindElse:
+				hasElse = true
+
+				if !isTerminal(tree, childNode.Left) {
+					return false
+				}
+			}
+		}
+
+		return hasElse
 	}
 
 	return false

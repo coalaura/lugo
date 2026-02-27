@@ -35,6 +35,8 @@ type InitializationOptions struct {
 	DiagnosticsUndefinedGlobals bool `json:"diagnosticsUndefinedGlobals"`
 	DiagnosticsUnusedVariables  bool `json:"diagnosticsUnusedVariables"`
 	DiagnosticsShadowing        bool `json:"diagnosticsShadowing"`
+	DiagnosticsUnreachableCode  bool `json:"diagnosticsUnreachableCode"`
+	DiagnosticsAmbiguousReturns bool `json:"diagnosticsAmbiguousReturns"`
 	InlayHintsParameterNames    bool `json:"inlayHintsParameterNames"`
 }
 

@@ -54,6 +54,8 @@ async function startClient(context) {
 	const diagUndefinedGlobals = config.get("diagnostics.undefinedGlobals") !== false,
 		diagUnusedVariables = config.get("diagnostics.unusedVariables") !== false,
 		diagShadowing = config.get("diagnostics.shadowing") !== false,
+		diagUnreachableCode = config.get("diagnostics.unreachableCode") !== false,
+		diagAmbiguousReturns = config.get("diagnostics.ambiguousReturns") !== false,
 		inlayParamHints = config.get("inlayHints.parameterNames") !== false;
 
 	const filesConfig = vscode.workspace.getConfiguration("files"),
@@ -105,6 +107,8 @@ async function startClient(context) {
 			diagnosticsUndefinedGlobals: diagUndefinedGlobals,
 			diagnosticsUnusedVariables: diagUnusedVariables,
 			diagnosticsShadowing: diagShadowing,
+			diagnosticsUnreachableCode: diagUnreachableCode,
+			diagnosticsAmbiguousReturns: diagAmbiguousReturns,
 			inlayHintsParameterNames: inlayParamHints,
 		},
 	};
