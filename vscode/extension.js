@@ -1,12 +1,12 @@
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
-import * as vscode from "vscode";
-import { LanguageClient } from "vscode-languageclient/node.js";
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const vscode = require("vscode");
+const { LanguageClient } = require("vscode-languageclient/node");
 
 let client;
 
-export async function activate(context) {
+async function activate(context) {
 	await startClient(context);
 
 	const stdProvider = {
@@ -123,10 +123,15 @@ function triggerReindex() {
 	);
 }
 
-export function deactivate() {
+function deactivate() {
 	if (!client) {
 		return;
 	}
 
 	return client.stop();
 }
+
+module.exports = {
+	activate: activate,
+	deactivate: deactivate,
+};

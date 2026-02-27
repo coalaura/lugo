@@ -4,7 +4,6 @@
     "description": " A high-performance, zero-allocation Lua 5.4 parser and Language Server (LSP).",
     "publisher": "coalaura",
     "icon": "logo.png",
-    "type": "module",
     "version": "0.1.0",
     "repository": {
         "type": "git",
@@ -23,7 +22,7 @@
     ],
     "main": "./extension.js",
     "scripts": {
-        "build": "esbuild ./extension.js --bundle --outfile=dist/extension.js --external:vscode --format=esm --platform=node --target=node18"
+        "build": "esbuild ./extension.js --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18"
     },
     "contributes": {
         "commands": [
