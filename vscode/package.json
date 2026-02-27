@@ -21,7 +21,7 @@
         "onLanguage:lua",
         "workspaceContains:**/*.lua"
     ],
-    "main": "./dist/extension.js",
+    "main": "./extension.js",
     "scripts": {
         "build": "esbuild ./extension.js --bundle --outfile=dist/extension.js --external:vscode --format=esm --platform=node --target=node18"
     },
