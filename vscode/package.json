@@ -35,50 +35,50 @@
             "type": "object",
             "title": "Lugo LSP",
             "properties": {
-                "lugo.ignoreGlobs": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "default": [
-                        "fxmanifest.lua",
-                        "__resource.lua"
-                    ],
-                    "description": "List of globs/files to ignore during indexing. Inherits VS Code's files.exclude automatically."
-                },
-                "lugo.libraryPaths": {
+                "lugo.workspace.libraryPaths": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     },
                     "default": [],
-                    "description": "List of absolute paths to external Lua libraries to index."
+                    "description": "List of absolute paths to external Lua libraries to index.",
+                    "order": 1
                 },
-                "lugo.knownGlobals": {
+                "lugo.workspace.ignoreGlobs": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     },
-                    "default": [
-                        "source",
-                        "Citizen"
-                    ],
-                    "description": "List of global variables to ignore when reporting undefined globals."
+                    "default": [],
+                    "description": "List of globs/files to ignore during indexing. Inherits VS Code's files.exclude automatically.",
+                    "order": 2
+                },
+                "lugo.environment.knownGlobals": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [],
+                    "description": "List of global variables to ignore when reporting undefined globals.",
+                    "order": 3
                 },
                 "lugo.diagnostics.undefinedGlobals": {
                     "type": "boolean",
                     "default": true,
-                    "description": "Enable diagnostics for undefined global variables."
+                    "description": "Enable diagnostics for undefined global variables.",
+                    "order": 4
                 },
                 "lugo.diagnostics.unusedVariables": {
                     "type": "boolean",
                     "default": true,
-                    "description": "Enable diagnostics for unused local variables."
+                    "description": "Enable diagnostics for unused local variables.",
+                    "order": 5
                 },
                 "lugo.diagnostics.shadowing": {
                     "type": "boolean",
                     "default": true,
-                    "description": "Enable diagnostics when a local variable shadows a global or outer local."
+                    "description": "Enable diagnostics when a local variable shadows a global or outer local.",
+                    "order": 6
                 }
             }
         }

@@ -48,8 +48,8 @@ async function activate(context) {
 
 async function startClient(context) {
 	const config = vscode.workspace.getConfiguration("lugo"),
-		libraryPaths = config.get("libraryPaths") || [],
-		knownGlobals = config.get("knownGlobals") || [];
+		libraryPaths = config.get("workspace.libraryPaths") || [],
+		knownGlobals = config.get("environment.knownGlobals") || [];
 
 	const diagUndefinedGlobals = config.get("diagnostics.undefinedGlobals") !== false,
 		diagUnusedVariables = config.get("diagnostics.unusedVariables") !== false,
@@ -58,7 +58,7 @@ async function startClient(context) {
 	const filesConfig = vscode.workspace.getConfiguration("files"),
 		searchConfig = vscode.workspace.getConfiguration("search");
 
-	let ignoreGlobs = config.get("ignoreGlobs") || [];
+	let ignoreGlobs = config.get("workspace.ignoreGlobs") || [];
 
 	const nativeExcludes = {
 		...(filesConfig.get("exclude") || {}),
