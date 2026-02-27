@@ -6,6 +6,10 @@
     "icon": "logo.png",
     "type": "module",
     "version": "0.1.0",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/coalaura/lugo.git"
+    },
     "engines": {
         "vscode": "^1.80.0"
     },
@@ -17,7 +21,10 @@
         "onLanguage:lua",
         "workspaceContains:**/*.lua"
     ],
-    "main": "./extension.js",
+    "main": "./dist/extension.js",
+    "scripts": {
+        "vscode:prepublish": "esbuild ./extension.js --bundle --outfile=dist/extension.js --external:vscode --format=esm --platform=node"
+    },
     "contributes": {
         "commands": [
             {
@@ -66,6 +73,7 @@
         "vscode-languageclient": "^9.0.1"
     },
     "devDependencies": {
-        "@types/vscode": "^1.80.0"
+        "@types/vscode": "^1.80.0",
+        "esbuild": "^0.20.0"
     }
 }
