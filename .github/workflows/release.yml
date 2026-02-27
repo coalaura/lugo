@@ -142,6 +142,7 @@ jobs:
         chmod +x bin/* || true
         
         cp ../README.md .
+        cp ../LICENSE .
         cp ../logo.png .
 
         rm -f .gitignore
