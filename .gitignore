@@ -1,0 +1,5 @@
+*.json
+*.log
+*.exe
+node_modules
+bin
