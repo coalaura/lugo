@@ -26,10 +26,13 @@ var luaKeywords = []string{
 	"then", "true", "until", "while",
 }
 
+const MaxWorkspaceResults = 100
+
 type GlobalSymbol struct {
 	URI    string
 	NodeID ast.NodeID
 	Depth  int
+	Name   string
 }
 
 type GlobalKey struct {
@@ -173,12 +176,13 @@ func (s *Server) handleMessage(req Request) {
 
 		result := InitializeResult{
 			Capabilities: ServerCapabilities{
-				TextDocumentSync:       1,
-				DefinitionProvider:     true,
-				HoverProvider:          true,
-				RenameProvider:         true,
-				ReferencesProvider:     true,
-				DocumentSymbolProvider: true,
+				TextDocumentSync:        1,
+				DefinitionProvider:      true,
+				HoverProvider:           true,
+				RenameProvider:          true,
+				ReferencesProvider:      true,
+				DocumentSymbolProvider:  true,
+				WorkspaceSymbolProvider: true,
 				CompletionProvider: &CompletionOptions{
 					TriggerCharacters: []string{".", ":"},
 				},
@@ -1024,6 +1028,84 @@ func (s *Server) handleMessage(req Request) {
 			ID:     req.ID,
 			Result: symbols,
 		})
+	case "workspace/symbol":
+		var params WorkspaceSymbolParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		queryLower := []byte(strings.ToLower(params.Query))
+
+		var (
+			results []SymbolInformation
+			count   int
+		)
+
+		for key, sym := range s.GlobalIndex {
+			if !containsFold([]byte(sym.Name), queryLower) {
+				continue
+			}
+
+			doc, ok := s.Documents[sym.URI]
+			if !ok {
+				continue
+			}
+
+			node := doc.Tree.Nodes[sym.NodeID]
+			kind := SymbolKindVariable
+
+			valID := doc.getAssignedValue(sym.NodeID)
+
+			if valID != ast.InvalidNode {
+				valKind := doc.Tree.Nodes[valID].Kind
+				if valKind == ast.KindFunctionExpr {
+					if key.ReceiverHash != 0 {
+						kind = SymbolKindMethod
+					} else {
+						kind = SymbolKindFunction
+					}
+				} else if valKind == ast.KindTableExpr {
+					kind = SymbolKindClass
+				} else if key.ReceiverHash != 0 {
+					kind = SymbolKindField
+				}
+			} else if key.ReceiverHash != 0 {
+				kind = SymbolKindField
+			}
+
+			startLine, startCol := doc.Tree.Position(node.Start)
+			endLine, endCol := doc.Tree.Position(node.End)
+
+			results = append(results, SymbolInformation{
+				Name: sym.Name,
+				Kind: kind,
+				Location: Location{
+					URI: sym.URI,
+					Range: Range{
+						Start: Position{Line: startLine, Character: startCol},
+						End:   Position{Line: endLine, Character: endCol},
+					},
+				},
+			})
+
+			count++
+
+			if count >= MaxWorkspaceResults {
+				break
+			}
+		}
+
+		if results == nil {
+			results = []SymbolInformation{}
+		}
+
+		WriteMessage(s.Writer, Response{
+			RPC:    "2.0",
+			ID:     req.ID,
+			Result: results,
+		})
 	case "textDocument/rename":
 		var params RenameParams
 
@@ -1264,15 +1346,17 @@ func (s *Server) updateDocument(uri string, source []byte) {
 
 	for _, defID := range res.GlobalDefs {
 		node := tree.Nodes[defID]
+		identBytes := tree.Source[node.Start:node.End]
 		hash := ast.HashBytes(tree.Source[node.Start:node.End])
 
 		depth := getASTDepth(tree, defID)
 
-		s.setGlobalSymbol(GlobalKey{ReceiverHash: 0, PropHash: hash}, uri, defID, depth)
+		s.setGlobalSymbol(GlobalKey{ReceiverHash: 0, PropHash: hash}, uri, defID, depth, string(identBytes))
 
 		doc.ExtractLuaDocFields(defID, func(name []byte) {
 			fieldHash := ast.HashBytes(name)
-			s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fieldHash}, uri, defID, depth)
+
+			s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fieldHash}, uri, defID, depth, string(identBytes)+"."+string(name))
 		})
 
 		// Module Aliasing
@@ -1290,7 +1374,9 @@ func (s *Server) updateDocument(uri string, source []byte) {
 
 					for _, fd := range res.FieldDefs {
 						if bytes.Equal(fd.ReceiverName, localName) {
-							s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fd.PropHash}, uri, fd.NodeID, depth)
+							propBytes := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
+
+							s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(identBytes)+"."+string(propBytes))
 						} else if len(fd.ReceiverName) > len(localName) && bytes.HasPrefix(fd.ReceiverName, localName) && fd.ReceiverName[len(localName)] == '.' {
 							suffix := fd.ReceiverName[len(localName)+1:]
 
@@ -1301,7 +1387,9 @@ func (s *Server) updateDocument(uri string, source []byte) {
 
 							newRecHash := ast.HashBytes(newRec)
 
-							s.setGlobalSymbol(GlobalKey{ReceiverHash: newRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth)
+							propBytes := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
+
+							s.setGlobalSymbol(GlobalKey{ReceiverHash: newRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(identBytes)+"."+string(suffix)+"."+string(propBytes))
 						}
 					}
 				}
@@ -1318,7 +1406,15 @@ func (s *Server) updateDocument(uri string, source []byte) {
 
 			depth := getASTDepth(tree, fd.NodeID)
 
-			s.setGlobalSymbol(GlobalKey{ReceiverHash: fd.ReceiverHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth)
+			propBytes := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
+
+			sep := "."
+
+			if doc.Tree.Nodes[doc.Tree.Nodes[fd.NodeID].Parent].Kind == ast.KindMethodName {
+				sep = ":"
+			}
+
+			s.setGlobalSymbol(GlobalKey{ReceiverHash: fd.ReceiverHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(fd.ReceiverName)+sep+string(propBytes))
 		}
 	}
 
@@ -1535,7 +1631,7 @@ func (s *Server) getGlobalSymbol(recHash, propHash uint64) (GlobalSymbol, bool) 
 	return GlobalSymbol{}, false
 }
 
-func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, depth int) {
+func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, depth int, name string) {
 	if existing, exists := s.GlobalIndex[key]; exists {
 		if depth > existing.Depth {
 			return
@@ -1546,6 +1642,7 @@ func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, d
 		URI:    uri,
 		NodeID: nodeID,
 		Depth:  depth,
+		Name:   name,
 	}
 }
 
@@ -1726,4 +1823,44 @@ func getASTDepth(tree *ast.Tree, id ast.NodeID) int {
 	}
 
 	return depth
+}
+
+func containsFold(b, queryLower []byte) bool {
+	if len(queryLower) == 0 {
+		return true
+	}
+
+	if len(b) < len(queryLower) {
+		return false
+	}
+
+	for i := 0; i <= len(b)-len(queryLower); i++ {
+		match := true
+
+		for j := range queryLower {
+			cb := b[i+j]
+
+			if cb >= 'A' && cb <= 'Z' {
+				cb += 32 // fast to-lower
+			}
+
+			qb := queryLower[j]
+
+			if cb != qb {
+				if (cb == '.' && qb == ':') || (cb == ':' && qb == '.') {
+					continue
+				}
+
+				match = false
+
+				break
+			}
+		}
+
+		if match {
+			return true
+		}
+	}
+
+	return false
 }

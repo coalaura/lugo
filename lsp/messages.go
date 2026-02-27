@@ -38,13 +38,14 @@ type InitializeResult struct {
 }
 
 type ServerCapabilities struct {
-	TextDocumentSync       int                `json:"textDocumentSync"`
-	DefinitionProvider     bool               `json:"definitionProvider"`
-	HoverProvider          bool               `json:"hoverProvider"`
-	RenameProvider         bool               `json:"renameProvider"`
-	ReferencesProvider     bool               `json:"referencesProvider"`
-	DocumentSymbolProvider bool               `json:"documentSymbolProvider"`
-	CompletionProvider     *CompletionOptions `json:"completionProvider,omitempty"`
+	TextDocumentSync        int                `json:"textDocumentSync"`
+	DefinitionProvider      bool               `json:"definitionProvider"`
+	HoverProvider           bool               `json:"hoverProvider"`
+	RenameProvider          bool               `json:"renameProvider"`
+	ReferencesProvider      bool               `json:"referencesProvider"`
+	DocumentSymbolProvider  bool               `json:"documentSymbolProvider"`
+	WorkspaceSymbolProvider bool               `json:"workspaceSymbolProvider"`
+	CompletionProvider      *CompletionOptions `json:"completionProvider,omitempty"`
 }
 
 type TextDocumentItem struct {
@@ -192,6 +193,17 @@ type ReferenceContext struct {
 
 type DocumentSymbolParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+type WorkspaceSymbolParams struct {
+	Query string `json:"query"`
+}
+
+type SymbolInformation struct {
+	Name          string     `json:"name"`
+	Kind          SymbolKind `json:"kind"`
+	Location      Location   `json:"location"`
+	ContainerName string     `json:"containerName,omitempty"`
 }
 
 type SymbolKind int
