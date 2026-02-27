@@ -72,6 +72,7 @@ type Server struct {
 	DiagUndefinedGlobals bool
 	DiagUnusedVariables  bool
 	DiagShadowing        bool
+	InlayParamHints      bool
 }
 
 func NewServer(version string) *Server {
@@ -180,6 +181,7 @@ func (s *Server) handleMessage(req Request) {
 			s.DiagUndefinedGlobals = params.InitializationOptions.DiagnosticsUndefinedGlobals
 			s.DiagUnusedVariables = params.InitializationOptions.DiagnosticsUnusedVariables
 			s.DiagShadowing = params.InitializationOptions.DiagnosticsShadowing
+			s.InlayParamHints = params.InitializationOptions.InlayHintsParameterNames
 		}
 
 		result := InitializeResult{
@@ -191,6 +193,7 @@ func (s *Server) handleMessage(req Request) {
 				ReferencesProvider:      true,
 				DocumentSymbolProvider:  true,
 				WorkspaceSymbolProvider: true,
+				InlayHintProvider:       true,
 				SignatureHelpProvider: &SignatureHelpOptions{
 					TriggerCharacters: []string{"(", ","},
 				},
@@ -1353,6 +1356,139 @@ func (s *Server) handleMessage(req Request) {
 				ActiveSignature: 0,
 				ActiveParameter: activeParam,
 			},
+		})
+	case "textDocument/inlayHint":
+		var params InlayHintParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		if !s.InlayParamHints {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []InlayHint{}})
+
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []InlayHint{}})
+
+			return
+		}
+
+		startOffset := doc.Tree.Offset(params.Range.Start.Line, params.Range.Start.Character)
+		endOffset := doc.Tree.Offset(params.Range.End.Line, params.Range.End.Character)
+
+		var hints []InlayHint
+
+		for i := 1; i < len(doc.Tree.Nodes); i++ {
+			node := doc.Tree.Nodes[i]
+
+			if node.Start > endOffset || node.End < startOffset {
+				continue
+			}
+
+			if node.Kind != ast.KindCallExpr && node.Kind != ast.KindMethodCall {
+				continue
+			}
+
+			if node.Count == 0 {
+				continue
+			}
+
+			var funcIdentID ast.NodeID
+
+			if node.Kind == ast.KindMethodCall {
+				funcIdentID = node.Right
+			} else {
+				funcIdentID = node.Left
+				if doc.Tree.Nodes[funcIdentID].Kind == ast.KindMemberExpr {
+					funcIdentID = doc.Tree.Nodes[funcIdentID].Right
+				}
+			}
+
+			if doc.Tree.Nodes[funcIdentID].Kind != ast.KindIdent {
+				continue
+			}
+
+			ctx := s.resolveSymbolAt(uri, doc.Tree.Nodes[funcIdentID].Start)
+			if ctx == nil || ctx.TargetDoc == nil || ctx.TargetDefID == ast.InvalidNode {
+				continue
+			}
+
+			valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
+			if valID == ast.InvalidNode || ctx.TargetDoc.Tree.Nodes[valID].Kind != ast.KindFunctionExpr {
+				continue
+			}
+
+			hasImplicitSelfCall := node.Kind == ast.KindMethodCall
+			hasImplicitSelfDef := false
+
+			pDefID := ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Parent
+			if pDefID != ast.InvalidNode && ctx.TargetDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
+				hasImplicitSelfDef = true
+			}
+
+			paramOffset := 0
+			if hasImplicitSelfCall && !hasImplicitSelfDef {
+				paramOffset = 1 // e.g., table:func(arg) -> function table.func(self, arg)
+			} else if !hasImplicitSelfCall && hasImplicitSelfDef {
+				paramOffset = -1 // e.g., table.func(table, arg) -> function table:func(arg)
+			}
+
+			funcNode := ctx.TargetDoc.Tree.Nodes[valID]
+
+			for j := uint16(0); j < node.Count; j++ {
+				paramIdx := int(j) + paramOffset
+
+				if paramIdx < 0 || paramIdx >= int(funcNode.Count) {
+					continue
+				}
+
+				argID := doc.Tree.ExtraList[node.Extra+uint32(j)]
+				argNode := doc.Tree.Nodes[argID]
+
+				pID := ctx.TargetDoc.Tree.ExtraList[funcNode.Extra+uint32(paramIdx)]
+				pNode := ctx.TargetDoc.Tree.Nodes[pID]
+
+				if pNode.Kind == ast.KindVararg {
+					continue
+				}
+
+				pName := ctx.TargetDoc.Source[pNode.Start:pNode.End]
+				if bytes.Equal(pName, []byte("self")) {
+					continue
+				}
+
+				if argNode.Kind == ast.KindIdent {
+					argName := doc.Source[argNode.Start:argNode.End]
+					if bytes.Equal(pName, argName) {
+						continue
+					}
+				}
+
+				sLine, sCol := doc.Tree.Position(argNode.Start)
+				hints = append(hints, InlayHint{
+					Position:     Position{Line: sLine, Character: sCol},
+					Label:        string(pName) + ":",
+					Kind:         ParameterHint,
+					PaddingRight: true,
+				})
+			}
+		}
+
+		if hints == nil {
+			hints = []InlayHint{}
+		}
+
+		WriteMessage(s.Writer, Response{
+			RPC:    "2.0",
+			ID:     req.ID,
+			Result: hints,
 		})
 	}
 }

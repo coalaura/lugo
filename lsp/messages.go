@@ -35,6 +35,7 @@ type InitializationOptions struct {
 	DiagnosticsUndefinedGlobals bool `json:"diagnosticsUndefinedGlobals"`
 	DiagnosticsUnusedVariables  bool `json:"diagnosticsUnusedVariables"`
 	DiagnosticsShadowing        bool `json:"diagnosticsShadowing"`
+	InlayHintsParameterNames    bool `json:"inlayHintsParameterNames"`
 }
 
 type InitializeResult struct {
@@ -49,6 +50,7 @@ type ServerCapabilities struct {
 	ReferencesProvider      bool                  `json:"referencesProvider"`
 	DocumentSymbolProvider  bool                  `json:"documentSymbolProvider"`
 	WorkspaceSymbolProvider bool                  `json:"workspaceSymbolProvider"`
+	InlayHintProvider       bool                  `json:"inlayHintProvider"`
 	SignatureHelpProvider   *SignatureHelpOptions `json:"signatureHelpProvider,omitempty"`
 	CompletionProvider      *CompletionOptions    `json:"completionProvider,omitempty"`
 }
@@ -277,4 +279,24 @@ type SignatureInformation struct {
 type ParameterInformation struct {
 	Label         string         `json:"label"`
 	Documentation *MarkupContent `json:"documentation,omitempty"`
+}
+
+type InlayHintParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Range        Range                  `json:"range"`
+}
+
+type InlayHintKind int
+
+const (
+	TypeHint      InlayHintKind = 1
+	ParameterHint InlayHintKind = 2
+)
+
+type InlayHint struct {
+	Position     Position      `json:"position"`
+	Label        string        `json:"label"`
+	Kind         InlayHintKind `json:"kind,omitempty"`
+	PaddingLeft  bool          `json:"paddingLeft,omitempty"`
+	PaddingRight bool          `json:"paddingRight,omitempty"`
 }

@@ -79,6 +79,12 @@
                     "default": true,
                     "description": "Enable diagnostics when a local variable shadows a global or outer local.",
                     "order": 6
+                },
+                "lugo.inlayHints.parameterNames": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable inline parameter name hints for function and method calls.",
+                    "order": 7
                 }
             }
         }
