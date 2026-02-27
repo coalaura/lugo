@@ -1,0 +1,71 @@
+{
+    "name": "lugo-vscode",
+    "displayName": "Lugo Language Server",
+    "description": " A high-performance, zero-allocation Lua 5.4 parser and Language Server (LSP).",
+    "publisher": "coalaura",
+    "icon": "logo.png",
+    "type": "module",
+    "version": "0.1.0",
+    "engines": {
+        "vscode": "^1.80.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Linters"
+    ],
+    "activationEvents": [
+        "onLanguage:lua",
+        "workspaceContains:**/*.lua"
+    ],
+    "main": "./extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "lugo.reindex",
+                "title": "Lugo: Re-index Workspace"
+            }
+        ],
+        "configuration": {
+            "type": "object",
+            "title": "Lugo LSP",
+            "properties": {
+                "lugo.ignoreGlobs": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [
+                        "fxmanifest.lua",
+                        "__resource.lua"
+                    ],
+                    "description": "List of globs/files to ignore during indexing. Inherits VS Code's files.exclude automatically."
+                },
+                "lugo.libraryPaths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [],
+                    "description": "List of absolute paths to external Lua libraries to index."
+                },
+                "lugo.knownGlobals": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [
+                        "source",
+                        "Citizen"
+                    ],
+                    "description": "List of global variables to ignore when reporting undefined globals."
+                }
+            }
+        }
+    },
+    "dependencies": {
+        "vscode-languageclient": "^9.0.1"
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.80.0"
+    }
+}
