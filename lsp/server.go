@@ -1624,6 +1624,125 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 	}
 
+	for _, defID := range doc.Resolver.LocalDefs {
+		node := doc.Tree.Nodes[defID]
+		nameBytes := doc.Source[node.Start:node.End]
+
+		if len(nameBytes) > 0 && nameBytes[0] == '_' {
+			continue
+		}
+
+		startLine, startCol := doc.Tree.Position(node.Start)
+		endLine, endCol := doc.Tree.Position(node.End)
+
+		r := Range{
+			Start: Position{Line: startLine, Character: startCol},
+			End:   Position{Line: endLine, Character: endCol},
+		}
+
+		if doc.Resolver.UsageCount[defID] == 0 {
+			diagnostics = append(diagnostics, Diagnostic{
+				Range:    r,
+				Severity: SeverityHint,
+				Tags:     []DiagnosticTag{Unnecessary},
+				Message:  "Unused local variable: " + string(nameBytes),
+			})
+		}
+
+		var isOuterShadow bool
+
+		for _, pair := range doc.Resolver.ShadowedOuter {
+			if pair.Shadowing == defID {
+				isOuterShadow = true
+
+				break
+			}
+		}
+
+		if !isOuterShadow {
+			if s.isKnownGlobal(nameBytes) {
+				diagnostics = append(diagnostics, Diagnostic{
+					Range:    r,
+					Severity: SeverityWarning,
+					Message:  "Local variable '" + string(nameBytes) + "' shadows a known global.",
+				})
+			} else {
+				hash := ast.HashBytes(nameBytes)
+
+				if sym, exists := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]; exists {
+					var related []DiagnosticRelatedInformation
+
+					if symDoc, ok := s.Documents[sym.URI]; ok {
+						sNode := symDoc.Tree.Nodes[sym.NodeID]
+
+						sLine, sCol := symDoc.Tree.Position(sNode.Start)
+						eLine, eCol := symDoc.Tree.Position(sNode.End)
+
+						var fromFile string
+
+						if sym.URI != uri {
+							fromFile = " in " + filepath.Base(s.uriToPath(sym.URI))
+						}
+
+						related = append(related, DiagnosticRelatedInformation{
+							Location: Location{
+								URI: sym.URI,
+								Range: Range{
+									Start: Position{Line: sLine, Character: sCol},
+									End:   Position{Line: eLine, Character: eCol},
+								},
+							},
+							Message: "Global '" + string(nameBytes) + "' defined here" + fromFile,
+						})
+					}
+
+					diagnostics = append(diagnostics, Diagnostic{
+						Range:              r,
+						Severity:           SeverityWarning,
+						Message:            "Local variable '" + string(nameBytes) + "' shadows a global definition.",
+						RelatedInformation: related,
+					})
+				}
+			}
+		}
+	}
+
+	for _, pair := range doc.Resolver.ShadowedOuter {
+		node := doc.Tree.Nodes[pair.Shadowing]
+		nameBytes := doc.Source[node.Start:node.End]
+
+		startLine, startCol := doc.Tree.Position(node.Start)
+		endLine, endCol := doc.Tree.Position(node.End)
+
+		var related []DiagnosticRelatedInformation
+
+		shadowedNode := doc.Tree.Nodes[pair.Shadowed]
+
+		sLine, sCol := doc.Tree.Position(shadowedNode.Start)
+		eLine, eCol := doc.Tree.Position(shadowedNode.End)
+
+		related = append(related, DiagnosticRelatedInformation{
+			Location: Location{
+				URI: uri,
+				Range: Range{
+					Start: Position{Line: sLine, Character: sCol},
+					End:   Position{Line: eLine, Character: eCol},
+				},
+			},
+			Message: "Outer local '" + string(nameBytes) + "' defined here",
+		})
+
+		diagnostics = append(diagnostics, Diagnostic{
+			Range: Range{
+				Start: Position{Line: startLine, Character: startCol},
+				End:   Position{Line: endLine, Character: endCol},
+			},
+			Severity:           SeverityWarning,
+			Message:            "Local variable '" + string(nameBytes) + "' shadows a variable from an outer scope.",
+			RelatedInformation: related,
+		})
+	}
+
 	if diagnostics == nil {
 		diagnostics = []Diagnostic{}
 	}

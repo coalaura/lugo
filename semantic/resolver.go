@@ -22,6 +22,11 @@ type FieldRef struct {
 	PropHash     uint64
 }
 
+type ShadowPair struct {
+	Shadowing ast.NodeID
+	Shadowed  ast.NodeID
+}
+
 // Resolver walks the AST and links variable references to their local definitions.
 type Resolver struct {
 	Tree *ast.Tree
@@ -34,12 +39,19 @@ type Resolver struct {
 	PendingFields []FieldRef
 
 	scopeStack []ast.NodeID
+
+	UsageCount    []uint16
+	LocalDefs     []ast.NodeID
+	ShadowedOuter []ShadowPair
 }
 
 func New(tree *ast.Tree) *Resolver {
 	return &Resolver{
 		Tree:          tree,
 		References:    make([]ast.NodeID, len(tree.Nodes)),
+		UsageCount:    make([]uint16, len(tree.Nodes)),
+		LocalDefs:     make([]ast.NodeID, 0, 128),
+		ShadowedOuter: make([]ShadowPair, 0, 16),
 		PendingFields: make([]FieldRef, 0, 128),
 		scopeStack:    make([]ast.NodeID, 0, 64),
 	}
@@ -65,6 +77,24 @@ func (r *Resolver) declare(identID ast.NodeID) {
 	}
 
 	r.References[identID] = identID
+
+	r.LocalDefs = append(r.LocalDefs, identID)
+
+	name := r.source(identID)
+
+	// ignore "_" prefix
+	if len(name) > 0 && name[0] != '_' {
+		for i := len(r.scopeStack) - 1; i >= 0; i-- {
+			if bytes.Equal(r.source(r.scopeStack[i]), name) {
+				r.ShadowedOuter = append(r.ShadowedOuter, ShadowPair{
+					Shadowing: identID,
+					Shadowed:  r.scopeStack[i],
+				})
+
+				break
+			}
+		}
+	}
 
 	r.scopeStack = append(r.scopeStack, identID)
 }
@@ -109,6 +139,8 @@ func (r *Resolver) resolveReference(identID ast.NodeID, isDef bool) {
 
 		if bytes.Equal(targetSrc, r.source(defID)) {
 			r.References[identID] = defID
+
+			r.UsageCount[defID]++
 
 			return
 		}
