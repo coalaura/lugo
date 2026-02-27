@@ -50,6 +50,7 @@ type SymbolContext struct {
 }
 
 type Server struct {
+	Version           string
 	Reader            *bufio.Reader
 	Writer            io.Writer
 	Log               *plain.Plain
@@ -66,8 +67,9 @@ type Server struct {
 	IsIndexing        bool
 }
 
-func NewServer() *Server {
+func NewServer(version string) *Server {
 	return &Server{
+		Version:     version,
 		Reader:      bufio.NewReader(os.Stdin),
 		Writer:      os.Stdout,
 		Documents:   make(map[string]*Document),
@@ -97,7 +99,7 @@ func (s *Server) Start() error {
 		plain.WithDate(plain.RFC3339Local),
 	)
 
-	s.Log.Println("Lugo LSP Started")
+	s.Log.Printf("Lugo LSP %s Started\n", s.Version)
 
 	for {
 		msg, err := ReadMessage(s.Reader)

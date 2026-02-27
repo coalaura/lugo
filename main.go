@@ -9,11 +9,13 @@ import (
 	"github.com/coalaura/lugo/lsp"
 )
 
+var Version = "dev"
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	server := lsp.NewServer()
+	server := lsp.NewServer(Version)
 
 	go func() {
 		<-ctx.Done()

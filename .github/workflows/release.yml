@@ -1,0 +1,164 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            zig_target: x86_64-linux-musl
+            node_os: linux
+            node_arch: x64
+          - goos: linux
+            goarch: arm64
+            zig_target: aarch64-linux-musl
+            node_os: linux
+            node_arch: arm64
+          - goos: windows
+            goarch: amd64
+            zig_target: x86_64-windows-gnu
+            node_os: win32
+            node_arch: x64
+          - goos: windows
+            goarch: arm64
+            zig_target: aarch64-windows-gnu
+            node_os: win32
+            node_arch: arm64
+          - goos: darwin
+            goarch: amd64
+            zig_target: x86_64-macos
+            node_os: darwin
+            node_arch: x64
+          - goos: darwin
+            goarch: arm64
+            zig_target: aarch64-macos
+            node_os: darwin
+            node_arch: arm64
+      fail-fast: false
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Zig
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: 0.15.2
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+
+    - name: Build
+      shell: bash
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+        CGO_ENABLED: 1
+        CC: zig cc -target ${{ matrix.zig_target }}
+        CXX: zig c++ -target ${{ matrix.zig_target }}
+      run: |
+        mkdir -p build
+        mkdir -p ext_bin
+        [[ "$GOOS" == "windows" ]] && EXT=".exe" || EXT=""
+
+        OUT_RELEASE="build/lugo_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}${EXT}"
+        OUT_EXT="ext_bin/lugo-${{ matrix.node_os }}-${{ matrix.node_arch }}${EXT}"
+
+        if [[ "${{ matrix.zig_target }}" == *"musl"* ]]; then
+          LDFLAGS="-linkmode external -extldflags '-static'"
+        else
+          LDFLAGS=""
+        fi
+
+        go build \
+          -trimpath \
+          -buildvcs=false \
+          -ldflags "-s -w -X 'main.Version=${{ github.ref_name }}' $LDFLAGS" \
+          -o "$OUT_RELEASE" .
+          
+        cp "$OUT_RELEASE" "$OUT_EXT"
+
+    - name: Upload Release Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: release_${{ matrix.goos }}_${{ matrix.goarch }}
+        path: build/*
+
+    - name: Upload Extension Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ext_${{ matrix.goos }}_${{ matrix.goarch }}
+        path: ext_bin/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install vsce
+      run: npm install -g @vscode/vsce
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Download Release Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: release_*
+        path: release_artifacts
+        merge-multiple: true
+
+    - name: Download Extension Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: ext_*
+        path: bin
+        merge-multiple: true
+
+    - name: Package VS Code Extension
+      run: |
+        chmod +x bin/* || true
+        
+        rm -f .gitignore
+        
+        if [ ! -f README.md ]; then echo "# Lugo LSP" > README.md; fi
+        
+        VERSION="${{ github.ref_name }}"
+        VERSION="${VERSION#v}"
+        npm version $VERSION --allow-same-version --no-git-tag-version || true
+        
+        vsce package -o lugo-${{ github.ref_name }}.vsix
+
+    - name: Prepare Final Release Files
+      run: |
+        mkdir -p final_release
+        cp release_artifacts/* final_release/
+        cp lugo-*.vsix final_release/
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: final_release/*
+        name: "Release ${{ github.ref_name }}"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
