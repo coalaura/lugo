@@ -1,6 +1,27 @@
 package lsp
 
-import "strings"
+import "bytes"
+
+var (
+	tagParam      = []byte("@param")
+	tagReturn     = []byte("@return")
+	tagField      = []byte("@field")
+	tagDeprecated = []byte("@deprecated")
+	tagClass      = []byte("@class")
+	tagType       = []byte("@type")
+	tagAlias      = []byte("@alias")
+	tagGeneric    = []byte("@generic")
+	tagOverload   = []byte("@overload")
+	tagSee        = []byte("@see")
+
+	kwPublic    = []byte("public ")
+	kwPrivate   = []byte("private ")
+	kwProtected = []byte("protected ")
+
+	dashPrefix = []byte("- ")
+	hashPrefix = []byte("# ")
+	qSuffix    = []byte("?")
+)
 
 type LuaDocParam struct {
 	Name string
@@ -57,10 +78,10 @@ type LuaDoc struct {
 }
 
 // findTypeEnd safely scans past complex types with spaces like 'fun(a: string): number'
-func findTypeEnd(s string) int {
+func findTypeEnd(s []byte) int {
 	var depth int
 
-	for i := 0; i < len(s); i++ {
+	for i := range s {
 		c := s[i]
 
 		if c == '(' || c == '<' || c == '{' || c == '[' {
@@ -75,19 +96,19 @@ func findTypeEnd(s string) int {
 	return -1
 }
 
-func extractTypeDesc(s string) (typ, desc string) {
-	s = strings.TrimSpace(s)
+func extractTypeDesc(s []byte) (typ, desc []byte) {
+	s = bytes.TrimSpace(s)
 
 	idx := findTypeEnd(s)
 	if idx == -1 {
-		return s, ""
+		return s, nil
 	}
 
-	return s[:idx], strings.TrimSpace(s[idx:])
+	return s[:idx], bytes.TrimSpace(s[idx:])
 }
 
-func extractNameParent(s string) (name, parent, desc string) {
-	s = strings.TrimSpace(s)
+func extractNameParent(s []byte) (name, parent, desc []byte) {
+	s = bytes.TrimSpace(s)
 
 	var nameEnd int
 
@@ -96,14 +117,14 @@ func extractNameParent(s string) (name, parent, desc string) {
 	}
 
 	if nameEnd == 0 {
-		return "", "", s
+		return nil, nil, s
 	}
 
 	name = s[:nameEnd]
-	s = strings.TrimSpace(s[nameEnd:])
+	s = bytes.TrimSpace(s[nameEnd:])
 
-	if strings.HasPrefix(s, ":") {
-		s = strings.TrimSpace(s[1:])
+	if bytes.HasPrefix(s, []byte(":")) {
+		s = bytes.TrimSpace(s[1:])
 
 		var parentEnd int
 
@@ -112,7 +133,7 @@ func extractNameParent(s string) (name, parent, desc string) {
 		}
 
 		parent = s[:parentEnd]
-		desc = strings.TrimSpace(s[parentEnd:])
+		desc = bytes.TrimSpace(s[parentEnd:])
 	} else {
 		desc = s
 	}
@@ -120,118 +141,161 @@ func extractNameParent(s string) (name, parent, desc string) {
 	return name, parent, desc
 }
 
-func parseLuaDoc(comments string) LuaDoc {
+func parseLuaDoc(comments []byte) LuaDoc {
 	var (
 		doc       LuaDoc
-		descLines []string
+		descLines [][]byte
 	)
 
-	for line := range strings.SplitSeq(comments, "\n") {
-		line = strings.TrimSpace(line)
+	for len(comments) > 0 {
+		var line []byte
 
-		if after, ok := strings.CutPrefix(line, "@param"); ok {
-			rest := strings.TrimSpace(after)
-			idx := strings.IndexByte(rest, ' ')
-
-			if idx != -1 {
-				name := rest[:idx]
-				rest = strings.TrimSpace(rest[idx:])
-
-				typ, desc := extractTypeDesc(rest)
-				desc = strings.TrimPrefix(desc, "- ")
-
-				if strings.HasSuffix(name, "?") {
-					name = name[:len(name)-1]
-					typ += "?"
-				}
-
-				doc.Params = append(doc.Params, LuaDocParam{Name: name, Type: typ, Desc: desc})
-			} else {
-				name := strings.TrimSuffix(rest, "?")
-
-				doc.Params = append(doc.Params, LuaDocParam{Name: name})
-			}
-		} else if after, ok := strings.CutPrefix(line, "@return"); ok {
-			typ, desc := extractTypeDesc(strings.TrimSpace(after))
-
-			desc = strings.TrimPrefix(desc, "- ")
-			desc = strings.TrimPrefix(desc, "# ")
-
-			doc.Returns = append(doc.Returns, LuaDocReturn{Type: typ, Desc: desc})
-		} else if after, ok := strings.CutPrefix(line, "@field"); ok {
-			rest := strings.TrimSpace(after)
-
-			if strings.HasPrefix(rest, "public ") {
-				rest = strings.TrimSpace(rest[7:])
-			} else if strings.HasPrefix(rest, "private ") {
-				rest = strings.TrimSpace(rest[8:])
-			} else if strings.HasPrefix(rest, "protected ") {
-				rest = strings.TrimSpace(rest[10:])
-			}
-
-			idx := strings.IndexByte(rest, ' ')
-			if idx != -1 {
-				name := rest[:idx]
-				rest = strings.TrimSpace(rest[idx:])
-
-				typ, desc := extractTypeDesc(rest)
-				desc = strings.TrimPrefix(desc, "- ")
-
-				if strings.HasSuffix(name, "?") {
-					name = name[:len(name)-1]
-					typ = "?" + typ
-				}
-
-				doc.Fields = append(doc.Fields, LuaDocField{Name: name, Type: typ, Desc: desc})
-			} else {
-				name := strings.TrimSuffix(rest, "?")
-
-				doc.Fields = append(doc.Fields, LuaDocField{Name: name})
-			}
-		} else if after, ok := strings.CutPrefix(line, "@deprecated"); ok {
-			doc.IsDeprecated = true
-			doc.DeprecatedMsg = strings.TrimSpace(after)
-		} else if after, ok := strings.CutPrefix(line, "@class"); ok {
-			name, parent, desc := extractNameParent(after)
-			if name != "" {
-				doc.Class = &LuaDocClass{Name: name, Parent: parent, Desc: desc}
-			}
-		} else if after, ok := strings.CutPrefix(line, "@type"); ok {
-			typ, desc := extractTypeDesc(after)
-			doc.Type = &LuaDocType{Type: typ, Desc: desc}
-		} else if after, ok := strings.CutPrefix(line, "@alias"); ok {
-			rest := strings.TrimSpace(after)
-
-			idx := strings.IndexByte(rest, ' ')
-			if idx != -1 {
-				name := rest[:idx]
-				rest = strings.TrimSpace(rest[idx:])
-
-				typ, desc := extractTypeDesc(rest)
-				doc.Alias = &LuaDocAlias{Name: name, Type: typ, Desc: desc}
-			} else {
-				doc.Alias = &LuaDocAlias{Name: rest}
-			}
-		} else if after, ok := strings.CutPrefix(line, "@generic"); ok {
-			rest := strings.TrimSpace(after)
-			for gStr := range strings.SplitSeq(rest, ",") {
-				name, parent, _ := extractNameParent(gStr)
-				if name != "" {
-					doc.Generics = append(doc.Generics, LuaDocGeneric{Name: name, Parent: parent})
-				}
-			}
-		} else if after, ok := strings.CutPrefix(line, "@overload"); ok {
-			doc.Overloads = append(doc.Overloads, strings.TrimSpace(after))
-		} else if after, ok := strings.CutPrefix(line, "@see"); ok {
-			doc.See = append(doc.See, strings.TrimSpace(after))
+		idx := bytes.IndexByte(comments, '\n')
+		if idx == -1 {
+			line = comments
+			comments = nil
 		} else {
-			if len(line) > 0 && !strings.HasPrefix(line, "@") {
-				descLines = append(descLines, line)
+			line = comments[:idx]
+			comments = comments[idx+1:]
+		}
+
+		line = bytes.TrimSpace(line)
+
+		if after, ok := bytes.CutPrefix(line, tagParam); ok {
+			rest := bytes.TrimSpace(after)
+			spaceIdx := bytes.IndexByte(rest, ' ')
+
+			if spaceIdx != -1 {
+				name := rest[:spaceIdx]
+				rest = bytes.TrimSpace(rest[spaceIdx:])
+
+				typ, desc := extractTypeDesc(rest)
+				desc = bytes.TrimPrefix(desc, dashPrefix)
+
+				nameStr := string(name)
+				typStr := string(typ)
+
+				if bytes.HasSuffix(name, qSuffix) {
+					nameStr = nameStr[:len(nameStr)-1]
+					typStr += "?"
+				}
+
+				doc.Params = append(doc.Params, LuaDocParam{Name: nameStr, Type: typStr, Desc: string(desc)})
+			} else {
+				nameStr := string(rest)
+
+				if bytes.HasSuffix(rest, qSuffix) {
+					nameStr = nameStr[:len(nameStr)-1]
+				}
+
+				doc.Params = append(doc.Params, LuaDocParam{Name: nameStr})
+			}
+		} else if after, ok := bytes.CutPrefix(line, tagReturn); ok {
+			typ, desc := extractTypeDesc(bytes.TrimSpace(after))
+
+			desc = bytes.TrimPrefix(desc, dashPrefix)
+			desc = bytes.TrimPrefix(desc, hashPrefix)
+
+			doc.Returns = append(doc.Returns, LuaDocReturn{Type: string(typ), Desc: string(desc)})
+		} else if after, ok := bytes.CutPrefix(line, tagField); ok {
+			rest := bytes.TrimSpace(after)
+
+			if bytes.HasPrefix(rest, kwPublic) {
+				rest = bytes.TrimSpace(rest[7:])
+			} else if bytes.HasPrefix(rest, kwPrivate) {
+				rest = bytes.TrimSpace(rest[8:])
+			} else if bytes.HasPrefix(rest, kwProtected) {
+				rest = bytes.TrimSpace(rest[10:])
+			}
+
+			spaceIdx := bytes.IndexByte(rest, ' ')
+			if spaceIdx != -1 {
+				name := rest[:spaceIdx]
+				rest = bytes.TrimSpace(rest[spaceIdx:])
+
+				typ, desc := extractTypeDesc(rest)
+				desc = bytes.TrimPrefix(desc, dashPrefix)
+
+				nameStr := string(name)
+				typStr := string(typ)
+
+				if bytes.HasSuffix(name, qSuffix) {
+					nameStr = nameStr[:len(nameStr)-1]
+					typStr = "?" + typStr
+				}
+
+				doc.Fields = append(doc.Fields, LuaDocField{Name: nameStr, Type: typStr, Desc: string(desc)})
+			} else {
+				nameStr := string(rest)
+
+				if bytes.HasSuffix(rest, qSuffix) {
+					nameStr = nameStr[:len(nameStr)-1]
+				}
+
+				doc.Fields = append(doc.Fields, LuaDocField{Name: nameStr})
+			}
+		} else if after, ok := bytes.CutPrefix(line, tagDeprecated); ok {
+			doc.IsDeprecated = true
+			doc.DeprecatedMsg = string(bytes.TrimSpace(after))
+		} else if after, ok := bytes.CutPrefix(line, tagClass); ok {
+			name, parent, desc := extractNameParent(after)
+			if len(name) > 0 {
+				doc.Class = &LuaDocClass{Name: string(name), Parent: string(parent), Desc: string(desc)}
+			}
+		} else if after, ok := bytes.CutPrefix(line, tagType); ok {
+			typ, desc := extractTypeDesc(bytes.TrimSpace(after))
+
+			doc.Type = &LuaDocType{Type: string(typ), Desc: string(desc)}
+		} else if after, ok := bytes.CutPrefix(line, tagAlias); ok {
+			rest := bytes.TrimSpace(after)
+
+			spaceIdx := bytes.IndexByte(rest, ' ')
+			if spaceIdx != -1 {
+				name := rest[:spaceIdx]
+				rest = bytes.TrimSpace(rest[spaceIdx:])
+
+				typ, desc := extractTypeDesc(rest)
+
+				doc.Alias = &LuaDocAlias{Name: string(name), Type: string(typ), Desc: string(desc)}
+			} else {
+				doc.Alias = &LuaDocAlias{Name: string(rest)}
+			}
+		} else if after, ok := bytes.CutPrefix(line, tagGeneric); ok {
+			rest := bytes.TrimSpace(after)
+
+			for gStr := range bytes.SplitSeq(rest, []byte(",")) {
+				name, parent, _ := extractNameParent(gStr)
+				if len(name) > 0 {
+					doc.Generics = append(doc.Generics, LuaDocGeneric{Name: string(name), Parent: string(parent)})
+				}
+			}
+		} else if after, ok := bytes.CutPrefix(line, tagOverload); ok {
+			doc.Overloads = append(doc.Overloads, string(bytes.TrimSpace(after)))
+		} else if after, ok := bytes.CutPrefix(line, tagSee); ok {
+			doc.See = append(doc.See, string(bytes.TrimSpace(after)))
+		} else {
+			if len(line) > 0 {
+				if line[0] != '@' { // Ignore @meta, @diagnostic, etc.
+					descLines = append(descLines, line)
+				}
+			} else {
+				descLines = append(descLines, line) // Preserve empty lines for paragraph gaps
 			}
 		}
 	}
 
-	doc.Description = strings.TrimSpace(strings.Join(descLines, "\n"))
+	// Clean up leading/trailing empty description lines
+	for len(descLines) > 0 && len(descLines[0]) == 0 {
+		descLines = descLines[1:]
+	}
+
+	for len(descLines) > 0 && len(descLines[len(descLines)-1]) == 0 {
+		descLines = descLines[:len(descLines)-1]
+	}
+
+	if len(descLines) > 0 {
+		doc.Description = string(bytes.Join(descLines, []byte("\n")))
+	}
 
 	return doc
 }

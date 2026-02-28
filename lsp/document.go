@@ -153,9 +153,9 @@ func (doc *Document) findCommentIndex(offset uint32) int {
 	return low - 1
 }
 
-func (doc *Document) getCommentsAbove(id ast.NodeID) string {
+func (doc *Document) getCommentsAbove(id ast.NodeID) []byte {
 	if id == ast.InvalidNode {
-		return ""
+		return nil
 	}
 
 	stmtID := id
@@ -178,7 +178,7 @@ func (doc *Document) getCommentsAbove(id ast.NodeID) string {
 	stmtLine, _ := doc.Tree.Position(stmtStart)
 	targetLine := stmtLine - 1
 
-	var comments []string
+	var validComments []int
 
 	idx := doc.findCommentIndex(stmtStart)
 
@@ -189,21 +189,31 @@ func (doc *Document) getCommentsAbove(id ast.NodeID) string {
 		cEndLine, _ := doc.Tree.Position(c.End)
 
 		if cEndLine == targetLine || cEndLine == stmtLine {
-			rawC := string(doc.Source[c.Start:c.End])
-
-			comments = append(comments, cleanLuaComment(rawC))
-
+			validComments = append(validComments, i)
 			targetLine = cStartLine - 1
 		} else if cEndLine < targetLine {
 			break
 		}
 	}
 
-	for i, j := 0, len(comments)-1; i < j; i, j = i+1, j-1 {
-		comments[i], comments[j] = comments[j], comments[i]
+	if len(validComments) == 0 {
+		return nil
 	}
 
-	return strings.TrimSpace(strings.Join(comments, "\n"))
+	var b []byte
+
+	for i := len(validComments) - 1; i >= 0; i-- {
+		c := doc.Tree.Comments[validComments[i]]
+		rawC := doc.Source[c.Start:c.End]
+
+		b = cleanLuaCommentBytes(b, rawC)
+
+		if i > 0 && len(b) > 0 && b[len(b)-1] != '\n' {
+			b = append(b, '\n')
+		}
+	}
+
+	return bytes.TrimSpace(b)
 }
 
 // GetLocalsAt walks up the AST from the given offset and calls 'yield' for every
@@ -435,9 +445,9 @@ func (doc *Document) HasDeprecatedTag(id ast.NodeID) (bool, string) {
 					endIdx = len(rest)
 				}
 
-				msg := cleanLuaComment(string(rest[:endIdx]))
+				msgBytes := cleanLuaCommentBytes(nil, rest[:endIdx])
 
-				return true, msg
+				return true, string(bytes.TrimSpace(msgBytes))
 			}
 
 			targetLine = cStartLine - 1
@@ -449,37 +459,32 @@ func (doc *Document) HasDeprecatedTag(id ast.NodeID) (bool, string) {
 	return false, ""
 }
 
-func cleanLuaComment(raw string) string {
-	var b strings.Builder
-
-	b.Grow(len(raw))
-
+func cleanLuaCommentBytes(dst, raw []byte) []byte {
 	for len(raw) > 0 {
-		idx := strings.IndexByte(raw, '\n')
+		var line []byte
 
-		var line string
-
+		idx := bytes.IndexByte(raw, '\n')
 		if idx == -1 {
 			line = raw
-			raw = ""
+			raw = nil
 		} else {
 			line = raw[:idx]
 			raw = raw[idx+1:]
 		}
 
-		line = strings.TrimSpace(line)
+		line = bytes.TrimSpace(line)
 
-		if strings.HasPrefix(line, "--[[") {
+		if bytes.HasPrefix(line, []byte("--[[")) {
 			line = line[4:]
-		} else if strings.HasPrefix(line, "---") {
+		} else if bytes.HasPrefix(line, []byte("---")) {
 			line = line[3:]
-		} else if strings.HasPrefix(line, "--") {
+		} else if bytes.HasPrefix(line, []byte("--")) {
 			line = line[2:]
 		}
 
-		if strings.HasSuffix(line, "--]]") {
+		if bytes.HasSuffix(line, []byte("--]]")) {
 			line = line[:len(line)-4]
-		} else if strings.HasSuffix(line, "]]") {
+		} else if bytes.HasSuffix(line, []byte("]]")) {
 			line = line[:len(line)-2]
 		}
 
@@ -487,12 +492,12 @@ func cleanLuaComment(raw string) string {
 			line = line[1:]
 		}
 
-		b.WriteString(line)
+		dst = append(dst, line...)
 
 		if len(raw) > 0 {
-			b.WriteByte('\n')
+			dst = append(dst, '\n')
 		}
 	}
 
-	return strings.TrimSpace(b.String())
+	return dst
 }
