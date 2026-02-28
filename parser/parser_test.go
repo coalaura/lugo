@@ -3,92 +3,187 @@ package parser_test
 import (
 	"testing"
 
+	"github.com/coalaura/lugo/ast"
 	"github.com/coalaura/lugo/parser"
 )
 
-func TestParser_Valid(t *testing.T) {
+func TestParser_ValidSyntax(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
 	}{
 		{
-			name: "Basic Math and Local",
+			name: "Assignments and Attributes",
 			input: `
-				local a = 10 + 20 * 3
-				local b = (a + 5) / 2
+				local a = 1
+				local b, c = 2, 3
+				local d <const> = 4
+				local e <close> = 5
+				x, y = y, x
 			`,
 		},
 		{
-			name: "Function and Loops",
+			name: "Functions and Methods",
 			input: `
-				local function calculate(max)
-					local sum = 0
-					for i = 1, max do
-						if i % 2 == 0 then
-							sum = sum + i
-						elseif i == 5 then
-							break
-						else
-							sum = sum - 1
-						end
-					end
-					return sum
+				function globalFunc(a, b, ...) return a + b end
+				local function localFunc() end
+				function object:method(param) self.prop = param end
+				function object.sub:method() end
+				local anon = function() return true end
+			`,
+		},
+		{
+			name: "Control Flow Structures",
+			input: `
+				if a == 1 then
+					do_a()
+				elseif b == 2 then
+					do_b()
+				else
+					do_c()
+				end
+
+				while true do break end
+
+				repeat
+					local x = 1
+				until x == 1
+
+				for i = 1, 10, 2 do end
+				for k, v in pairs(t) do end
+			`,
+		},
+		{
+			name: "Labels and Goto",
+			input: `
+				::start::
+				local a = 1
+				if a < 10 then
+					a = a + 1
+					goto start
 				end
 			`,
 		},
 		{
-			name: "Table Constructor",
+			name: "Table Constructors",
 			input: `
-				local config = {
-					debug = true,
-					["timeout"] = 5000,
-					retries = 3,
-					10, 20, 30
+				local t1 = {}
+				local t2 = { 1, 2, 3 }
+				local t3 = { a = 1, ["b"] = 2 }
+				local t4 = {
+					nested = { x = 10 },
+					[1 + 2] = function() end,
 				}
+			`,
+		},
+		{
+			name: "Call Variations",
+			input: `
+				func()
+				func "string"
+				func {}
+				obj:method()
+				obj:method "string"
+				obj:method {}
+			`,
+		},
+		{
+			name: "Complex Expressions",
+			input: `
+				local x = -a + b * c ^ d == e and f or g
+				local y = not #t == 0
+				local z = (a + b) * c
 			`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := parser.New([]byte(tt.input), nil)
+			src := []byte(tt.input)
+			tree := ast.NewTree(src)
+			p := parser.New(src, tree)
 
-			p.Parse()
+			rootID := p.Parse()
 
 			if len(p.Errors) > 0 {
 				for _, err := range p.Errors {
-					t.Errorf("Unexpected error: %s", err.Message)
+					t.Errorf("Unexpected syntax error: %s", err.Message)
 				}
 			}
 
-			tree := p.GetTree()
-
-			if len(tree.Nodes) == 0 {
-				t.Fatalf("Expected AST nodes, got 0")
+			if rootID == ast.InvalidNode || len(tree.Nodes) <= 1 {
+				t.Fatalf("Expected AST nodes to be generated, got empty tree")
 			}
 		})
 	}
 }
 
-// Tests that the parser doesn't completely crash or halt on bad syntax
 func TestParser_ErrorRecovery(t *testing.T) {
-	input := `
-		local a = 
-		local b = 10
-	`
+	tests := []struct {
+		name           string
+		input          string
+		expectedErrors int
+		// We verify recovery by checking if a specific valid variable name was successfully parsed AFTER the error
+		verifyIdent string
+	}{
+		{
+			name: "Missing RHS Assignment",
+			input: `
+				local broken =
+				local recovered_a = 10
+			`,
+			expectedErrors: 1,
+			verifyIdent:    "recovered_a",
+		},
+		{
+			name: "Invalid Left Hand Side",
+			input: `
+				10 + 20 = 5
+				local recovered_b = 20
+			`,
+			expectedErrors: 1,
+			verifyIdent:    "recovered_b",
+		},
+		{
+			name: "Missing End in Function",
+			input: `
+				local function broken_func()
+					local x = 1
 
-	p := parser.New([]byte(input), nil)
-
-	p.Parse()
-
-	if len(p.Errors) == 0 {
-		t.Fatalf("Expected syntax error, got none")
+				local recovered_c = 30
+			`,
+			expectedErrors: 1,
+			verifyIdent:    "recovered_c",
+		},
 	}
 
-	// It should have recovered and still parsed 'local b = 10'
-	tree := p.GetTree()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := []byte(tt.input)
+			tree := ast.NewTree(src)
+			p := parser.New(src, tree)
 
-	if len(tree.Nodes) < 5 { // Magic number: Needs enough nodes for the File, Block, and Assignment
-		t.Errorf("Expected parser to recover and build AST, but got %d nodes", len(tree.Nodes))
+			p.Parse()
+
+			if len(p.Errors) != tt.expectedErrors {
+				t.Fatalf("Expected %d errors, got %d. Errors: %v", tt.expectedErrors, len(p.Errors), p.Errors)
+			}
+
+			// Mathematically prove recovery: Walk the flat AST and find the identifier that occurs AFTER the panic
+			found := false
+			for _, node := range tree.Nodes {
+				if node.Kind == ast.KindIdent {
+					name := string(src[node.Start:node.End])
+					if name == tt.verifyIdent {
+						found = true
+						break
+					}
+				}
+			}
+
+			if !found {
+				t.Errorf("Parser failed to recover! Could not find the subsequent identifier %q in the AST", tt.verifyIdent)
+			}
+		})
 	}
 }
