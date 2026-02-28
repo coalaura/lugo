@@ -47,18 +47,19 @@ type InitializeResult struct {
 }
 
 type ServerCapabilities struct {
-	TextDocumentSync        int                   `json:"textDocumentSync"`
-	DefinitionProvider      bool                  `json:"definitionProvider"`
-	HoverProvider           bool                  `json:"hoverProvider"`
-	RenameProvider          bool                  `json:"renameProvider"`
-	ReferencesProvider      bool                  `json:"referencesProvider"`
-	DocumentSymbolProvider  bool                  `json:"documentSymbolProvider"`
-	WorkspaceSymbolProvider bool                  `json:"workspaceSymbolProvider"`
-	InlayHintProvider       bool                  `json:"inlayHintProvider"`
-	CodeActionProvider      bool                  `json:"codeActionProvider"`
-	CodeLensProvider        *CodeLensOptions      `json:"codeLensProvider,omitempty"`
-	SignatureHelpProvider   *SignatureHelpOptions `json:"signatureHelpProvider,omitempty"`
-	CompletionProvider      *CompletionOptions    `json:"completionProvider,omitempty"`
+	TextDocumentSync        int                    `json:"textDocumentSync"`
+	DefinitionProvider      bool                   `json:"definitionProvider"`
+	HoverProvider           bool                   `json:"hoverProvider"`
+	RenameProvider          bool                   `json:"renameProvider"`
+	ReferencesProvider      bool                   `json:"referencesProvider"`
+	DocumentSymbolProvider  bool                   `json:"documentSymbolProvider"`
+	WorkspaceSymbolProvider bool                   `json:"workspaceSymbolProvider"`
+	InlayHintProvider       bool                   `json:"inlayHintProvider"`
+	CodeActionProvider      bool                   `json:"codeActionProvider"`
+	CodeLensProvider        *CodeLensOptions       `json:"codeLensProvider,omitempty"`
+	SignatureHelpProvider   *SignatureHelpOptions  `json:"signatureHelpProvider,omitempty"`
+	CompletionProvider      *CompletionOptions     `json:"completionProvider,omitempty"`
+	SemanticTokensProvider  *SemanticTokensOptions `json:"semanticTokensProvider,omitempty"`
 }
 
 type TextDocumentItem struct {
@@ -351,4 +352,22 @@ type Command struct {
 	Title     string `json:"title"`
 	Command   string `json:"command"`
 	Arguments []any  `json:"arguments,omitempty"`
+}
+
+type SemanticTokensOptions struct {
+	Legend SemanticTokensLegend `json:"legend"`
+	Full   bool                 `json:"full"`
+}
+
+type SemanticTokensLegend struct {
+	TokenTypes     []string `json:"tokenTypes"`
+	TokenModifiers []string `json:"tokenModifiers"`
+}
+
+type SemanticTokensParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+type SemanticTokens struct {
+	Data []uint32 `json:"data"`
 }

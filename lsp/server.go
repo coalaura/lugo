@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -52,6 +53,13 @@ type SymbolContext struct {
 	IsGlobal    bool
 }
 
+type SemanticToken struct {
+	Start     uint32
+	End       uint32
+	TokenType uint32
+	Modifiers uint32
+}
+
 type Server struct {
 	Version           string
 	Reader            *bufio.Reader
@@ -69,6 +77,9 @@ type Server struct {
 	IgnoreGlobs       []string
 	IsIndexing        bool
 
+	semTokensBuf []SemanticToken
+	semDataBuf   []uint32
+
 	DiagUndefinedGlobals bool
 	DiagImplicitGlobals  bool
 	DiagUnusedVariables  bool
@@ -81,13 +92,15 @@ type Server struct {
 
 func NewServer(version string) *Server {
 	return &Server{
-		Version:     version,
-		Reader:      bufio.NewReader(os.Stdin),
-		Writer:      os.Stdout,
-		Documents:   make(map[string]*Document),
-		GlobalIndex: make(map[GlobalKey]GlobalSymbol),
-		OpenFiles:   make(map[string]bool),
-		IsIndexing:  true,
+		Version:      version,
+		Reader:       bufio.NewReader(os.Stdin),
+		Writer:       os.Stdout,
+		Documents:    make(map[string]*Document),
+		GlobalIndex:  make(map[GlobalKey]GlobalSymbol),
+		OpenFiles:    make(map[string]bool),
+		semTokensBuf: make([]SemanticToken, 0, 4096),
+		semDataBuf:   make([]uint32, 0, 4096*5),
+		IsIndexing:   true,
 	}
 }
 
@@ -211,6 +224,13 @@ func (s *Server) handleMessage(req Request) {
 				},
 				CompletionProvider: &CompletionOptions{
 					TriggerCharacters: []string{".", ":"},
+				},
+				SemanticTokensProvider: &SemanticTokensOptions{
+					Legend: SemanticTokensLegend{
+						TokenTypes:     []string{"variable", "property", "parameter", "function", "method", "class"},
+						TokenModifiers: []string{"declaration", "readonly", "deprecated", "defaultLibrary"},
+					},
+					Full: true,
 				},
 			},
 		}
@@ -1760,6 +1780,192 @@ func (s *Server) handleMessage(req Request) {
 			RPC:    "2.0",
 			ID:     req.ID,
 			Result: actions,
+		})
+	case "textDocument/semanticTokens/full":
+		var params SemanticTokensParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		s.semTokensBuf = s.semTokensBuf[:0]
+
+		for i := 1; i < len(doc.Tree.Nodes); i++ {
+			node := doc.Tree.Nodes[i]
+
+			if node.Kind != ast.KindIdent {
+				continue
+			}
+
+			identBytes := doc.Source[node.Start:node.End]
+
+			var (
+				tokenType uint32 = 0 // 0: variable
+				modifiers uint32 = 0
+			)
+
+			defID := doc.Resolver.References[i]
+			isDecl := ast.NodeID(i) == defID
+
+			if isDecl {
+				modifiers |= 1 << 0 // declaration
+			}
+
+			if defID == ast.InvalidNode {
+				if s.isKnownGlobal(identBytes) {
+					modifiers |= 1 << 3 // defaultLibrary
+				}
+			} else {
+				pNode := doc.Tree.Nodes[defID]
+				if pNode.Parent != ast.InvalidNode {
+					parentOfDef := doc.Tree.Nodes[pNode.Parent]
+					if parentOfDef.Kind == ast.KindFunctionExpr || parentOfDef.Kind == ast.KindFunctionStmt {
+						if parentOfDef.Left != defID && parentOfDef.Right != defID {
+							tokenType = 2 // parameter
+						}
+					}
+				}
+
+				if ast.Attr(doc.Tree.Nodes[defID].Extra) != ast.AttrNone {
+					parentOfDef := doc.Tree.Nodes[doc.Tree.Nodes[defID].Parent]
+					if parentOfDef.Kind == ast.KindNameList {
+						modifiers |= 1 << 1 // readonly
+					}
+				}
+			}
+
+			parentID := node.Parent
+			if parentID != ast.InvalidNode {
+				pNode := doc.Tree.Nodes[parentID]
+
+				if pNode.Kind == ast.KindMemberExpr && pNode.Right == ast.NodeID(i) {
+					tokenType = 1 // property
+				} else if pNode.Kind == ast.KindMethodCall && pNode.Right == ast.NodeID(i) {
+					tokenType = 4 // method
+				} else if pNode.Kind == ast.KindMethodName && pNode.Right == ast.NodeID(i) {
+					tokenType = 4 // method
+				} else if pNode.Kind == ast.KindRecordField && pNode.Left == ast.NodeID(i) {
+					tokenType = 1 // property
+				}
+			}
+
+			if tokenType == 0 || tokenType == 1 {
+				targetDoc := doc
+				targetDef := defID
+
+				if defID == ast.InvalidNode {
+					hash := ast.HashBytes(identBytes)
+					recHash := uint64(0)
+
+					if tokenType == 1 && parentID != ast.InvalidNode {
+						pNode := doc.Tree.Nodes[parentID]
+						recID := pNode.Left
+						recBytes := doc.Source[doc.Tree.Nodes[recID].Start:doc.Tree.Nodes[recID].End]
+						recHash = ast.HashBytes(recBytes)
+					}
+
+					if sym, ok := s.getGlobalSymbol(recHash, hash); ok {
+						if gDoc, ok := s.Documents[sym.URI]; ok {
+							targetDoc = gDoc
+							targetDef = sym.NodeID
+						}
+					}
+				}
+
+				if targetDef != ast.InvalidNode {
+					valID := targetDoc.getAssignedValue(targetDef)
+					if valID != ast.InvalidNode {
+						vNode := targetDoc.Tree.Nodes[valID]
+						switch vNode.Kind {
+						case ast.KindFunctionExpr:
+							if tokenType == 1 {
+								tokenType = 4 // method
+							} else {
+								tokenType = 3 // function
+							}
+						case ast.KindTableExpr:
+							tokenType = 5 // class
+						}
+					} else {
+						pID := targetDoc.Tree.Nodes[targetDef].Parent
+						if pID != ast.InvalidNode {
+							pNode := targetDoc.Tree.Nodes[pID]
+							if pNode.Kind == ast.KindFunctionStmt || pNode.Kind == ast.KindLocalFunction {
+								if tokenType == 1 {
+									tokenType = 4 // method
+								} else {
+									tokenType = 3 // function
+								}
+							}
+						}
+					}
+				}
+			}
+
+			if defID != ast.InvalidNode {
+				isDep, _ := doc.HasDeprecatedTag(defID)
+				if isDep {
+					modifiers |= 1 << 2 // deprecated
+				}
+			}
+
+			s.semTokensBuf = append(s.semTokensBuf, SemanticToken{
+				Start:     node.Start,
+				End:       node.End,
+				TokenType: tokenType,
+				Modifiers: modifiers,
+			})
+		}
+
+		slices.SortFunc(s.semTokensBuf, func(a, b SemanticToken) int {
+			if a.Start < b.Start {
+				return -1
+			}
+
+			if a.Start > b.Start {
+				return 1
+			}
+
+			return 0
+		})
+
+		s.semDataBuf = s.semDataBuf[:0]
+
+		var prevLine, prevCol uint32
+
+		for _, t := range s.semTokensBuf {
+			line, col := doc.Tree.Position(t.Start)
+			length := t.End - t.Start
+
+			deltaLine := line - prevLine
+			deltaCol := col
+
+			if deltaLine == 0 {
+				deltaCol = col - prevCol
+			}
+
+			s.semDataBuf = append(s.semDataBuf, deltaLine, deltaCol, length, t.TokenType, t.Modifiers)
+
+			prevLine = line
+			prevCol = col
+		}
+
+		WriteMessage(s.Writer, Response{
+			RPC: "2.0",
+			ID:  req.ID,
+			Result: SemanticTokens{
+				Data: s.semDataBuf,
+			},
 		})
 	}
 }
