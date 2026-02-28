@@ -53,6 +53,7 @@ type ServerCapabilities struct {
 	DocumentSymbolProvider  bool                  `json:"documentSymbolProvider"`
 	WorkspaceSymbolProvider bool                  `json:"workspaceSymbolProvider"`
 	InlayHintProvider       bool                  `json:"inlayHintProvider"`
+	CodeActionProvider      bool                  `json:"codeActionProvider"`
 	SignatureHelpProvider   *SignatureHelpOptions `json:"signatureHelpProvider,omitempty"`
 	CompletionProvider      *CompletionOptions    `json:"completionProvider,omitempty"`
 }
@@ -134,6 +135,7 @@ const (
 type Diagnostic struct {
 	Range              Range                          `json:"range"`
 	Severity           DiagnosticSeverity             `json:"severity,omitempty"`
+	Code               string                         `json:"code,omitempty"`
 	Message            string                         `json:"message"`
 	Tags               []DiagnosticTag                `json:"tags,omitempty"`
 	RelatedInformation []DiagnosticRelatedInformation `json:"relatedInformation,omitempty"`
@@ -301,4 +303,22 @@ type InlayHint struct {
 	Kind         InlayHintKind `json:"kind,omitempty"`
 	PaddingLeft  bool          `json:"paddingLeft,omitempty"`
 	PaddingRight bool          `json:"paddingRight,omitempty"`
+}
+
+type CodeActionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Range        Range                  `json:"range"`
+	Context      CodeActionContext      `json:"context"`
+}
+
+type CodeActionContext struct {
+	Diagnostics []Diagnostic `json:"diagnostics"`
+}
+
+type CodeAction struct {
+	Title       string         `json:"title"`
+	Kind        string         `json:"kind,omitempty"`
+	Diagnostics []Diagnostic   `json:"diagnostics,omitempty"`
+	Edit        *WorkspaceEdit `json:"edit,omitempty"`
+	IsPreferred bool           `json:"isPreferred,omitempty"`
 }

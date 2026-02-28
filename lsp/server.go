@@ -198,6 +198,7 @@ func (s *Server) handleMessage(req Request) {
 				DocumentSymbolProvider:  true,
 				WorkspaceSymbolProvider: true,
 				InlayHintProvider:       true,
+				CodeActionProvider:      true,
 				SignatureHelpProvider: &SignatureHelpOptions{
 					TriggerCharacters: []string{"(", ","},
 				},
@@ -1494,6 +1495,72 @@ func (s *Server) handleMessage(req Request) {
 			ID:     req.ID,
 			Result: hints,
 		})
+	case "textDocument/codeAction":
+		var params CodeActionParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		var actions []CodeAction
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		for _, diag := range params.Context.Diagnostics {
+			switch diag.Code {
+			case "unused-local":
+				actions = append(actions, CodeAction{
+					Title:       "Prefix unused variable with '_'",
+					Kind:        "quickfix",
+					Diagnostics: []Diagnostic{diag},
+					IsPreferred: true,
+					Edit: &WorkspaceEdit{
+						Changes: map[string][]TextEdit{
+							uri: {
+								{
+									Range: Range{
+										Start: diag.Range.Start,
+										End:   diag.Range.Start,
+									},
+									NewText: "_",
+								},
+							},
+						},
+					},
+				})
+			case "implicit-global":
+				actions = append(actions, CodeAction{
+					Title:       "Prefix variable with 'local'",
+					Kind:        "quickfix",
+					Diagnostics: []Diagnostic{diag},
+					IsPreferred: true,
+					Edit: &WorkspaceEdit{
+						Changes: map[string][]TextEdit{
+							uri: {
+								{
+									Range: Range{
+										Start: diag.Range.Start,
+										End:   diag.Range.Start,
+									},
+									NewText: "local ",
+								},
+							},
+						},
+					},
+				})
+			}
+		}
+
+		if actions == nil {
+			actions = []CodeAction{}
+		}
+
+		WriteMessage(s.Writer, Response{
+			RPC:    "2.0",
+			ID:     req.ID,
+			Result: actions,
+		})
 	}
 }
 
@@ -1752,9 +1819,8 @@ func (s *Server) publishDiagnostics(uri string) {
 			Severity: SeverityError,
 			Message:  err.Message,
 		})
-	}
 
-	if s.DiagUndefinedGlobals {
+		// accidental implicit globals
 		for _, refID := range doc.Resolver.GlobalRefs {
 			node := doc.Tree.Nodes[refID]
 			if node.Start == node.End {
@@ -1786,6 +1852,50 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 	}
 
+	if s.DiagUndefinedGlobals {
+		for _, defID := range doc.Resolver.GlobalDefs {
+			node := doc.Tree.Nodes[defID]
+
+			if node.Start == node.End {
+				continue
+			}
+
+			identBytes := doc.Source[node.Start:node.End]
+
+			if s.isKnownGlobal(identBytes) {
+				continue
+			}
+
+			if isRootLevel(doc.Tree, defID) {
+				continue
+			}
+
+			hash := ast.HashBytes(identBytes)
+			key := GlobalKey{ReceiverHash: 0, PropHash: hash}
+
+			if sym, ok := s.GlobalIndex[key]; ok {
+				if symDoc, docOk := s.Documents[sym.URI]; docOk {
+					if isRootLevel(symDoc.Tree, sym.NodeID) {
+						continue
+					}
+				}
+			}
+
+			startLine, startCol := doc.Tree.Position(node.Start)
+			endLine, endCol := doc.Tree.Position(node.End)
+
+			diagnostics = append(diagnostics, Diagnostic{
+				Range: Range{
+					Start: Position{Line: startLine, Character: startCol},
+					End:   Position{Line: endLine, Character: endCol},
+				},
+				Severity: SeverityWarning,
+				Code:     "implicit-global",
+				Message:  "Implicit global creation: '" + string(identBytes) + "'. Did you forget the 'local' keyword?",
+			})
+		}
+	}
+
 	if s.DiagShadowing || s.DiagUnusedVariables {
 		for _, defID := range doc.Resolver.LocalDefs {
 			node := doc.Tree.Nodes[defID]
@@ -1807,66 +1917,55 @@ func (s *Server) publishDiagnostics(uri string) {
 				diagnostics = append(diagnostics, Diagnostic{
 					Range:    r,
 					Severity: SeverityHint,
+					Code:     "unused-local",
 					Tags:     []DiagnosticTag{Unnecessary},
-					Message:  "Unused local variable: " + string(nameBytes),
+					Message:  "Unused local variable: '" + string(nameBytes) + "'. If this is intentional, prefix the name with an underscore (e.g., '_" + string(nameBytes) + "').",
 				})
 			}
 
 			if s.DiagShadowing {
-				var isOuterShadow bool
+				if s.isKnownGlobal(nameBytes) {
+					diagnostics = append(diagnostics, Diagnostic{
+						Range:    r,
+						Severity: SeverityWarning,
+						Message:  "Local variable '" + string(nameBytes) + "' shadows a known global.",
+					})
+				} else {
+					hash := ast.HashBytes(nameBytes)
 
-				for _, pair := range doc.Resolver.ShadowedOuter {
-					if pair.Shadowing == defID {
-						isOuterShadow = true
+					if sym, exists := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]; exists {
+						var related []DiagnosticRelatedInformation
 
-						break
-					}
-				}
+						if symDoc, ok := s.Documents[sym.URI]; ok {
+							sNode := symDoc.Tree.Nodes[sym.NodeID]
 
-				if !isOuterShadow {
-					if s.isKnownGlobal(nameBytes) {
-						diagnostics = append(diagnostics, Diagnostic{
-							Range:    r,
-							Severity: SeverityWarning,
-							Message:  "Local variable '" + string(nameBytes) + "' shadows a known global.",
-						})
-					} else {
-						hash := ast.HashBytes(nameBytes)
+							sLine, sCol := symDoc.Tree.Position(sNode.Start)
+							eLine, eCol := symDoc.Tree.Position(sNode.End)
 
-						if sym, exists := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]; exists {
-							var related []DiagnosticRelatedInformation
+							var fromFile string
 
-							if symDoc, ok := s.Documents[sym.URI]; ok {
-								sNode := symDoc.Tree.Nodes[sym.NodeID]
-
-								sLine, sCol := symDoc.Tree.Position(sNode.Start)
-								eLine, eCol := symDoc.Tree.Position(sNode.End)
-
-								var fromFile string
-
-								if sym.URI != uri {
-									fromFile = " in " + filepath.Base(s.uriToPath(sym.URI))
-								}
-
-								related = append(related, DiagnosticRelatedInformation{
-									Location: Location{
-										URI: sym.URI,
-										Range: Range{
-											Start: Position{Line: sLine, Character: sCol},
-											End:   Position{Line: eLine, Character: eCol},
-										},
-									},
-									Message: "Global '" + string(nameBytes) + "' defined here" + fromFile,
-								})
+							if sym.URI != uri {
+								fromFile = " in " + filepath.Base(s.uriToPath(sym.URI))
 							}
 
-							diagnostics = append(diagnostics, Diagnostic{
-								Range:              r,
-								Severity:           SeverityWarning,
-								Message:            "Local variable '" + string(nameBytes) + "' shadows a global definition.",
-								RelatedInformation: related,
+							related = append(related, DiagnosticRelatedInformation{
+								Location: Location{
+									URI: sym.URI,
+									Range: Range{
+										Start: Position{Line: sLine, Character: sCol},
+										End:   Position{Line: eLine, Character: eCol},
+									},
+								},
+								Message: "Global '" + string(nameBytes) + "' defined here" + fromFile,
 							})
 						}
+
+						diagnostics = append(diagnostics, Diagnostic{
+							Range:              r,
+							Severity:           SeverityWarning,
+							Message:            "Local variable '" + string(nameBytes) + "' shadows a global definition.",
+							RelatedInformation: related,
+						})
 					}
 				}
 			}
@@ -2371,6 +2470,7 @@ func getASTDepth(tree *ast.Tree, id ast.NodeID) int {
 
 	for curr != ast.InvalidNode {
 		depth++
+
 		curr = tree.Nodes[curr].Parent
 	}
 
@@ -2412,6 +2512,34 @@ func containsFold(b, queryLower []byte) bool {
 		if match {
 			return true
 		}
+	}
+
+	return false
+}
+
+func isRootLevel(tree *ast.Tree, id ast.NodeID) bool {
+	curr := tree.Nodes[id].Parent
+
+	for curr != ast.InvalidNode {
+		n := tree.Nodes[curr]
+
+		if n.Kind == ast.KindBlock {
+			parentID := n.Parent
+			if parentID == tree.Root {
+				return true
+			}
+
+			pNode := tree.Nodes[parentID]
+			if pNode.Kind == ast.KindIf || pNode.Kind == ast.KindElseIf || pNode.Kind == ast.KindElse || pNode.Kind == ast.KindDo {
+				curr = parentID
+
+				continue
+			}
+
+			return false
+		}
+
+		curr = n.Parent
 	}
 
 	return false
