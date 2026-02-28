@@ -1,168 +1,105 @@
----@meta debug
-
----@class debuglib
+---@meta
 debug = {}
 
----@class debuginfo
----@field name            string
----@field namewhat        string
----@field source          string
----@field short_src       string
----@field linedefined     integer
----@field lastlinedefined integer
----@field what            string
----@field currentline     integer
----@field istailcall      boolean
----@field nups            integer
----@field nparams         integer
----@field isvararg        boolean
----@field func            function
----@field ftransfer       integer
----@field ntransfer       integer
----@field activelines     table
-
+---Enters an interactive mode with the user, running each string that the user enters.
 function debug.debug() end
 
----@version 5.1
----@param o any
----@return table
----@nodiscard
-function debug.getfenv(o) end
+---Returns the current hook settings of the thread, as three values: the current hook function, the current hook mask, and the current hook count.
+---@param thread? thread
+---@return function|nil, string, integer
+function debug.gethook(thread) end
 
----@param co? thread
----@return function hook
----@return string mask
----@return integer count
----@nodiscard
-function debug.gethook(co) end
-
----@alias infowhat string
----|+"n"     # ---|+"S"     # ---|+"l"     # ---|+"t"     # ---|+"u" # ---|+"u" # ---|+"f"     # ---|+"r"     # ---|+"L"     #
----@overload fun(f: integer|function, what?: infowhat):debuginfo
----@param thread thread
----@param f      integer|async fun(...):...
----@param what?  infowhat
----@return debuginfo
----@nodiscard
+---Returns a table with information about a function.
+---@param thread? thread
+---@param f function|integer
+---@param what? string
+---@return table|nil
 function debug.getinfo(thread, f, what) end
 
----@overload fun(level: integer, index: integer):string, any
----@param thread  thread
----@param level   integer
----@param index   integer
----@return string name
----@return any    value
----@nodiscard
-function debug.getlocal(thread, level, index) end
----@overload fun(f: integer|async fun(...):..., index: integer):string, any
----@param thread  thread
----@param f       integer|async fun(...):...
----@param index   integer
----@return string name
----@return any    value
----@nodiscard
-function debug.getlocal(thread, f, index) end
+---Returns the name and the value of the local variable with index local of the function at level f of the stack.
+---@param thread? thread
+---@param f integer|function
+---@param locl integer
+---@return string|nil, any
+function debug.getlocal(thread, f, locl) end
 
----@param object any
----@return table metatable
----@nodiscard
-function debug.getmetatable(object) end
+---Returns the metatable of the given value or nil if it does not have one.
+---@param value any
+---@return table|nil
+function debug.getmetatable(value) end
 
+---Returns the registry table.
 ---@return table
----@nodiscard
 function debug.getregistry() end
 
----@param f  async fun(...):...
+---Returns the name and the value of the upvalue with index up of the function.
+---@param f function
 ---@param up integer
----@return string name
----@return any    value
----@nodiscard
+---@return string|nil, any
 function debug.getupvalue(f, up) end
 
----@param u  userdata
----@param n? integer
----@return any
----@return boolean
----@nodiscard
-function debug.getuservalue(u, n) end
+---Returns the n-th user value associated to the userdata u plus a boolean, false if the userdata does not have that value.
 ---@param u userdata
----@return any
----@nodiscard
-function debug.getuservalue(u) end
+---@param n integer
+---@return any, boolean
+function debug.getuservalue(u, n) end
 
----@deprecated
+---Sets a new limit for the C stack.
 ---@param limit integer
 ---@return integer|boolean
 function debug.setcstacklimit(limit) end
 
----@version 5.1
----@generic T
----@param object T
----@param env    table
----@return T object
-function debug.setfenv(object, env) end
-
----@alias hookmask string
----|+"c" # ---|+"r" # ---|+"l" #
----@overload fun(hook: (async fun(...):...), mask: hookmask, count?: integer)
----@overload fun(thread: thread):...
----@overload fun(...):...
----@param thread thread
----@param hook   async fun(...):...
----@param mask   hookmask
+---Sets the given function as a hook.
+---@param thread? thread
+---@param hook function
+---@param mask string
 ---@param count? integer
 function debug.sethook(thread, hook, mask, count) end
 
----@overload fun(level: integer, index: integer, value: any):string
----@param thread thread
----@param level  integer
----@param index  integer
----@param value  any
----@return string name
-function debug.setlocal(thread, level, index, value) end
-
----@generic T
----@param value T
----@param meta? table
----@return T value
-function debug.setmetatable(value, meta) end
-
----@param f     async fun(...):...
----@param up    integer
+---Assigns the value value to the local variable with index local of the function at level level of the stack.
+---@param thread? thread
+---@param level integer
+---@param locl integer
 ---@param value any
----@return string name
+---@return string|nil
+function debug.setlocal(thread, level, locl, value) end
+
+---Sets the metatable for the given value to the given table (which can be nil). Returns value.
+---@param value any
+---@param table table|nil
+---@return any
+function debug.setmetatable(value, table) end
+
+---Assigns the value value to the upvalue with index up of the function.
+---@param f function
+---@param up integer
+---@param value any
+---@return string|nil
 function debug.setupvalue(f, up, value) end
 
+---Sets the given value as the n-th user value associated to the given userdata.
 ---@param udata userdata
 ---@param value any
----@param n?    integer
----@return userdata udata
+---@param n integer
+---@return userdata
 function debug.setuservalue(udata, value, n) end
----@param udata userdata
----@param value any
----@return userdata udata
-function debug.setuservalue(udata, value) end
 
----@overload fun(message?: any, level?: integer): string
----@param thread   thread
----@param message? any
----@param level?   integer
----@return string  message
----@nodiscard
+---Returns a string with a traceback of the call stack.
+---@param thread? thread
+---@param message? string
+---@param level? integer
+---@return string
 function debug.traceback(thread, message, level) end
 
----@version >5.2, JIT
----@param f async fun(...):...
+---Returns a unique identifier (as a light userdata) for the upvalue numbered n from the given function.
+---@param f function
 ---@param n integer
----@return lightuserdata id
----@nodiscard
+---@return userdata
 function debug.upvalueid(f, n) end
 
----@version >5.2, JIT
----@param f1 async fun(...):...
+---Make the n1-th upvalue of the Lua closure f1 refer to the n2-th upvalue of the Lua closure f2.
+---@param f1 function
 ---@param n1 integer
----@param f2 async fun(...):...
+---@param f2 function
 ---@param n2 integer
 function debug.upvaluejoin(f1, n1, f2, n2) end
-
-return debug

@@ -1,50 +1,40 @@
----@meta package
-
----@param modname string
----@return unknown
----@return unknown loaderdata
-function require(modname) end
----@param modname string
----@return unknown
-function require(modname) end
-
----@class packagelib
----@field cpath     string
----@field loaded    table
----@field path      string
----@field preload   table
+---@meta
 package = {}
 
-package.config = [[
-/
-;
-?
-!
--]]
+---A string that describes some compile-time configurations for packages.
+---@type string
+package.config = "\\\n;\n?\n!\n-\n"
 
----@version <5.1
-package.loaders = {}
+---The path used by require to search for a C loader.
+---@type string
+package.cpath = ""
 
----@param libname string
----@param funcname string
----@return any
-function package.loadlib(libname, funcname) end
+---A table used by require to control which modules are already loaded.
+---@type table
+package.loaded = {}
 
----@version >5.2
+---The path used by require to search for a Lua loader.
+---@type string
+package.path = ""
+
+---A table to store loaders for specific modules.
+---@type table
+package.preload = {}
+
+---A table used by require to control how to load modules.
+---@type table
 package.searchers = {}
 
----@version >5.2,JIT
+---Dynamically links the host program with the C library libname.
+---@param libname string
+---@param funcname string
+---@return function|nil, string?
+function package.loadlib(libname, funcname) end
+
+---Searches for the given name in the given path.
 ---@param name string
 ---@param path string
 ---@param sep? string
 ---@param rep? string
----@return string? filename
----@return string? errmsg
----@nodiscard
+---@return string|nil, string?
 function package.searchpath(name, path, sep, rep) end
-
----@version <5.1
----@param module table
-function package.seeall(module) end
-
-return package

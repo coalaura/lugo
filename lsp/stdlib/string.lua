@@ -1,133 +1,108 @@
----@meta string
-
----@class stringlib
+---@meta
 string = {}
 
----@param s  string|number
+---Returns the internal numeric codes of the characters s[i], s[i+1], ..., s[j].
+---@param s string
 ---@param i? integer
 ---@param j? integer
 ---@return integer ...
----@nodiscard
 function string.byte(s, i, j) end
 
----@param byte integer
+---Receives zero or more integers. Returns a string with length equal to the number of arguments, in which each character has the internal numeric code equal to its corresponding argument.
 ---@param ... integer
 ---@return string
----@nodiscard
-function string.char(byte, ...) end
+function string.char(...) end
 
----@param f      async fun(...):...
+---Returns a string containing a binary representation (a binary chunk) of the given function.
+---@param func function
 ---@param strip? boolean
 ---@return string
----@nodiscard
-function string.dump(f, strip) end
----@param f      async fun(...):...
----@return string
----@nodiscard
-function string.dump(f) end
+function string.dump(func, strip) end
 
----@param s       string|number
----@param pattern string|number
----@param init?   integer
----@param plain?  boolean
----@return integer|nil start
----@return integer|nil end
----@return any|nil ... captured
----@nodiscard
+---Looks for the first match of pattern in the string s.
+---@param s string
+---@param pattern string
+---@param init? integer
+---@param plain? boolean
+---@return integer|nil, integer?, any ...
 function string.find(s, pattern, init, plain) end
 
----@param s string|number
+---Returns a formatted version of its variable number of arguments following the description given in its first argument (which must be a string).
+---@param formatstring string
 ---@param ... any
 ---@return string
----@nodiscard
-function string.format(s, ...) end
+function string.format(formatstring, ...) end
 
----@param s       string|number
----@param pattern string|number
----@return fun():string, ...
----@nodiscard
-function string.gmatch(s, pattern) end
----@param s       string|number
----@param pattern string|number
----@param init?   integer
----@return fun():string, ...
+---Returns an iterator function that, each time it is called, returns the next captures from pattern over the string s.
+---@param s string
+---@param pattern string
+---@param init? integer
+---@return function
 function string.gmatch(s, pattern, init) end
 
----@param s       string|number
----@param pattern string|number
----@param repl    string|number|table|function
----@param n?      integer
----@return string
----@return integer count
+---Returns a copy of s in which all (or the first n, if given) occurrences of the pattern have been replaced by a replacement string specified by repl.
+---@param s string
+---@param pattern string
+---@param repl string|table|function
+---@param n? integer
+---@return string, integer
 function string.gsub(s, pattern, repl, n) end
 
----@param s string|number
+---Receives a string and returns its length.
+---@param s string
 ---@return integer
----@nodiscard
 function string.len(s) end
 
----@param s string|number
+---Receives a string and returns a copy of this string with all uppercase letters changed to lowercase.
+---@param s string
 ---@return string
----@nodiscard
 function string.lower(s) end
 
----@param s       string|number
----@param pattern string|number
----@param init?   integer
----@return any ...
----@nodiscard
+---Looks for the first match of pattern in the string s. If it finds one, then match returns the captures from the pattern; otherwise it returns nil.
+---@param s string
+---@param pattern string
+---@param init? integer
+---@return string|nil ...
 function string.match(s, pattern, init) end
 
----@version >5.3
+---Returns a binary string containing the values v1, v2, etc. serialized in binary form (packed) according to the format string fmt.
 ---@param fmt string
----@param v1  string|number
----@param v2? string|number
----@param ... string|number
----@return string binary
----@nodiscard
-function string.pack(fmt, v1, v2, ...) end
+---@param ... any
+---@return string
+function string.pack(fmt, ...) end
 
----@version >5.3
+---Returns the size of a string resulting from string.pack with the given format.
 ---@param fmt string
 ---@return integer
----@nodiscard
 function string.packsize(fmt) end
 
----@param s    string|number
----@param n    integer
+---Returns a string that is the concatenation of n copies of the string s separated by the string sep.
+---@param s string
+---@param n integer
+---@param sep? string
 ---@return string
----@nodiscard
-function string.rep(s, n) end
----@param s    string|number
----@param n    integer
----@param sep? string|number
----@return string
----@nodiscard
 function string.rep(s, n, sep) end
 
----@param s string|number
+---Returns a string that is the string s reversed.
+---@param s string
 ---@return string
----@nodiscard
 function string.reverse(s) end
 
----@param s  string|number
----@param i  integer
+---Returns the substring of s that starts at i and continues until j.
+---@param s string
+---@param i integer
 ---@param j? integer
 ---@return string
----@nodiscard
 function string.sub(s, i, j) end
 
----@version >5.3
----@param fmt  string
----@param s    string
+---Returns the values packed in string s according to the format string fmt.
+---@param fmt string
+---@param s string
 ---@param pos? integer
----@return any ...
----@nodiscard
+---@return any ..., integer
 function string.unpack(fmt, s, pos) end
 
----@param s string|number
+---Receives a string and returns a copy of this string with all lowercase letters changed to uppercase.
+---@param s string
 ---@return string
----@nodiscard
 function string.upper(s) end
-
-return string

@@ -1,69 +1,40 @@
----@meta utf8
-
----@version >5.3
----@class utf8lib
----@field charpattern string
+---@meta
 utf8 = {}
 
----@param code integer
+---The pattern (a string) which matches exactly one UTF-8 byte sequence, assuming that the subject is a valid UTF-8 string.
+---@type string
+utf8.charpattern = "[-┬-²][Ç-┐]*"
+
+---Receives zero or more integers, converts each one to its corresponding UTF-8 byte sequence and returns a string with the concatenation of all these sequences.
 ---@param ... integer
 ---@return string
----@nodiscard
-function utf8.char(code, ...) end
+function utf8.char(...) end
 
----@param s    string
----@return fun(s: string, p: integer):integer, integer
-function utf8.codes(s) end
----@param s    string
+---Returns an iterator function so that `for p, c in utf8.codes(s) do body end` will iterate over all characters in string s, with p being the position (in bytes) and c the code point of each character.
+---@param s string
 ---@param lax? boolean
----@return fun(s: string, p: integer):integer, integer
+---@return function, string, integer
 function utf8.codes(s, lax) end
 
----@param s    string
----@param i?   integer
----@param j?   integer
----@return integer code
----@return integer ...
----@nodiscard
-function utf8.codepoint(s, i, j) end
----@param s    string
----@param i?   integer
----@param j?   integer
+---Returns the codepoints (as integers) from all characters in s that start between byte position i and j (both included).
+---@param s string
+---@param i? integer
+---@param j? integer
 ---@param lax? boolean
----@return integer code
 ---@return integer ...
----@nodiscard
 function utf8.codepoint(s, i, j, lax) end
 
----@param s    string
----@param i?   integer
----@param j?   integer
----@return integer?
----@return integer? errpos
----@nodiscard
-function utf8.len(s, i, j) end
----@param s    string
----@param i?   integer
----@param j?   integer
+---Returns the number of UTF-8 characters in string s that start between positions i and j (both inclusive). If it finds any invalid byte sequence, returns false plus the position of the first invalid byte.
+---@param s string
+---@param i? integer
+---@param j? integer
 ---@param lax? boolean
----@return integer?
----@return integer? errpos
----@nodiscard
+---@return integer|false, integer?
 function utf8.len(s, i, j, lax) end
 
+---Returns the position (in bytes) where the encoding of the n-th character of s (counting from position i) starts.
 ---@param s string
 ---@param n integer
 ---@param i? integer
----@return integer p
----@nodiscard
+---@return integer|nil
 function utf8.offset(s, n, i) end
-
----@param s string
----@param n integer
----@param i? integer
----@return integer ps
----@return integer pe
----@nodiscard
-function utf8.offset(s, n, i) end
-
-return utf8

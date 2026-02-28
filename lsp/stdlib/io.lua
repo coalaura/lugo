@@ -1,111 +1,66 @@
----@meta io
-
----@class iolib
----@field stdin  file*
----@field stdout file*
----@field stderr file*
+---@meta
 io = {}
 
----@alias openmode
----|>"r"   # ---| "w"   # ---| "a"   # ---| "r+"  # ---| "w+"  # ---| "a+"  # ---| "rb"  # ---| "wb"  # ---| "ab"  # ---| "r+b" # ---| "w+b" # ---| "a+b" #
+---@type file*
+io.stderr = nil
+
+---@type file*
+io.stdin = nil
+
+---@type file*
+io.stdout = nil
+
+---Equivalent to file:close(). Without a file, closes the default output file.
 ---@param file? file*
----@return boolean?  suc
----@return exitcode? exitcode
----@return integer?  code
+---@return boolean|nil, string?, integer?
 function io.close(file) end
 
+---Equivalent to io.output():flush().
 function io.flush() end
 
----@overload fun():file*
----@param file string|file*
+---When called with a file name, it opens the named file (in text mode), and sets its handle as the default input file.
+---@param file? string|file*
+---@return file*
 function io.input(file) end
 
----@param filename string?
----@param ... readmode
----@return fun():any, ...
+---Opens the given file name in read mode and returns an iterator function that works like file:lines(...).
+---@param filename? string
+---@param ... string|integer
+---@return function
 function io.lines(filename, ...) end
 
+---This function opens a file, in the mode specified in the string mode.
 ---@param filename string
----@param mode?    openmode
----@return file*?
----@return string? errmsg
----@nodiscard
+---@param mode? "r"|"w"|"a"|"r+"|"w+"|"a+"|"rb"|"wb"|"ab"|"r+b"|"w+b"|"a+b"
+---@return file*|nil, string?, integer?
 function io.open(filename, mode) end
 
----@overload fun():file*
----@param file string|file*
+---Similar to io.input, but operates over the default output file.
+---@param file? string|file*
+---@return file*
 function io.output(file) end
 
----@alias popenmode
----| "r" # ---| "w" #
----@param prog  string
----@param mode? popenmode
----@return file*?
----@return string? errmsg
+---Starts program prog in a separated process and returns a file handle that you can use to read data from this program (if mode is "r") or to write data to this program (if mode is "w").
+---@param prog string
+---@param mode? "r"|"w"
+---@return file*|nil, string?, integer?
 function io.popen(prog, mode) end
 
----@param ... readmode
+---Equivalent to io.input():read(...).
+---@param ... string|integer
 ---@return any
----@return any ...
----@nodiscard
 function io.read(...) end
 
+---In case of success, returns a handle for a temporary file.
 ---@return file*
----@nodiscard
 function io.tmpfile() end
 
----@alias filetype
----| "file"        # ---| "closed file" # ---| `nil`         #
----@param file file*
----@return filetype
----@nodiscard
-function io.type(file) end
+---Checks whether obj is a valid file handle.
+---@param obj any
+---@return "file"|"closed file"|nil
+function io.type(obj) end
 
----@return file*
----@return string? errmsg
-function io.write(...) end
-
----@class file*
-local file = {}
-
----@alias readmode integer|string
----| "n"  # ---| "a"  # ---|>"l"  # ---| "L"  # ---| "*n" # ---| "*a" # ---|>"*l" # ---| "*L" #
----@alias exitcode "exit"|"signal"
-
----@return boolean?  suc
----@return exitcode? exitcode
----@return integer?  code
-function file:close() end
-
-function file:flush() end
-
----@param ... readmode
----@return fun():any, ...
-function file:lines(...) end
-
----@param ... readmode
----@return any
----@return any ...
----@nodiscard
-function file:read(...) end
-
----@alias seekwhence
----| "set" # ---|>"cur" # ---| "end" #
----@param whence? seekwhence
----@param offset? integer
----@return integer offset
----@return string? errmsg
-function file:seek(whence, offset) end
-
----@alias vbuf
----| "no"   # ---| "full" # ---| "line" #
----@param mode vbuf
----@param size? integer
-function file:setvbuf(mode, size) end
-
+---Equivalent to io.output():write(...).
 ---@param ... string|number
----@return file*?
----@return string? errmsg
-function file:write(...) end
-
-return io
+---@return file*|nil, string?
+function io.write(...) end
