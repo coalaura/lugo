@@ -1,5 +1,7 @@
 # Lugo
 
+[![Tests](https://github.com/coalaura/lugo/actions/workflows/test.yml/badge.svg)](https://github.com/coalaura/lugo/actions/workflows/test.yml)
+
 A ridiculously fast, zero-allocation Lua 5.4 parser and Language Server (LSP) written in Go. 
 
 Lugo is built from the ground up for maximum performance. By iterating over source code using a flat-array/arena architecture (`[]Node`) and storing only byte offsets, it heavily eliminates pointer allocations, heap strings, and garbage collection pressure.
