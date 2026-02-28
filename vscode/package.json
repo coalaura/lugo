@@ -5,6 +5,10 @@
     "publisher": "coalaura",
     "icon": "logo.png",
     "version": "0.3.0",
+    "galleryBanner": {
+		"color": "#161928",
+		"theme": "dark"
+	},
     "repository": {
         "type": "git",
         "url": "https://github.com/coalaura/lugo.git"
