@@ -58,6 +58,7 @@ type ServerCapabilities struct {
 	CodeActionProvider         bool                   `json:"codeActionProvider"`
 	FoldingRangeProvider       bool                   `json:"foldingRangeProvider"`
 	LinkedEditingRangeProvider bool                   `json:"linkedEditingRangeProvider"`
+	CallHierarchyProvider      bool                   `json:"callHierarchyProvider"`
 	CodeLensProvider           *CodeLensOptions       `json:"codeLensProvider,omitempty"`
 	SignatureHelpProvider      *SignatureHelpOptions  `json:"signatureHelpProvider,omitempty"`
 	CompletionProvider         *CompletionOptions     `json:"completionProvider,omitempty"`
@@ -364,6 +365,46 @@ type SemanticTokensOptions struct {
 type SemanticTokensLegend struct {
 	TokenTypes     []string `json:"tokenTypes"`
 	TokenModifiers []string `json:"tokenModifiers"`
+}
+
+type SymbolTag int
+
+const (
+	SymbolTagDeprecated SymbolTag = 1
+)
+
+type CallHierarchyPrepareParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type CallHierarchyItem struct {
+	Name           string      `json:"name"`
+	Kind           SymbolKind  `json:"kind"`
+	Tags           []SymbolTag `json:"tags,omitempty"`
+	Detail         string      `json:"detail,omitempty"`
+	URI            string      `json:"uri"`
+	Range          Range       `json:"range"`
+	SelectionRange Range       `json:"selectionRange"`
+	Data           any         `json:"data,omitempty"`
+}
+
+type CallHierarchyIncomingCallsParams struct {
+	Item CallHierarchyItem `json:"item"`
+}
+
+type CallHierarchyIncomingCall struct {
+	From       CallHierarchyItem `json:"from"`
+	FromRanges []Range           `json:"fromRanges"`
+}
+
+type CallHierarchyOutgoingCallsParams struct {
+	Item CallHierarchyItem `json:"item"`
+}
+
+type CallHierarchyOutgoingCall struct {
+	To         CallHierarchyItem `json:"to"`
+	FromRanges []Range           `json:"fromRanges"`
 }
 
 type SemanticTokensParams struct {

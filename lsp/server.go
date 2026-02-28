@@ -41,6 +41,16 @@ type GlobalKey struct {
 	PropHash     uint64
 }
 
+type CallerKey struct {
+	URI string
+	Def ast.NodeID
+}
+
+type TargetKey struct {
+	URI string
+	Def ast.NodeID
+}
+
 type SymbolContext struct {
 	TargetDoc   *Document
 	IdentName   string
@@ -219,6 +229,7 @@ func (s *Server) handleMessage(req Request) {
 				InlayHintProvider:       true,
 				CodeActionProvider:      true,
 				FoldingRangeProvider:    true,
+				CallHierarchyProvider:   true,
 				CodeLensProvider: &CodeLensOptions{
 					ResolveProvider: true,
 				},
@@ -1444,6 +1455,260 @@ func (s *Server) handleMessage(req Request) {
 				Ranges: ranges,
 			},
 		})
+	case "textDocument/prepareCallHierarchy":
+		var params CallHierarchyPrepareParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
+
+		ctx := s.resolveSymbolAt(uri, offset)
+		if ctx == nil || ctx.TargetDoc == nil || ctx.TargetDefID == ast.InvalidNode {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		item := s.buildCallHierarchyItemFromDef(ctx.TargetURI, ctx.TargetDoc, ctx.TargetDefID)
+
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []CallHierarchyItem{item}})
+	case "callHierarchy/incomingCalls":
+		var params CallHierarchyIncomingCallsParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		data, ok := params.Item.Data.(map[string]any)
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		uri, _ := data["uri"].(string)
+		defIDFloat, _ := data["defId"].(float64)
+		defID := ast.NodeID(defIDFloat)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		ctx := s.resolveSymbolNode(uri, doc, defID)
+		if ctx == nil {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		locations := s.getReferences(ctx, false)
+
+		callers := make(map[CallerKey][]Range)
+
+		for _, loc := range locations {
+			refDoc := s.Documents[loc.URI]
+			if refDoc == nil {
+				continue
+			}
+
+			offset := refDoc.Tree.Offset(loc.Range.Start.Line, loc.Range.Start.Character)
+
+			refID := refDoc.Tree.NodeAt(offset)
+			if refID == ast.InvalidNode {
+				continue
+			}
+
+			pID := refDoc.Tree.Nodes[refID].Parent
+			pNode := refDoc.Tree.Nodes[pID]
+
+			isCall := false
+			callNodeID := ast.InvalidNode
+
+			if pNode.Kind == ast.KindCallExpr && pNode.Left == refID {
+				isCall = true
+				callNodeID = pID
+			} else if pNode.Kind == ast.KindMethodCall && pNode.Right == refID {
+				isCall = true
+				callNodeID = pID
+			} else if pNode.Kind == ast.KindMemberExpr {
+				gpID := refDoc.Tree.Nodes[pID].Parent
+				if gpID != ast.InvalidNode {
+					gpNode := refDoc.Tree.Nodes[gpID]
+					if gpNode.Kind == ast.KindCallExpr && gpNode.Left == pID {
+						isCall = true
+						callNodeID = gpID
+					}
+				}
+			}
+
+			if isCall {
+				enclosingFuncDefID := s.getEnclosingFunctionDef(refDoc, callNodeID)
+
+				cKey := CallerKey{URI: loc.URI, Def: enclosingFuncDefID}
+
+				callNode := refDoc.Tree.Nodes[callNodeID]
+
+				sL, sC := refDoc.Tree.Position(callNode.Start)
+				eL, eC := refDoc.Tree.Position(callNode.End)
+
+				callers[cKey] = append(callers[cKey], Range{
+					Start: Position{Line: sL, Character: sC},
+					End:   Position{Line: eL, Character: eC},
+				})
+			}
+		}
+
+		var result []CallHierarchyIncomingCall
+		for key, ranges := range callers {
+			cDoc := s.Documents[key.URI]
+			if cDoc == nil {
+				continue
+			}
+
+			item := s.buildCallHierarchyItemFromDef(key.URI, cDoc, key.Def)
+
+			result = append(result, CallHierarchyIncomingCall{
+				From:       item,
+				FromRanges: ranges,
+			})
+		}
+
+		if result == nil {
+			result = []CallHierarchyIncomingCall{}
+		}
+
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: result})
+	case "callHierarchy/outgoingCalls":
+		var params CallHierarchyOutgoingCallsParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		data, ok := params.Item.Data.(map[string]any)
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		uri, _ := data["uri"].(string)
+		defIDFloat, _ := data["defId"].(float64)
+		defID := ast.NodeID(defIDFloat)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		var root ast.NodeID
+
+		valID := doc.getAssignedValue(defID)
+
+		if valID != ast.InvalidNode && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+			root = valID
+		} else if doc.Tree.Nodes[defID].Kind == ast.KindFile || doc.Tree.Nodes[defID].Kind == ast.KindFunctionExpr {
+			root = defID
+		} else {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []CallHierarchyOutgoingCall{}})
+
+			return
+		}
+
+		targets := make(map[TargetKey][]Range)
+
+		var walk func(id ast.NodeID)
+
+		walk = func(id ast.NodeID) {
+			if id == ast.InvalidNode {
+				return
+			}
+
+			node := doc.Tree.Nodes[id]
+
+			if id != root && node.Kind == ast.KindFunctionExpr {
+				return
+			}
+
+			if node.Kind == ast.KindCallExpr || node.Kind == ast.KindMethodCall {
+				var identID ast.NodeID
+
+				if node.Kind == ast.KindCallExpr {
+					if doc.Tree.Nodes[node.Left].Kind == ast.KindIdent {
+						identID = node.Left
+					} else if doc.Tree.Nodes[node.Left].Kind == ast.KindMemberExpr {
+						identID = doc.Tree.Nodes[node.Left].Right
+					}
+				} else {
+					identID = node.Right
+				}
+
+				if identID != ast.InvalidNode {
+					ctx := s.resolveSymbolNode(uri, doc, identID)
+					if ctx != nil && ctx.TargetDefID != ast.InvalidNode && ctx.TargetDoc != nil {
+						tKey := TargetKey{URI: ctx.TargetURI, Def: ctx.TargetDefID}
+
+						sL, sC := doc.Tree.Position(node.Start)
+						eL, eC := doc.Tree.Position(node.End)
+
+						targets[tKey] = append(targets[tKey], Range{
+							Start: Position{Line: sL, Character: sC},
+							End:   Position{Line: eL, Character: eC},
+						})
+					}
+				}
+			}
+
+			walk(node.Left)
+			walk(node.Right)
+
+			for i := uint16(0); i < node.Count; i++ {
+				walk(doc.Tree.ExtraList[node.Extra+uint32(i)])
+			}
+		}
+
+		walk(root)
+
+		var result []CallHierarchyOutgoingCall
+
+		for key, ranges := range targets {
+			tDoc := s.Documents[key.URI]
+			if tDoc == nil {
+				continue
+			}
+
+			item := s.buildCallHierarchyItemFromDef(key.URI, tDoc, key.Def)
+
+			result = append(result, CallHierarchyOutgoingCall{
+				To:         item,
+				FromRanges: ranges,
+			})
+		}
+
+		if result == nil {
+			result = []CallHierarchyOutgoingCall{}
+		}
+
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: result})
 	case "textDocument/rename":
 		var params RenameParams
 
@@ -3135,6 +3400,139 @@ func (s *Server) isKnownGlobal(name []byte) bool {
 	return false
 }
 
+func (s *Server) buildCallHierarchyItemFromDef(uri string, doc *Document, defID ast.NodeID) CallHierarchyItem {
+	valID := doc.getAssignedValue(defID)
+	isFunc := valID != ast.InvalidNode && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr
+
+	node := doc.Tree.Nodes[defID]
+	name := string(doc.Source[node.Start:node.End])
+	kind := SymbolKindVariable
+
+	if isFunc {
+		kind = SymbolKindFunction
+		if doc.Tree.Nodes[node.Parent].Kind == ast.KindMethodName || doc.Tree.Nodes[node.Parent].Kind == ast.KindRecordField {
+			kind = SymbolKindMethod
+		}
+	}
+
+	if node.Kind == ast.KindFile {
+		name = "(main)"
+		kind = SymbolKindFile
+	} else if node.Kind == ast.KindFunctionExpr {
+		name = "(anonymous function)"
+		kind = SymbolKindFunction
+	}
+
+	sLine, sCol := doc.Tree.Position(node.Start)
+	eLine, eCol := doc.Tree.Position(node.End)
+
+	selRange := Range{
+		Start: Position{Line: sLine, Character: sCol},
+		End:   Position{Line: eLine, Character: eCol},
+	}
+
+	fullRange := selRange
+	if isFunc {
+		fNode := doc.Tree.Nodes[valID]
+
+		fSL, fSC := doc.Tree.Position(fNode.Start)
+		fEL, fEC := doc.Tree.Position(fNode.End)
+
+		fullRange = Range{
+			Start: Position{Line: fSL, Character: fSC},
+			End:   Position{Line: fEL, Character: fEC},
+		}
+	} else if node.Kind == ast.KindFile {
+		fullRange = Range{
+			Start: Position{Line: 0, Character: 0},
+			End:   Position{Line: sLine, Character: sCol},
+		}
+
+		if len(doc.Tree.LineOffsets) > 0 {
+			lastLine := uint32(len(doc.Tree.LineOffsets) - 1)
+			lastCol := uint32(len(doc.Source)) - doc.Tree.LineOffsets[lastLine]
+
+			fullRange.End = Position{Line: lastLine, Character: lastCol}
+		}
+	}
+
+	var detail string
+
+	if uri != "" {
+		detail = filepath.Base(s.uriToPath(uri))
+	}
+
+	var tags []SymbolTag
+
+	if isDep, _ := doc.HasDeprecatedTag(defID); isDep {
+		tags = append(tags, SymbolTagDeprecated)
+	}
+
+	return CallHierarchyItem{
+		Name:           name,
+		Kind:           kind,
+		Tags:           tags,
+		Detail:         detail,
+		URI:            uri,
+		Range:          fullRange,
+		SelectionRange: selRange,
+		Data: map[string]any{
+			"uri":   uri,
+			"defId": float64(defID),
+		},
+	}
+}
+
+func (s *Server) getEnclosingFunctionDef(doc *Document, id ast.NodeID) ast.NodeID {
+	curr := doc.Tree.Nodes[id].Parent
+
+	for curr != ast.InvalidNode {
+		node := doc.Tree.Nodes[curr]
+		if node.Kind == ast.KindFunctionExpr {
+			pID := node.Parent
+			if pID != ast.InvalidNode {
+				pNode := doc.Tree.Nodes[pID]
+				if pNode.Kind == ast.KindLocalFunction || pNode.Kind == ast.KindFunctionStmt {
+					return pNode.Left
+				} else if pNode.Kind == ast.KindRecordField {
+					return pNode.Left
+				} else if pNode.Kind == ast.KindExprList {
+					gpID := pNode.Parent
+					if gpID != ast.InvalidNode {
+						gpNode := doc.Tree.Nodes[gpID]
+						if (gpNode.Kind == ast.KindAssign || gpNode.Kind == ast.KindLocalAssign) && gpNode.Right == pID {
+							idx := -1
+
+							for i := uint16(0); i < pNode.Count; i++ {
+								if doc.Tree.ExtraList[pNode.Extra+uint32(i)] == curr {
+									idx = int(i)
+
+									break
+								}
+							}
+
+							if idx != -1 {
+								lhs := doc.Tree.Nodes[gpNode.Left]
+								if uint16(idx) < lhs.Count {
+									return doc.Tree.ExtraList[lhs.Extra+uint32(idx)]
+								}
+							}
+						}
+					}
+				}
+			}
+
+			return curr
+		} else if node.Kind == ast.KindFile {
+			return curr
+		}
+
+		curr = node.Parent
+	}
+
+	return doc.Tree.Root
+}
+
 func isTerminal(tree *ast.Tree, id ast.NodeID) bool {
 	if id == ast.InvalidNode {
 		return false
@@ -3160,7 +3558,7 @@ func isTerminal(tree *ast.Tree, id ast.NodeID) bool {
 			return false
 		}
 
-		hasElse := false
+		var hasElse bool
 
 		for i := uint16(0); i < node.Count; i++ {
 			childID := tree.ExtraList[node.Extra+uint32(i)]
