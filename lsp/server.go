@@ -90,6 +90,9 @@ type Server struct {
 	semTokensBuf []SemanticToken
 	semDataBuf   []uint32
 
+	sharedParser *parser.Parser
+	diagBuf      []Diagnostic
+
 	DiagUndefinedGlobals bool
 	DiagImplicitGlobals  bool
 	DiagUnusedVariables  bool
@@ -110,6 +113,8 @@ func NewServer(version string) *Server {
 		OpenFiles:    make(map[string]bool),
 		semTokensBuf: make([]SemanticToken, 0, 4096),
 		semDataBuf:   make([]uint32, 0, 4096*5),
+		sharedParser: parser.New(nil, ast.NewTree(nil)),
+		diagBuf:      make([]Diagnostic, 0, 1024),
 		IsIndexing:   true,
 	}
 }
@@ -2527,7 +2532,14 @@ func (s *Server) updateDocument(uri string, source []byte) {
 	if existing, exists := s.Documents[uri]; exists {
 		doc = existing
 		doc.Source = source
-		doc.ExportedGlobals = make(map[ast.NodeID]GlobalKey)
+
+		if doc.ExportedGlobals != nil {
+			for _, key := range doc.ExportedGlobals {
+				delete(s.GlobalIndex, key)
+			}
+		}
+
+		clear(doc.ExportedGlobals)
 
 		tree = existing.Tree
 		tree.Reset(source)
@@ -2544,11 +2556,18 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		s.Documents[uri] = doc
 	}
 
-	p := parser.New(source, tree)
+	p := s.sharedParser
+	p.Reset(source, tree)
 
 	rootID := p.Parse()
 
-	doc.Errors = p.Errors
+	if len(p.Errors) > 0 {
+		doc.Errors = make([]parser.ParseError, len(p.Errors))
+
+		copy(doc.Errors, p.Errors)
+	} else {
+		doc.Errors = nil
+	}
 
 	res := doc.Resolver
 
@@ -2645,7 +2664,7 @@ func (s *Server) publishDiagnostics(uri string) {
 
 	doc := s.Documents[uri]
 
-	var diagnostics []Diagnostic
+	s.diagBuf = s.diagBuf[:0]
 
 	for _, err := range doc.Errors {
 		startLine, startCol := doc.Tree.Position(err.Start)
@@ -2655,7 +2674,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			endCol++
 		}
 
-		diagnostics = append(diagnostics, Diagnostic{
+		s.diagBuf = append(s.diagBuf, Diagnostic{
 			Range: Range{
 				Start: Position{Line: startLine, Character: startCol},
 				End:   Position{Line: endLine, Character: endCol},
@@ -2684,7 +2703,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				startLine, startCol := doc.Tree.Position(node.Start)
 				endLine, endCol := doc.Tree.Position(node.End)
 
-				diagnostics = append(diagnostics, Diagnostic{
+				s.diagBuf = append(s.diagBuf, Diagnostic{
 					Range: Range{
 						Start: Position{Line: startLine, Character: startCol},
 						End:   Position{Line: endLine, Character: endCol},
@@ -2728,7 +2747,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			startLine, startCol := doc.Tree.Position(node.Start)
 			endLine, endCol := doc.Tree.Position(node.End)
 
-			diagnostics = append(diagnostics, Diagnostic{
+			s.diagBuf = append(s.diagBuf, Diagnostic{
 				Range: Range{
 					Start: Position{Line: startLine, Character: startCol},
 					End:   Position{Line: endLine, Character: endCol},
@@ -2758,7 +2777,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			}
 
 			if s.DiagUnusedVariables && doc.Resolver.UsageCount[defID] == 0 {
-				diagnostics = append(diagnostics, Diagnostic{
+				s.diagBuf = append(s.diagBuf, Diagnostic{
 					Range:    r,
 					Severity: SeverityHint,
 					Code:     "unused-local",
@@ -2769,7 +2788,7 @@ func (s *Server) publishDiagnostics(uri string) {
 
 			if s.DiagShadowing {
 				if s.isKnownGlobal(nameBytes) {
-					diagnostics = append(diagnostics, Diagnostic{
+					s.diagBuf = append(s.diagBuf, Diagnostic{
 						Range:    r,
 						Severity: SeverityWarning,
 						Message:  "Local variable '" + string(nameBytes) + "' shadows a known global.",
@@ -2804,7 +2823,7 @@ func (s *Server) publishDiagnostics(uri string) {
 							})
 						}
 
-						diagnostics = append(diagnostics, Diagnostic{
+						s.diagBuf = append(s.diagBuf, Diagnostic{
 							Range:              r,
 							Severity:           SeverityWarning,
 							Message:            "Local variable '" + string(nameBytes) + "' shadows a global definition.",
@@ -2842,7 +2861,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				Message: "Outer local '" + string(nameBytes) + "' defined here",
 			})
 
-			diagnostics = append(diagnostics, Diagnostic{
+			s.diagBuf = append(s.diagBuf, Diagnostic{
 				Range: Range{
 					Start: Position{Line: startLine, Character: startCol},
 					End:   Position{Line: endLine, Character: endCol},
@@ -2874,7 +2893,7 @@ func (s *Server) publishDiagnostics(uri string) {
 						lastExprNode := doc.Tree.Nodes[lastExprID]
 						eLine, eCol := doc.Tree.Position(lastExprNode.End)
 
-						diagnostics = append(diagnostics, Diagnostic{
+						s.diagBuf = append(s.diagBuf, Diagnostic{
 							Range: Range{
 								Start: Position{Line: sLine, Character: sCol},
 								End:   Position{Line: eLine, Character: eCol},
@@ -2901,7 +2920,7 @@ func (s *Server) publishDiagnostics(uri string) {
 						sLine, sCol := doc.Tree.Position(startNode.Start)
 						eLine, eCol := doc.Tree.Position(endNode.End)
 
-						diagnostics = append(diagnostics, Diagnostic{
+						s.diagBuf = append(s.diagBuf, Diagnostic{
 							Range: Range{
 								Start: Position{Line: sLine, Character: sCol},
 								End:   Position{Line: eLine, Character: eCol},
@@ -2943,7 +2962,7 @@ func (s *Server) publishDiagnostics(uri string) {
 						diagMsg += ": " + msg
 					}
 
-					diagnostics = append(diagnostics, Diagnostic{
+					s.diagBuf = append(s.diagBuf, Diagnostic{
 						Range: Range{
 							Start: Position{Line: startLine, Character: startCol},
 							End:   Position{Line: endLine, Character: endCol},
@@ -2957,16 +2976,12 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 	}
 
-	if diagnostics == nil {
-		diagnostics = []Diagnostic{}
-	}
-
 	WriteMessage(s.Writer, OutgoingNotification{
 		RPC:    "2.0",
 		Method: "textDocument/publishDiagnostics",
 		Params: PublishDiagnosticsParams{
 			URI:         uri,
-			Diagnostics: diagnostics,
+			Diagnostics: s.diagBuf,
 		},
 	})
 }
@@ -3280,13 +3295,13 @@ func (s *Server) isIgnored(fullPath, name string) bool {
 }
 
 func (s *Server) clearDocument(uri string) {
-	delete(s.Documents, uri)
-
-	for key, sym := range s.GlobalIndex {
-		if sym.URI == uri {
+	if doc, ok := s.Documents[uri]; ok && doc.ExportedGlobals != nil {
+		for _, key := range doc.ExportedGlobals {
 			delete(s.GlobalIndex, key)
 		}
 	}
+
+	delete(s.Documents, uri)
 
 	WriteMessage(s.Writer, OutgoingNotification{
 		RPC:    "2.0",

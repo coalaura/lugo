@@ -1,6 +1,8 @@
 package ast
 
 import (
+	"bytes"
+
 	"github.com/coalaura/lugo/token"
 )
 
@@ -95,12 +97,20 @@ type Tree struct {
 }
 
 func NewTree(source []byte) *Tree {
-	lines := []uint32{0} // Line 0 starts at offset 0
+	lines := make([]uint32, 1, 128)
+	lines[0] = 0
 
-	for i, b := range source {
-		if b == '\n' {
-			lines = append(lines, uint32(i+1))
+	var offset int
+
+	for {
+		idx := bytes.IndexByte(source[offset:], '\n')
+		if idx == -1 {
+			break
 		}
+
+		offset += idx + 1
+
+		lines = append(lines, uint32(offset))
 	}
 
 	t := &Tree{
@@ -221,13 +231,19 @@ func (t *Tree) Reset(source []byte) {
 	t.ExtraList = t.ExtraList[:0]
 	t.Comments = t.Comments[:0]
 
-	t.LineOffsets = t.LineOffsets[:0]
-	t.LineOffsets = append(t.LineOffsets, 0)
+	t.LineOffsets = t.LineOffsets[:1] // Keep 0 at index 0
 
-	for i, b := range source {
-		if b == '\n' {
-			t.LineOffsets = append(t.LineOffsets, uint32(i+1))
+	var offset int
+
+	for {
+		idx := bytes.IndexByte(source[offset:], '\n')
+		if idx == -1 {
+			break
 		}
+
+		offset += idx + 1
+
+		t.LineOffsets = append(t.LineOffsets, uint32(offset))
 	}
 }
 

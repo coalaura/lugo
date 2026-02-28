@@ -86,6 +86,17 @@ func New(source []byte, tree *ast.Tree) *Parser {
 	return p
 }
 
+func (p *Parser) Reset(source []byte, tree *ast.Tree) {
+	p.lex = lexer.New(source)
+	p.tree = tree
+	p.Errors = p.Errors[:0]
+	p.listStack = p.listStack[:0]
+	p.loopDepth = 0
+
+	p.nextToken()
+	p.nextToken()
+}
+
 func (p *Parser) GetTree() *ast.Tree {
 	return p.tree
 }
