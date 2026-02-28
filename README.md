@@ -11,25 +11,39 @@ Lugo is built from the ground up for maximum performance. By iterating over sour
 Most Lua language servers struggle when dropped into massive codebases (like game server environments or large modding frameworks). They consume gigabytes of RAM, take minutes to index, and lag while typing.
 
 **Lugo is different:**
-* **Microscopic Memory Footprint:** Lugo only stores flat arrays of integers. Only actively open files keep their source strings in memory. In real-world benchmarks, Lugo completely indexes a **2,400+ file workspace** (including full AST generation, resolution, and publishing workspace-wide diagnostics) in **~1.5 seconds** while consuming only **~270 MB** of RAM.
-* **Zero-Allocation Architecture:** The parser, lexer, and symbol resolver are designed to never allocate heap strings during normal typing and querying.
+* **Blistering Performance:** In real-world benchmarks on modern hardware (e.g., AMD Ryzen 9 9950X3D), Lugo completely cold-indexes a **2,200+ file workspace** (including full AST generation, resolution, and publishing workspace-wide diagnostics) in **~640ms**.
+* **Incremental Warm Starts:** Lugo hashes your workspace files. If you restart the server or trigger a re-index, it skips parsing unchanged files and reuses map memory pools (`clear()`), dropping warm re-indexes to just **~340ms**.
+* **Zero-Allocation Architecture:** The parser, lexer, and symbol resolver are designed to never allocate heap strings during normal typing. Tight loops execute inside CPU registers, leveraging SIMD-accelerated byte scanning to maximize cache locality.
+* **Microscopic Memory Footprint:** Lugo only stores flat arrays of integers. Only actively open files keep their source strings in memory, meaning Lugo can index thousands of files while consuming a fraction of the RAM used by traditional LSPs.
 * **Dynamic by Design:** Instead of forcing strict typing on a dynamic language, Lugo embraces Lua. If you do `MySQL = this` in a local file, Lugo dynamically resolves all deep table fields (e.g., `MySQL.Await.Execute`) across your entire workspace in real-time.
 * **Standalone Binary:** No NodeJS, no Java, no Lua runtimes. Just a single, blazingly fast compiled Go binary.
 
 ## Features & Capabilities
 
-* **Intelligent Autocomplete:** Resilient, context-aware member access (`table.|`), locals, and globals. Works even when the surrounding syntax tree is temporarily broken.
-* **Go to Definition & Hover:** Instant cross-file jumps. Supports LuaDoc (`@param`, `@return`, `@field`) and renders formatted function signatures.
-* **Signature Help & Inlay Hints:** Real-time parameter tooltips and inline parameter name hints with smart implicit `self` handling.
-* **Workspace Symbol Search:** Instantly search for fully qualified names (e.g., `OP.Math.Round`) across your entire workspace.
-* **Advanced Diagnostics:**
-  * Workspace-wide undefined globals (with wildcard support, e.g., `N_0x*`).
-  * Unused local variable detection (fades out unused code).
-  * Unreachable code detection.
-  * Shadowing warnings with clickable links jumping to the shadowed definition.
-  * Ambiguous return warnings (catching Lua's infamous newline evaluation trap).
+Lugo implements a comprehensive suite of modern Language Server Protocol features:
+
+* **Intelligent Autocomplete:** Resilient, context-aware member access (`table.|`), locals, globals, and keywords. Works even when the surrounding syntax tree is temporarily broken.
+* **Semantic Tokens (Rich Highlighting):** Compiler-accurate syntax highlighting. Visually distinguishes locals from globals, properties from methods, and identifies modifiers like `readonly` (`<const>`), `deprecated`, and `defaultLibrary`.
+* **Go to Definition & Hover:** Instant cross-file jumps. Fully parses LuaDoc (`@param`, `@return`, `@field`, `@class`, `@alias`, `@type`, `@generic`, `@overload`, `@see`, `@deprecated`) and renders beautifully formatted function signatures.
+* **Find References & Code Lens:** Find all usages of a symbol across your workspace. Automatically embeds clickable Code Lens reference counters directly above function definitions.
+* **Rename & Linked Editing Ranges:** Instantly rename symbols across your workspace. Supports Linked Editing for simultaneous, multi-cursor renaming of local variables as you type.
+* **Call Hierarchy:** Visually explore a tree of incoming and outgoing function calls.
+* **Document & Workspace Symbols:** Instant workspace-wide search (`Ctrl+T`) for fully qualified names (e.g., `OP.Math.Round`), and full VS Code "Outline" tree generation.
+* **Signature Help & Inlay Hints:** Real-time active-parameter tooltips and inline parameter name hints with smart implicit `self` offset calculation.
+* **Code Actions (Quick Fixes):** Fast automated fixes for common diagnostics (e.g., prefixing unused variables with `_`, or adding `local` to implicit globals).
+* **Folding Ranges:** Accurately fold functions, tables, control flow blocks, and multi-line strings/comments.
 * **Virtual Standard Library:** Click on any standard library function to open a syntax-highlighted, read-only virtual tab streaming directly from the Go server's embedded filesystem (`std:///`).
-* **Smart Ignores:** Automatically inherits VS Code's native `files.exclude` and `search.exclude` settings to instantly skip parsing ignored directories (like `node_modules` or `.git`).
+* **Fast-Path Smart Ignores:** Automatically inherits VS Code's native `files.exclude` and `search.exclude` settings. Lugo pre-compiles these into high-speed prefix/suffix byte matchers, instantly skipping ignored directories without the overhead of regex.
+
+### Advanced Diagnostics
+Lugo performs workspace-wide analysis to catch bugs before runtime:
+* **Undefined Globals:** Detects typos with wildcard ignore support (e.g., `N_0x*`).
+* **Implicit Globals:** Warns when you forget the `local` keyword inside a function.
+* **Unused Variables:** Fades out unused local variables.
+* **Shadowing:** Warns when a local shadows an outer scope or global, providing a clickable link to the shadowed definition.
+* **Unreachable Code:** Detects dead code after `return`, `break`, or `goto`.
+* **Ambiguous Returns:** Catches Lua's infamous newline evaluation trap where expressions on the next line are accidentally returned.
+* **Deprecation:** Warns when using symbols marked with `@deprecated`.
 
 ## Installation
 
@@ -52,10 +66,12 @@ You can configure Lugo via your VS Code `settings.json` (also available via the 
 
 **Diagnostics**
 * `lugo.diagnostics.undefinedGlobals`: Toggle undefined global warnings.
+* `lugo.diagnostics.implicitGlobals`: Toggle warnings for forgetting the `local` keyword.
 * `lugo.diagnostics.unusedVariables`: Toggle unused local variable detection.
 * `lugo.diagnostics.shadowing`: Toggle warnings when a local shadows an outer scope or global.
 * `lugo.diagnostics.unreachableCode`: Toggle graying out unreachable code.
 * `lugo.diagnostics.ambiguousReturns`: Toggle warnings for expressions accidentally returned due to newlines.
+* `lugo.diagnostics.deprecated`: Toggle warnings for usage of `@deprecated` symbols.
 
 **Editor**
 * `lugo.inlayHints.parameterNames`: Enable inline parameter name hints for function and method calls.

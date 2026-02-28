@@ -1,6 +1,9 @@
 *.json
 *.log
 *.exe
+*.prof
+*.out
 !vscode/package.json
+!.vscode/launch.json
 node_modules
 bin

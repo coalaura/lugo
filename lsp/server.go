@@ -11,8 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"runtime/pprof"
-	"runtime/trace"
 	"slices"
 	"strings"
 	"time"
@@ -96,7 +94,8 @@ type Server struct {
 	KnownGlobalGlobs  []string
 	IsIndexing        bool
 
-	activeURIs map[string]bool
+	activeURIs  map[string]bool
+	visitedDirs map[string]bool
 
 	IgnoreGlobs     []string
 	compiledIgnores []IgnorePattern
@@ -212,34 +211,7 @@ func (s *Server) handleMessage(req Request) {
 			}
 
 			s.IgnoreGlobs = params.InitializationOptions.IgnoreGlobs
-
-			s.compiledIgnores = make([]IgnorePattern, 0, len(s.IgnoreGlobs))
-
-			for _, g := range s.IgnoreGlobs {
-				if strings.ContainsAny(g, "?[") {
-					s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{MatchFallback: g})
-				} else if strings.HasPrefix(g, "*") && !strings.Contains(g[1:], "*") {
-					s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{HasSuffix: g[1:]})
-				} else if strings.HasSuffix(g, "*") && !strings.Contains(g[:len(g)-1], "*") {
-					s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{HasPrefix: g[:len(g)-1]})
-				} else {
-					cleanGlob := strings.TrimPrefix(strings.TrimPrefix(g, "**/"), "*/")
-					cleanGlob = strings.TrimSuffix(strings.TrimSuffix(cleanGlob, "/**"), "/*")
-
-					if cleanGlob != "" {
-						if strings.Contains(cleanGlob, "*") {
-							s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{MatchFallback: g})
-						} else {
-							cleanPath := filepath.FromSlash(cleanGlob)
-
-							s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{
-								ContainsPath: string(filepath.Separator) + cleanPath + string(filepath.Separator),
-								SuffixPath:   string(filepath.Separator) + cleanPath,
-							})
-						}
-					}
-				}
-			}
+			s.compileIgnorePatterns()
 
 			s.KnownGlobals = make(map[string]bool)
 			s.KnownGlobalGlobs = []string{}
@@ -333,21 +305,27 @@ func (s *Server) handleMessage(req Request) {
 	case "lugo/reindex":
 		s.Log.Println("Starting workspace re-index...")
 
-		cpuFile, err := os.Create("C:\\Users\\Laura\\lugo\\lugo_cpu.prof")
-		if err == nil {
-			pprof.StartCPUProfile(cpuFile)
-		}
+		/*
+			cpuFile, err := os.Create("C:\\Users\\Laura\\lugo\\lugo_cpu.prof")
+			if err == nil {
+				pprof.StartCPUProfile(cpuFile)
+			}
 
-		traceFile, err := os.Create("C:\\Users\\Laura\\lugo\\lugo_trace.out")
-		if err == nil {
-			trace.Start(traceFile)
-		}
+			traceFile, err := os.Create("C:\\Users\\Laura\\lugo\\lugo_trace.out")
+			if err == nil {
+				trace.Start(traceFile)
+			}
+		*/
 
 		s.IsIndexing = true
 
 		start := time.Now()
 
-		s.activeURIs = make(map[string]bool, len(s.Documents))
+		if s.activeURIs == nil {
+			s.activeURIs = make(map[string]bool, len(s.Documents))
+		} else {
+			clear(s.activeURIs)
+		}
 
 		var (
 			indexed   int
@@ -405,17 +383,19 @@ func (s *Server) handleMessage(req Request) {
 
 		s.Log.Printf("Published diagnostics for %d workspace files in %s\n", diagCount, took)
 
-		if traceFile != nil {
-			trace.Stop()
+		/*
+			if traceFile != nil {
+				trace.Stop()
 
-			traceFile.Close()
-		}
+				traceFile.Close()
+			}
 
-		if cpuFile != nil {
-			pprof.StopCPUProfile()
+			if cpuFile != nil {
+				pprof.StopCPUProfile()
 
-			cpuFile.Close()
-		}
+				cpuFile.Close()
+			}
+		*/
 
 		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: "ok"})
 	case "textDocument/didOpen":
@@ -2508,16 +2488,20 @@ func (s *Server) indexWorkspace(rootPathOrURI string, indexed, unchanged, failed
 		path = realPath
 	}
 
-	visited := make(map[string]bool)
+	if s.visitedDirs == nil {
+		s.visitedDirs = make(map[string]bool, 256)
+	} else {
+		clear(s.visitedDirs)
+	}
 
 	var walk func(dir string)
 
 	walk = func(dir string) {
-		if visited[dir] {
+		if s.visitedDirs[dir] {
 			return
 		}
 
-		visited[dir] = true
+		s.visitedDirs[dir] = true
 
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -2635,23 +2619,21 @@ func (s *Server) updateDocument(uri string, source []byte) {
 	rootID := p.Parse()
 
 	if len(p.Errors) > 0 {
-		doc.Errors = make([]parser.ParseError, len(p.Errors))
+		if cap(doc.Errors) >= len(p.Errors) {
+			doc.Errors = doc.Errors[:len(p.Errors)]
+		} else {
+			doc.Errors = make([]parser.ParseError, len(p.Errors))
+		}
 
 		copy(doc.Errors, p.Errors)
 	} else {
-		doc.Errors = nil
+		doc.Errors = doc.Errors[:0]
 	}
 
 	res := doc.Resolver
 
 	res.Reset()
 	res.Resolve(rootID)
-
-	for key, sym := range s.GlobalIndex {
-		if sym.URI == uri {
-			delete(s.GlobalIndex, key)
-		}
-	}
 
 	for _, defID := range res.GlobalDefs {
 		node := tree.Nodes[defID]
@@ -3534,10 +3516,11 @@ func (s *Server) buildCallHierarchyItemFromDef(uri string, doc *Document, defID 
 		}
 	}
 
-	if node.Kind == ast.KindFile {
+	switch node.Kind {
+	case ast.KindFile:
 		name = "(main)"
 		kind = SymbolKindFile
-	} else if node.Kind == ast.KindFunctionExpr {
+	case ast.KindFunctionExpr:
 		name = "(anonymous function)"
 		kind = SymbolKindFunction
 	}
@@ -3650,6 +3633,35 @@ func (s *Server) getEnclosingFunctionDef(doc *Document, id ast.NodeID) ast.NodeI
 	}
 
 	return doc.Tree.Root
+}
+
+func (s *Server) compileIgnorePatterns() {
+	s.compiledIgnores = make([]IgnorePattern, 0, len(s.IgnoreGlobs))
+
+	for _, g := range s.IgnoreGlobs {
+		cleanGlob := strings.TrimPrefix(strings.TrimPrefix(g, "**/"), "*/")
+		cleanGlob = strings.TrimSuffix(strings.TrimSuffix(cleanGlob, "/**"), "/*")
+
+		if cleanGlob == "" {
+			continue
+		}
+
+		if !strings.ContainsAny(cleanGlob, "*?[") {
+			cleanPath := filepath.FromSlash(cleanGlob)
+
+			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{
+				ContainsPath: string(filepath.Separator) + cleanPath + string(filepath.Separator),
+				SuffixPath:   string(filepath.Separator) + cleanPath,
+				HasSuffix:    cleanGlob,
+			})
+		} else if strings.HasPrefix(cleanGlob, "*") && !strings.ContainsAny(cleanGlob[1:], "*?[") {
+			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{HasSuffix: cleanGlob[1:]})
+		} else if strings.HasSuffix(cleanGlob, "*") && !strings.ContainsAny(cleanGlob[:len(cleanGlob)-1], "*?[") {
+			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{HasPrefix: cleanGlob[:len(cleanGlob)-1]})
+		} else {
+			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{MatchFallback: g})
+		}
+	}
 }
 
 func isTerminal(tree *ast.Tree, id ast.NodeID) bool {
