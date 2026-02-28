@@ -57,6 +57,7 @@ async function startClient(context) {
 		diagShadowing = config.get("diagnostics.shadowing") !== false,
 		diagUnreachableCode = config.get("diagnostics.unreachableCode") !== false,
 		diagAmbiguousReturns = config.get("diagnostics.ambiguousReturns") !== false,
+		diagDeprecated = config.get("diagnostics.deprecated") !== false,
 		inlayParamHints = config.get("inlayHints.parameterNames") !== false;
 
 	const filesConfig = vscode.workspace.getConfiguration("files"),
@@ -111,6 +112,7 @@ async function startClient(context) {
 			diagnosticsShadowing: diagShadowing,
 			diagnosticsUnreachableCode: diagUnreachableCode,
 			diagnosticsAmbiguousReturns: diagAmbiguousReturns,
+			diagnosticsDeprecated: diagDeprecated,
 			inlayHintsParameterNames: inlayParamHints,
 		},
 	};

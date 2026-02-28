@@ -20,10 +20,12 @@ type LuaDocField struct {
 }
 
 type LuaDoc struct {
-	Description string
-	Params      []LuaDocParam
-	Returns     []LuaDocReturn
-	Fields      []LuaDocField
+	Description   string
+	Params        []LuaDocParam
+	Returns       []LuaDocReturn
+	Fields        []LuaDocField
+	IsDeprecated  bool
+	DeprecatedMsg string
 }
 
 func parseLuaDoc(comments string) LuaDoc {
@@ -111,6 +113,9 @@ func parseLuaDoc(comments string) LuaDoc {
 			}
 
 			doc.Fields = append(doc.Fields, f)
+		} else if after, ok := strings.CutPrefix(line, "@deprecated"); ok {
+			doc.IsDeprecated = true
+			doc.DeprecatedMsg = strings.TrimSpace(after)
 		} else if strings.HasPrefix(line, "@class") || strings.HasPrefix(line, "@type") || strings.HasPrefix(line, "@alias") {
 			descLines = append(descLines, "*`"+line+"`*")
 		} else {

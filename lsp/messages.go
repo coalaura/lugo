@@ -38,6 +38,7 @@ type InitializationOptions struct {
 	DiagnosticsShadowing        bool `json:"diagnosticsShadowing"`
 	DiagnosticsUnreachableCode  bool `json:"diagnosticsUnreachableCode"`
 	DiagnosticsAmbiguousReturns bool `json:"diagnosticsAmbiguousReturns"`
+	DiagnosticsDeprecated       bool `json:"diagnosticsDeprecated"`
 	InlayHintsParameterNames    bool `json:"inlayHintsParameterNames"`
 }
 
@@ -174,17 +175,24 @@ type CompletionParams struct {
 type CompletionItemKind int
 
 const (
-	VariableCompletion CompletionItemKind = 6
 	FunctionCompletion CompletionItemKind = 3
 	FieldCompletion    CompletionItemKind = 5
+	VariableCompletion CompletionItemKind = 6
 	KeywordCompletion  CompletionItemKind = 14
 )
 
+type CompletionItemTag int
+
+const (
+	CompletionItemTagDeprecated CompletionItemTag = 1
+)
+
 type CompletionItem struct {
-	Label         string             `json:"label"`
-	Kind          CompletionItemKind `json:"kind"`
-	Detail        string             `json:"detail,omitempty"`
-	Documentation *MarkupContent     `json:"documentation,omitempty"`
+	Label         string              `json:"label"`
+	Kind          CompletionItemKind  `json:"kind"`
+	Detail        string              `json:"detail,omitempty"`
+	Documentation *MarkupContent      `json:"documentation,omitempty"`
+	Tags          []CompletionItemTag `json:"tags,omitempty"`
 }
 
 type CompletionList struct {

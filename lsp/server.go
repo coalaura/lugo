@@ -75,6 +75,7 @@ type Server struct {
 	DiagShadowing        bool
 	DiagUnreachableCode  bool
 	DiagAmbiguousReturns bool
+	DiagDeprecated       bool
 	InlayParamHints      bool
 }
 
@@ -187,6 +188,7 @@ func (s *Server) handleMessage(req Request) {
 			s.DiagShadowing = params.InitializationOptions.DiagnosticsShadowing
 			s.DiagUnreachableCode = params.InitializationOptions.DiagnosticsUnreachableCode
 			s.DiagAmbiguousReturns = params.InitializationOptions.DiagnosticsAmbiguousReturns
+			s.DiagDeprecated = params.InitializationOptions.DiagnosticsDeprecated
 			s.InlayParamHints = params.InitializationOptions.InlayHintsParameterNames
 		}
 
@@ -517,6 +519,16 @@ func (s *Server) handleMessage(req Request) {
 
 			var docBuilder strings.Builder
 
+			if luadoc.IsDeprecated {
+				docBuilder.WriteString("\n---\n**@deprecated**")
+
+				if luadoc.DeprecatedMsg != "" {
+					docBuilder.WriteString(" - " + luadoc.DeprecatedMsg)
+				}
+
+				docBuilder.WriteString("\n")
+			}
+
 			if luadoc.Description != "" {
 				docBuilder.WriteString("\n---\n" + luadoc.Description + "\n")
 			}
@@ -702,17 +714,24 @@ func (s *Server) handleMessage(req Request) {
 		items := make([]CompletionItem, 0, 64)
 		seen := make(map[string]bool)
 
-		addCompletion := func(label string, kind CompletionItemKind, detail string) {
+		addCompletion := func(label string, kind CompletionItemKind, detail string, isDep bool) {
 			if seen[label] {
 				return
 			}
 
 			seen[label] = true
 
+			var tags []CompletionItemTag
+
+			if isDep {
+				tags = append(tags, CompletionItemTagDeprecated)
+			}
+
 			items = append(items, CompletionItem{
 				Label:  label,
 				Kind:   kind,
 				Detail: detail,
+				Tags:   tags,
 			})
 		}
 
@@ -808,7 +827,9 @@ func (s *Server) handleMessage(req Request) {
 				if (recDef != ast.InvalidNode && fd.ReceiverDef == recDef) || (recDef == ast.InvalidNode && fd.ReceiverHash == recHash) {
 					node := doc.Tree.Nodes[fd.NodeID]
 
-					addCompletion(string(doc.Source[node.Start:node.End]), FieldCompletion, "field")
+					isDep, _ := doc.HasDeprecatedTag(fd.NodeID)
+
+					addCompletion(string(doc.Source[node.Start:node.End]), FieldCompletion, "field", isDep)
 				}
 			}
 
@@ -827,13 +848,17 @@ func (s *Server) handleMessage(req Request) {
 					if symDoc, ok := s.Documents[sym.URI]; ok {
 						node := symDoc.Tree.Nodes[sym.NodeID]
 
-						addCompletion(string(symDoc.Source[node.Start:node.End]), FieldCompletion, "field")
+						isDep, _ := symDoc.HasDeprecatedTag(sym.NodeID)
+
+						addCompletion(string(symDoc.Source[node.Start:node.End]), FieldCompletion, "field", isDep)
 					}
 				}
 			}
 		} else {
 			doc.GetLocalsAt(offset, func(name []byte, defID ast.NodeID) bool {
-				addCompletion(string(name), VariableCompletion, "local")
+				isDep, _ := doc.HasDeprecatedTag(defID)
+
+				addCompletion(string(name), VariableCompletion, "local", isDep)
 
 				return true
 			})
@@ -852,14 +877,16 @@ func (s *Server) handleMessage(req Request) {
 								kind = FunctionCompletion
 							}
 
-							addCompletion(string(symDoc.Source[node.Start:node.End]), kind, "global")
+							isDep, _ := symDoc.HasDeprecatedTag(sym.NodeID)
+
+							addCompletion(string(symDoc.Source[node.Start:node.End]), kind, "global", isDep)
 						}
 					}
 				}
 			}
 
 			for _, kw := range luaKeywords {
-				addCompletion(kw, KeywordCompletion, "keyword")
+				addCompletion(kw, KeywordCompletion, "keyword", false)
 			}
 		}
 
@@ -2080,6 +2107,41 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 	}
 
+	if s.DiagDeprecated {
+		for i := 1; i < len(doc.Tree.Nodes); i++ {
+			node := doc.Tree.Nodes[i]
+
+			if node.Kind != ast.KindIdent {
+				continue
+			}
+
+			ctx := s.resolveSymbolNode(uri, doc, ast.NodeID(i))
+			if ctx != nil && ctx.TargetDefID != ast.InvalidNode && ctx.TargetDefID != ast.NodeID(i) {
+				isDep, msg := ctx.TargetDoc.HasDeprecatedTag(ctx.TargetDefID)
+				if isDep {
+					startLine, startCol := doc.Tree.Position(node.Start)
+					endLine, endCol := doc.Tree.Position(node.End)
+
+					diagMsg := "Use of deprecated symbol '" + ctx.DisplayName + "'"
+
+					if msg != "" {
+						diagMsg += ": " + msg
+					}
+
+					diagnostics = append(diagnostics, Diagnostic{
+						Range: Range{
+							Start: Position{Line: startLine, Character: startCol},
+							End:   Position{Line: endLine, Character: endCol},
+						},
+						Severity: SeverityHint,
+						Tags:     []DiagnosticTag{Deprecated},
+						Message:  diagMsg,
+					})
+				}
+			}
+		}
+	}
+
 	if diagnostics == nil {
 		diagnostics = []Diagnostic{}
 	}
@@ -2101,6 +2163,11 @@ func (s *Server) resolveSymbolAt(uri string, offset uint32) *SymbolContext {
 	}
 
 	nodeID := doc.Tree.NodeAt(offset)
+
+	return s.resolveSymbolNode(uri, doc, nodeID)
+}
+
+func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID) *SymbolContext {
 	if nodeID == ast.InvalidNode || doc.Tree.Nodes[nodeID].Kind != ast.KindIdent {
 		return nil
 	}

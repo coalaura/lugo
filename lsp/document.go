@@ -134,6 +134,25 @@ func (doc *Document) getFunctionParams(funcExprID ast.NodeID, luadoc LuaDoc) str
 	return strings.Join(params, ", ")
 }
 
+func (doc *Document) findCommentIndex(offset uint32) int {
+	var (
+		low  int
+		high = len(doc.Tree.Comments)
+	)
+
+	for low < high {
+		mid := int(uint(low+high) >> 1)
+
+		if doc.Tree.Comments[mid].End <= offset {
+			low = mid + 1
+		} else {
+			high = mid
+		}
+	}
+
+	return low - 1
+}
+
 func (doc *Document) getCommentsAbove(id ast.NodeID) string {
 	if id == ast.InvalidNode {
 		return ""
@@ -161,11 +180,10 @@ func (doc *Document) getCommentsAbove(id ast.NodeID) string {
 
 	var comments []string
 
-	for i := len(doc.Tree.Comments) - 1; i >= 0; i-- {
+	idx := doc.findCommentIndex(stmtStart)
+
+	for i := idx; i >= 0; i-- {
 		c := doc.Tree.Comments[i]
-		if c.End > stmtStart {
-			continue
-		}
 
 		cStartLine, _ := doc.Tree.Position(c.Start)
 		cEndLine, _ := doc.Tree.Position(c.End)
@@ -303,7 +321,9 @@ func (doc *Document) ExtractLuaDocFields(id ast.NodeID, yield func(name []byte))
 
 	fieldToken := []byte("@field")
 
-	for i := len(doc.Tree.Comments) - 1; i >= 0; i-- {
+	idx := doc.findCommentIndex(stmtStart)
+
+	for i := idx; i >= 0; i-- {
 		c := doc.Tree.Comments[i]
 		if c.End > stmtStart {
 			continue
@@ -365,6 +385,68 @@ func (doc *Document) ExtractLuaDocFields(id ast.NodeID, yield func(name []byte))
 			break
 		}
 	}
+}
+
+// HasDeprecatedTag performs a fast, zero-allocation byte scan for @deprecated comments directly above a node.
+func (doc *Document) HasDeprecatedTag(id ast.NodeID) (bool, string) {
+	if id == ast.InvalidNode {
+		return false, ""
+	}
+
+	stmtID := id
+
+	for {
+		parentID := doc.Tree.Nodes[stmtID].Parent
+		if parentID == ast.InvalidNode {
+			break
+		}
+
+		pKind := doc.Tree.Nodes[parentID].Kind
+		if pKind == ast.KindBlock || pKind == ast.KindFile || pKind == ast.KindTableExpr {
+			break
+		}
+
+		stmtID = parentID
+	}
+
+	stmtStart := doc.Tree.Nodes[stmtID].Start
+	stmtLine, _ := doc.Tree.Position(stmtStart)
+	targetLine := stmtLine - 1
+
+	depToken := []byte("@deprecated")
+
+	idx := doc.findCommentIndex(stmtStart)
+
+	for i := idx; i >= 0; i-- {
+		c := doc.Tree.Comments[i]
+
+		cStartLine, _ := doc.Tree.Position(c.Start)
+		cEndLine, _ := doc.Tree.Position(c.End)
+
+		if cEndLine == targetLine || cEndLine == stmtLine {
+			raw := doc.Source[c.Start:c.End]
+
+			foundIdx := bytes.Index(raw, depToken)
+			if foundIdx != -1 {
+				rest := raw[foundIdx+len(depToken):]
+
+				endIdx := bytes.IndexByte(rest, '\n')
+				if endIdx == -1 {
+					endIdx = len(rest)
+				}
+
+				msg := cleanLuaComment(string(rest[:endIdx]))
+
+				return true, msg
+			}
+
+			targetLine = cStartLine - 1
+		} else if cEndLine < targetLine {
+			break
+		}
+	}
+
+	return false, ""
 }
 
 func cleanLuaComment(raw string) string {

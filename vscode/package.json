@@ -98,11 +98,17 @@
                     "description": "Enable diagnostics for ambiguous returns where an expression on the next line is accidentally returned.",
                     "order": 9
                 },
+                "lugo.diagnostics.deprecated": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable diagnostics for usage of @deprecated symbols.",
+                    "order": 10
+                },
                 "lugo.inlayHints.parameterNames": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable inline parameter name hints for function and method calls.",
-                    "order": 10
+                    "order": 11
                 }
             }
         }
