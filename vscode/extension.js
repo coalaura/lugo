@@ -52,6 +52,7 @@ async function startClient(context) {
 		knownGlobals = config.get("environment.knownGlobals") || [];
 
 	const diagUndefinedGlobals = config.get("diagnostics.undefinedGlobals") !== false,
+		diagImplicitGlobals = config.get("diagnostics.implicitGlobals") !== false,
 		diagUnusedVariables = config.get("diagnostics.unusedVariables") !== false,
 		diagShadowing = config.get("diagnostics.shadowing") !== false,
 		diagUnreachableCode = config.get("diagnostics.unreachableCode") !== false,
@@ -105,6 +106,7 @@ async function startClient(context) {
 			ignoreGlobs: ignoreGlobs,
 
 			diagnosticsUndefinedGlobals: diagUndefinedGlobals,
+			diagnosticsImplicitGlobals: diagImplicitGlobals,
 			diagnosticsUnusedVariables: diagUnusedVariables,
 			diagnosticsShadowing: diagShadowing,
 			diagnosticsUnreachableCode: diagUnreachableCode,

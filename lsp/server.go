@@ -70,6 +70,7 @@ type Server struct {
 	IsIndexing        bool
 
 	DiagUndefinedGlobals bool
+	DiagImplicitGlobals  bool
 	DiagUnusedVariables  bool
 	DiagShadowing        bool
 	DiagUnreachableCode  bool
@@ -181,6 +182,7 @@ func (s *Server) handleMessage(req Request) {
 			}
 
 			s.DiagUndefinedGlobals = params.InitializationOptions.DiagnosticsUndefinedGlobals
+			s.DiagImplicitGlobals = params.InitializationOptions.DiagnosticsImplicitGlobals
 			s.DiagUnusedVariables = params.InitializationOptions.DiagnosticsUnusedVariables
 			s.DiagShadowing = params.InitializationOptions.DiagnosticsShadowing
 			s.DiagUnreachableCode = params.InitializationOptions.DiagnosticsUnreachableCode
@@ -1852,7 +1854,7 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 	}
 
-	if s.DiagUndefinedGlobals {
+	if s.DiagImplicitGlobals {
 		for _, defID := range doc.Resolver.GlobalDefs {
 			node := doc.Tree.Nodes[defID]
 

@@ -33,6 +33,7 @@ type InitializationOptions struct {
 	IgnoreGlobs  []string `json:"ignoreGlobs,omitempty"`
 
 	DiagnosticsUndefinedGlobals bool `json:"diagnosticsUndefinedGlobals"`
+	DiagnosticsImplicitGlobals  bool `json:"diagnosticsImplicitGlobals"`
 	DiagnosticsUnusedVariables  bool `json:"diagnosticsUnusedVariables"`
 	DiagnosticsShadowing        bool `json:"diagnosticsShadowing"`
 	DiagnosticsUnreachableCode  bool `json:"diagnosticsUnreachableCode"`

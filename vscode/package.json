@@ -68,35 +68,41 @@
                     "description": "Enable diagnostics for undefined global variables.",
                     "order": 4
                 },
+                "lugo.diagnostics.implicitGlobals": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable diagnostics for implicit global variable creation (e.g., forgetting the 'local' keyword inside a function).",
+                    "order": 5
+                },
                 "lugo.diagnostics.unusedVariables": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable diagnostics for unused local variables.",
-                    "order": 5
+                    "order": 6
                 },
                 "lugo.diagnostics.shadowing": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable diagnostics when a local variable shadows a global or outer local.",
-                    "order": 6
+                    "order": 7
                 },
                 "lugo.diagnostics.unreachableCode": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable diagnostics for unreachable code (e.g. after a return or break).",
-                    "order": 7
+                    "order": 8
                 },
                 "lugo.diagnostics.ambiguousReturns": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable diagnostics for ambiguous returns where an expression on the next line is accidentally returned.",
-                    "order": 8
+                    "order": 9
                 },
                 "lugo.inlayHints.parameterNames": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable inline parameter name hints for function and method calls.",
-                    "order": 9
+                    "order": 10
                 }
             }
         }
