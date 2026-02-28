@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/url"
@@ -202,6 +203,9 @@ func (s *Server) handleMessage(req Request) {
 				WorkspaceSymbolProvider: true,
 				InlayHintProvider:       true,
 				CodeActionProvider:      true,
+				CodeLensProvider: &CodeLensOptions{
+					ResolveProvider: true,
+				},
 				SignatureHelpProvider: &SignatureHelpOptions{
 					TriggerCharacters: []string{"(", ","},
 				},
@@ -720,85 +724,145 @@ func (s *Server) handleMessage(req Request) {
 		ctx := s.resolveSymbolAt(uri, offset)
 
 		if ctx == nil {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []Location{}})
 
 			return
 		}
 
-		var locations []Location
-
-		addRef := func(dDoc *Document, dUri string, nodeID ast.NodeID) {
-			if !params.Context.IncludeDeclaration && dUri == ctx.TargetURI && nodeID == ctx.TargetDefID {
-				return
-			}
-
-			node := dDoc.Tree.Nodes[nodeID]
-
-			startLine, startCol := dDoc.Tree.Position(node.Start)
-			endLine, endCol := dDoc.Tree.Position(node.End)
-
-			locations = append(locations, Location{
-				URI: dUri,
-				Range: Range{
-					Start: Position{Line: startLine, Character: startCol},
-					End:   Position{Line: endLine, Character: endCol},
-				},
-			})
-		}
-
-		if !ctx.IsGlobal && ctx.TargetDefID != ast.InvalidNode {
-			for i, def := range ctx.TargetDoc.Resolver.References {
-				if def == ctx.TargetDefID {
-					addRef(ctx.TargetDoc, ctx.TargetURI, ast.NodeID(i))
-				}
-			}
-		} else {
-			for dUri, dDoc := range s.Documents {
-				if ctx.GKey.ReceiverHash == 0 {
-					for _, id := range dDoc.Resolver.GlobalDefs {
-						node := dDoc.Tree.Nodes[id]
-
-						if ast.HashBytes(dDoc.Source[node.Start:node.End]) == ctx.GKey.PropHash {
-							addRef(dDoc, dUri, id)
-						}
-					}
-
-					for _, id := range dDoc.Resolver.GlobalRefs {
-						node := dDoc.Tree.Nodes[id]
-
-						if ast.HashBytes(dDoc.Source[node.Start:node.End]) == ctx.GKey.PropHash {
-							if dDoc.Resolver.References[id] == ast.InvalidNode {
-								addRef(dDoc, dUri, id)
-							}
-						}
-					}
-				} else {
-					for _, fd := range dDoc.Resolver.FieldDefs {
-						if fd.ReceiverHash == ctx.GKey.ReceiverHash && fd.PropHash == ctx.GKey.PropHash {
-							addRef(dDoc, dUri, fd.NodeID)
-						}
-					}
-
-					for _, pf := range dDoc.Resolver.PendingFields {
-						if pf.ReceiverHash == ctx.GKey.ReceiverHash && pf.PropHash == ctx.GKey.PropHash {
-							if dDoc.Resolver.References[pf.PropNodeID] == ast.InvalidNode {
-								addRef(dDoc, dUri, pf.PropNodeID)
-							}
-						}
-					}
-				}
-			}
-		}
-
-		if locations == nil {
-			locations = []Location{}
-		}
+		locations := s.getReferences(ctx, params.Context.IncludeDeclaration)
 
 		WriteMessage(s.Writer, Response{
 			RPC:    "2.0",
 			ID:     req.ID,
 			Result: locations,
 		})
+	case "textDocument/codeLens":
+		var params CodeLensParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		var lenses []CodeLens
+
+		for i := 1; i < len(doc.Tree.Nodes); i++ {
+			node := doc.Tree.Nodes[i]
+
+			if node.Kind == ast.KindLocalFunction || node.Kind == ast.KindFunctionStmt {
+				identNodeID := node.Left
+
+				for {
+					n := doc.Tree.Nodes[identNodeID]
+
+					if n.Kind == ast.KindMethodName || n.Kind == ast.KindMemberExpr {
+						identNodeID = n.Right
+					} else {
+						break
+					}
+				}
+
+				if doc.Tree.Nodes[identNodeID].Kind != ast.KindIdent {
+					continue
+				}
+
+				identNode := doc.Tree.Nodes[identNodeID]
+
+				startLine, startCol := doc.Tree.Position(identNode.Start)
+				endLine, endCol := doc.Tree.Position(identNode.End)
+
+				lenses = append(lenses, CodeLens{
+					Range: Range{
+						Start: Position{Line: startLine, Character: startCol},
+						End:   Position{Line: endLine, Character: endCol},
+					},
+					Data: map[string]any{
+						"uri":    uri,
+						"nodeId": identNodeID,
+					},
+				})
+			}
+		}
+
+		if lenses == nil {
+			lenses = []CodeLens{}
+		}
+
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: lenses})
+	case "codeLens/resolve":
+		var codeLens CodeLens
+
+		err := json.Unmarshal(req.Params, &codeLens)
+		if err != nil {
+			return
+		}
+
+		data, ok := codeLens.Data.(map[string]any)
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: codeLens})
+
+			return
+		}
+
+		uri, _ := data["uri"].(string)
+		nodeIDFloat, _ := data["nodeId"].(float64)
+		nodeID := ast.NodeID(nodeIDFloat)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: codeLens})
+
+			return
+		}
+
+		identNode := doc.Tree.Nodes[nodeID]
+
+		ctx := s.resolveSymbolAt(uri, identNode.Start)
+		if ctx == nil {
+			codeLens.Command = &Command{Title: "0 references", Command: ""}
+
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: codeLens})
+
+			return
+		}
+
+		locations := s.getReferences(ctx, false)
+		count := len(locations)
+
+		var title string
+
+		if count == 1 {
+			title = "1 reference"
+		} else {
+			title = fmt.Sprintf("%d references", count)
+		}
+
+		var (
+			cmd  string
+			args []any
+		)
+
+		if count > 0 {
+			cmd = "lugo.showReferences"
+			args = []any{uri, codeLens.Range.Start, locations}
+		}
+
+		codeLens.Command = &Command{
+			Title:     title,
+			Command:   cmd,
+			Arguments: args,
+		}
+
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: codeLens})
 	case "textDocument/completion":
 		var params CompletionParams
 
@@ -1821,6 +1885,7 @@ func (s *Server) updateDocument(uri string, source []byte) {
 	if existing, exists := s.Documents[uri]; exists {
 		doc = existing
 		doc.Source = source
+		doc.ExportedGlobals = make(map[ast.NodeID]GlobalKey)
 
 		tree = existing.Tree
 		tree.Reset(source)
@@ -1828,9 +1893,10 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		tree = ast.NewTree(source)
 
 		doc = &Document{
-			Source:   source,
-			Tree:     tree,
-			Resolver: semantic.New(tree),
+			Source:          source,
+			Tree:            tree,
+			Resolver:        semantic.New(tree),
+			ExportedGlobals: make(map[ast.NodeID]GlobalKey),
 		}
 
 		s.Documents[uri] = doc
@@ -2320,7 +2386,7 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 		} else {
 			gKey = GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes(identBytes)}
 
-			if defID == ast.InvalidNode && (pNode.Kind == ast.KindNameList || pNode.Kind == ast.KindFunctionExpr || pNode.Kind == ast.KindForNum || pNode.Kind == ast.KindLocalFunction) {
+			if defID == ast.InvalidNode && (pNode.Kind == ast.KindNameList || pNode.Kind == ast.KindFunctionExpr || pNode.Kind == ast.KindForNum || pNode.Kind == ast.KindLocalFunction || pNode.Kind == ast.KindFunctionStmt) {
 				defID = nodeID
 			}
 		}
@@ -2328,19 +2394,28 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 		gKey = GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes(identBytes)}
 	}
 
+	isGlobal := defID == ast.InvalidNode || (isProp && gKey.ReceiverHash != 0)
+
 	ctx := &SymbolContext{
 		IdentNodeID: nodeID,
 		IdentName:   identName,
 		DisplayName: displayName,
 		IsProp:      isProp,
 		GKey:        gKey,
-		IsGlobal:    defID == ast.InvalidNode,
+		IsGlobal:    isGlobal,
 	}
 
 	if defID != ast.InvalidNode {
 		ctx.TargetDoc = doc
 		ctx.TargetDefID = defID
 		ctx.TargetURI = uri
+
+		if !ctx.IsGlobal && ctx.TargetDoc != nil && ctx.TargetDoc.ExportedGlobals != nil {
+			if gKey, exported := ctx.TargetDoc.ExportedGlobals[defID]; exported {
+				ctx.IsGlobal = true
+				ctx.GKey = gKey
+			}
+		}
 	} else if gKey.PropHash != 0 {
 		if gSym, ok := s.getGlobalSymbol(gKey.ReceiverHash, gKey.PropHash); ok {
 			if gDoc, docOk := s.Documents[gSym.URI]; docOk {
@@ -2352,6 +2427,79 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 	}
 
 	return ctx
+}
+
+func (s *Server) getReferences(ctx *SymbolContext, includeDeclaration bool) []Location {
+	var locations []Location
+
+	addRef := func(dDoc *Document, dUri string, nodeID ast.NodeID) {
+		if !includeDeclaration && dUri == ctx.TargetURI && nodeID == ctx.TargetDefID {
+			return
+		}
+
+		node := dDoc.Tree.Nodes[nodeID]
+
+		startLine, startCol := dDoc.Tree.Position(node.Start)
+		endLine, endCol := dDoc.Tree.Position(node.End)
+
+		locations = append(locations, Location{
+			URI: dUri,
+			Range: Range{
+				Start: Position{Line: startLine, Character: startCol},
+				End:   Position{Line: endLine, Character: endCol},
+			},
+		})
+	}
+
+	if !ctx.IsGlobal && ctx.TargetDefID != ast.InvalidNode {
+		for i, def := range ctx.TargetDoc.Resolver.References {
+			if def == ctx.TargetDefID {
+				addRef(ctx.TargetDoc, ctx.TargetURI, ast.NodeID(i))
+			}
+		}
+	} else {
+		for dUri, dDoc := range s.Documents {
+			if ctx.GKey.ReceiverHash == 0 {
+				for _, id := range dDoc.Resolver.GlobalDefs {
+					node := dDoc.Tree.Nodes[id]
+
+					if ast.HashBytes(dDoc.Source[node.Start:node.End]) == ctx.GKey.PropHash {
+						addRef(dDoc, dUri, id)
+					}
+				}
+
+				for _, id := range dDoc.Resolver.GlobalRefs {
+					node := dDoc.Tree.Nodes[id]
+
+					if ast.HashBytes(dDoc.Source[node.Start:node.End]) == ctx.GKey.PropHash {
+						if dDoc.Resolver.References[id] == ast.InvalidNode {
+							addRef(dDoc, dUri, id)
+						}
+					}
+				}
+			} else {
+				for _, fd := range dDoc.Resolver.FieldDefs {
+					if fd.ReceiverHash == ctx.GKey.ReceiverHash && fd.PropHash == ctx.GKey.PropHash {
+						addRef(dDoc, dUri, fd.NodeID)
+					}
+				}
+
+				for _, pf := range dDoc.Resolver.PendingFields {
+					if pf.ReceiverHash == ctx.GKey.ReceiverHash && pf.PropHash == ctx.GKey.PropHash {
+						if dDoc.Resolver.References[pf.PropNodeID] == ast.InvalidNode {
+							addRef(dDoc, dUri, pf.PropNodeID)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if locations == nil {
+		locations = []Location{}
+	}
+
+	return locations
 }
 
 func (s *Server) getGlobalAlias(hash uint64) uint64 {
@@ -2419,6 +2567,14 @@ func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, d
 		NodeID: nodeID,
 		Depth:  depth,
 		Name:   name,
+	}
+
+	if doc, ok := s.Documents[uri]; ok {
+		if doc.ExportedGlobals == nil {
+			doc.ExportedGlobals = make(map[ast.NodeID]GlobalKey)
+		}
+
+		doc.ExportedGlobals[nodeID] = key
 	}
 }
 

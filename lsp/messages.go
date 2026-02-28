@@ -56,6 +56,7 @@ type ServerCapabilities struct {
 	WorkspaceSymbolProvider bool                  `json:"workspaceSymbolProvider"`
 	InlayHintProvider       bool                  `json:"inlayHintProvider"`
 	CodeActionProvider      bool                  `json:"codeActionProvider"`
+	CodeLensProvider        *CodeLensOptions      `json:"codeLensProvider,omitempty"`
 	SignatureHelpProvider   *SignatureHelpOptions `json:"signatureHelpProvider,omitempty"`
 	CompletionProvider      *CompletionOptions    `json:"completionProvider,omitempty"`
 }
@@ -330,4 +331,24 @@ type CodeAction struct {
 	Diagnostics []Diagnostic   `json:"diagnostics,omitempty"`
 	Edit        *WorkspaceEdit `json:"edit,omitempty"`
 	IsPreferred bool           `json:"isPreferred,omitempty"`
+}
+
+type CodeLensOptions struct {
+	ResolveProvider bool `json:"resolveProvider,omitempty"`
+}
+
+type CodeLensParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+type CodeLens struct {
+	Range   Range    `json:"range"`
+	Command *Command `json:"command,omitempty"`
+	Data    any      `json:"data,omitempty"`
+}
+
+type Command struct {
+	Title     string `json:"title"`
+	Command   string `json:"command"`
+	Arguments []any  `json:"arguments,omitempty"`
 }

@@ -44,6 +44,20 @@ async function activate(context) {
 			triggerReindex();
 		})
 	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand("lugo.showReferences", (uriStr, position, locations) => {
+			const uri = vscode.Uri.parse(uriStr),
+				pos = new vscode.Position(position.line, position.character);
+
+			const locs = locations.map(
+				loc =>
+					new vscode.Location(vscode.Uri.parse(loc.uri), new vscode.Range(loc.range.start.line, loc.range.start.character, loc.range.end.line, loc.range.end.character))
+			);
+
+			vscode.commands.executeCommand("editor.action.showReferences", uri, pos, locs);
+		})
+	);
 }
 
 async function startClient(context) {
