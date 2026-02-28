@@ -7,14 +7,14 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/pprof"
+	"runtime/trace"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/coalaura/lugo/ast"
@@ -72,23 +72,12 @@ type SemanticToken struct {
 	Modifiers uint32
 }
 
-type IndexJob struct {
-	Path  string
-	URI   string
-	IsStd bool
-}
-
-type IndexResult struct {
-	URI       string
-	Doc       *Document
-	Err       error
-	Unchanged bool
-}
-
 type IgnorePattern struct {
-	Match    string
-	Contains string
-	Suffix   string
+	MatchFallback string
+	HasSuffix     string
+	HasPrefix     string
+	ContainsPath  string
+	SuffixPath    string
 }
 
 type Server struct {
@@ -227,19 +216,27 @@ func (s *Server) handleMessage(req Request) {
 			s.compiledIgnores = make([]IgnorePattern, 0, len(s.IgnoreGlobs))
 
 			for _, g := range s.IgnoreGlobs {
-				if strings.ContainsAny(g, "*?[") {
-					s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{Match: g})
+				if strings.ContainsAny(g, "?[") {
+					s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{MatchFallback: g})
+				} else if strings.HasPrefix(g, "*") && !strings.Contains(g[1:], "*") {
+					s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{HasSuffix: g[1:]})
+				} else if strings.HasSuffix(g, "*") && !strings.Contains(g[:len(g)-1], "*") {
+					s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{HasPrefix: g[:len(g)-1]})
 				} else {
 					cleanGlob := strings.TrimPrefix(strings.TrimPrefix(g, "**/"), "*/")
 					cleanGlob = strings.TrimSuffix(strings.TrimSuffix(cleanGlob, "/**"), "/*")
 
 					if cleanGlob != "" {
-						cleanPath := filepath.FromSlash(cleanGlob)
+						if strings.Contains(cleanGlob, "*") {
+							s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{MatchFallback: g})
+						} else {
+							cleanPath := filepath.FromSlash(cleanGlob)
 
-						s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{
-							Contains: string(filepath.Separator) + cleanPath + string(filepath.Separator),
-							Suffix:   string(filepath.Separator) + cleanPath,
-						})
+							s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{
+								ContainsPath: string(filepath.Separator) + cleanPath + string(filepath.Separator),
+								SuffixPath:   string(filepath.Separator) + cleanPath,
+							})
+						}
 					}
 				}
 			}
@@ -336,117 +333,21 @@ func (s *Server) handleMessage(req Request) {
 	case "lugo/reindex":
 		s.Log.Println("Starting workspace re-index...")
 
+		cpuFile, err := os.Create("C:\\Users\\Laura\\lugo\\lugo_cpu.prof")
+		if err == nil {
+			pprof.StartCPUProfile(cpuFile)
+		}
+
+		traceFile, err := os.Create("C:\\Users\\Laura\\lugo\\lugo_trace.out")
+		if err == nil {
+			trace.Start(traceFile)
+		}
+
 		s.IsIndexing = true
 
 		start := time.Now()
 
 		s.activeURIs = make(map[string]bool, len(s.Documents))
-
-		existingDocs := make(map[string]*Document, len(s.Documents))
-		maps.Copy(existingDocs, s.Documents)
-
-		jobs := make(chan IndexJob, 1024)
-		results := make(chan IndexResult, 1024)
-
-		numWorkers := runtime.GOMAXPROCS(0)
-
-		var wg sync.WaitGroup
-
-		for range numWorkers {
-			wg.Go(func() {
-				p := parser.New(nil, nil)
-
-				for job := range jobs {
-					var (
-						b   []byte
-						err error
-					)
-
-					if job.IsStd {
-						filename := job.URI[7:]
-
-						b, err = stdlibFS.ReadFile("stdlib/" + filename)
-					} else {
-						b, err = os.ReadFile(job.Path)
-					}
-
-					if err != nil {
-						results <- IndexResult{URI: job.URI, Err: err}
-
-						continue
-					}
-
-					oldDoc := existingDocs[job.URI]
-
-					if oldDoc != nil && bytes.Equal(oldDoc.Source, b) {
-						results <- IndexResult{URI: job.URI, Unchanged: true}
-
-						continue
-					}
-
-					var (
-						doc  *Document
-						tree *ast.Tree
-					)
-
-					if oldDoc != nil {
-						doc = oldDoc
-						doc.Source = b
-
-						tree = oldDoc.Tree
-						tree.Reset(b)
-					} else {
-						tree = ast.NewTree(b)
-
-						doc = &Document{
-							Source:          b,
-							Tree:            tree,
-							Resolver:        semantic.New(tree),
-							ExportedGlobals: make(map[ast.NodeID]GlobalKey),
-						}
-					}
-
-					p.Reset(b, tree)
-
-					rootID := p.Parse()
-
-					if len(p.Errors) > 0 {
-						doc.Errors = make([]parser.ParseError, len(p.Errors))
-
-						copy(doc.Errors, p.Errors)
-					}
-
-					doc.Resolver.Reset()
-					doc.Resolver.Resolve(rootID)
-
-					results <- IndexResult{URI: job.URI, Doc: doc}
-				}
-			})
-		}
-
-		go func() {
-			entries, _ := stdlibFS.ReadDir("stdlib")
-
-			for _, e := range entries {
-				if strings.HasSuffix(e.Name(), ".lua") {
-					jobs <- IndexJob{URI: "std:///" + e.Name(), IsStd: true}
-				}
-			}
-
-			for _, libPath := range s.LibraryPaths {
-				s.queueWorkspace(libPath, jobs)
-			}
-
-			if s.RootURI != "" {
-				s.queueWorkspace(s.RootURI, jobs)
-			}
-
-			close(jobs)
-
-			wg.Wait()
-
-			close(results)
-		}()
 
 		var (
 			indexed   int
@@ -454,34 +355,28 @@ func (s *Server) handleMessage(req Request) {
 			failed    int
 		)
 
-		for res := range results {
-			s.activeURIs[res.URI] = true
+		s.indexEmbeddedStdlib(&indexed, &unchanged)
 
-			if res.Err != nil {
-				failed++
+		for _, libPath := range s.LibraryPaths {
+			s.Log.Printf("Indexing external library: %s\n", libPath)
 
-				continue
-			}
+			s.indexWorkspace(libPath, &indexed, &unchanged, &failed)
+		}
 
-			if res.Unchanged {
-				unchanged++
+		if s.RootURI != "" {
+			s.Log.Printf("Indexing workspace: %s\n", s.RootURI)
 
-				continue
-			}
-
-			s.applyDocument(res.URI, res.Doc)
-
-			indexed++
+			s.indexWorkspace(s.RootURI, &indexed, &unchanged, &failed)
 		}
 
 		for uri := range s.Documents {
-			if !s.activeURIs[uri] && !s.OpenFiles[uri] && !strings.HasPrefix(uri, "std:///") {
+			if !s.activeURIs[uri] && !s.OpenFiles[uri] {
 				s.clearDocument(uri)
 			}
 		}
 
 		for uri, doc := range s.Documents {
-			if s.OpenFiles[uri] && !s.activeURIs[uri] && !strings.HasPrefix(uri, "std:///") {
+			if s.OpenFiles[uri] && !s.activeURIs[uri] {
 				s.updateDocument(uri, doc.Source)
 			}
 		}
@@ -509,6 +404,18 @@ func (s *Server) handleMessage(req Request) {
 		took = time.Since(start)
 
 		s.Log.Printf("Published diagnostics for %d workspace files in %s\n", diagCount, took)
+
+		if traceFile != nil {
+			trace.Stop()
+
+			traceFile.Close()
+		}
+
+		if cpuFile != nil {
+			pprof.StopCPUProfile()
+
+			cpuFile.Close()
+		}
 
 		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: "ok"})
 	case "textDocument/didOpen":
@@ -2575,14 +2482,19 @@ func (s *Server) handleMessage(req Request) {
 	}
 }
 
-func (s *Server) queueWorkspace(rootPathOrURI string, jobs chan<- IndexJob) {
+func (s *Server) indexWorkspace(rootPathOrURI string, indexed, unchanged, failed *int) {
 	var path string
+
 	if strings.HasPrefix(rootPathOrURI, "file://") {
 		u, err := url.Parse(rootPathOrURI)
 		if err != nil {
+			s.Log.Errorf("Invalid workspace URI format: %s\n", rootPathOrURI)
+
 			return
 		}
+
 		path = u.Path
+
 		if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") {
 			path = path[1:]
 		}
@@ -2591,6 +2503,7 @@ func (s *Server) queueWorkspace(rootPathOrURI string, jobs chan<- IndexJob) {
 	}
 
 	path = strings.ReplaceAll(path, "/", string(filepath.Separator))
+
 	if realPath, err := filepath.EvalSymlinks(path); err == nil {
 		path = realPath
 	}
@@ -2598,10 +2511,12 @@ func (s *Server) queueWorkspace(rootPathOrURI string, jobs chan<- IndexJob) {
 	visited := make(map[string]bool)
 
 	var walk func(dir string)
+
 	walk = func(dir string) {
 		if visited[dir] {
 			return
 		}
+
 		visited[dir] = true
 
 		entries, err := os.ReadDir(dir)
@@ -2611,6 +2526,7 @@ func (s *Server) queueWorkspace(rootPathOrURI string, jobs chan<- IndexJob) {
 
 		for _, e := range entries {
 			fullPath := filepath.Join(dir, e.Name())
+
 			isDir := e.IsDir()
 			name := e.Name()
 
@@ -2618,6 +2534,7 @@ func (s *Server) queueWorkspace(rootPathOrURI string, jobs chan<- IndexJob) {
 				continue
 			}
 
+			// Check if its a symlink
 			if e.Type()&fs.ModeSymlink != 0 {
 				realPath, err := filepath.EvalSymlinks(fullPath)
 				if err == nil {
@@ -2625,12 +2542,17 @@ func (s *Server) queueWorkspace(rootPathOrURI string, jobs chan<- IndexJob) {
 					if err == nil {
 						isDir = stat.IsDir()
 						name = stat.Name()
+
 						fullPath = realPath
 					} else {
+						*failed++
+
 						continue
 					}
 				} else {
-					continue
+					*failed++
+
+					continue // Broken symlink
 				}
 			}
 
@@ -2638,10 +2560,31 @@ func (s *Server) queueWorkspace(rootPathOrURI string, jobs chan<- IndexJob) {
 				walk(fullPath)
 			} else if strings.HasSuffix(name, ".lua") {
 				uri := s.pathToURI(fullPath)
+
 				if runtime.GOOS == "windows" {
 					uri = strings.ToLower(uri)
 				}
-				jobs <- IndexJob{Path: fullPath, URI: uri, IsStd: false}
+
+				b, fsErr := os.ReadFile(fullPath)
+				if fsErr == nil {
+					if existing, ok := s.Documents[uri]; ok && bytes.Equal(existing.Source, b) {
+						s.activeURIs[uri] = true
+
+						*unchanged++
+
+						continue
+					}
+
+					s.updateDocument(uri, b)
+
+					if s.activeURIs != nil {
+						s.activeURIs[uri] = true
+					}
+
+					*indexed++
+				} else {
+					*failed++
+				}
 			}
 		}
 	}
@@ -2649,27 +2592,72 @@ func (s *Server) queueWorkspace(rootPathOrURI string, jobs chan<- IndexJob) {
 	walk(path)
 }
 
-func (s *Server) applyDocument(uri string, doc *Document) {
-	if doc.ExportedGlobals != nil {
-		for _, key := range doc.ExportedGlobals {
-			delete(s.GlobalIndex, key)
+func (s *Server) updateDocument(uri string, source []byte) {
+	var (
+		tree *ast.Tree
+		doc  *Document
+	)
+
+	if existing, exists := s.Documents[uri]; exists {
+		if bytes.Equal(existing.Source, source) {
+			return
+		}
+
+		doc = existing
+		doc.Source = source
+
+		if doc.ExportedGlobals != nil {
+			for _, key := range doc.ExportedGlobals {
+				delete(s.GlobalIndex, key)
+			}
 		}
 
 		clear(doc.ExportedGlobals)
+
+		tree = existing.Tree
+		tree.Reset(source)
 	} else {
-		doc.ExportedGlobals = make(map[ast.NodeID]GlobalKey)
+		tree = ast.NewTree(source)
+
+		doc = &Document{
+			Source:          source,
+			Tree:            tree,
+			Resolver:        semantic.New(tree),
+			ExportedGlobals: make(map[ast.NodeID]GlobalKey),
+		}
+
+		s.Documents[uri] = doc
 	}
 
-	s.Documents[uri] = doc
+	p := s.sharedParser
+	p.Reset(source, tree)
+
+	rootID := p.Parse()
+
+	if len(p.Errors) > 0 {
+		doc.Errors = make([]parser.ParseError, len(p.Errors))
+
+		copy(doc.Errors, p.Errors)
+	} else {
+		doc.Errors = nil
+	}
 
 	res := doc.Resolver
-	tree := doc.Tree
+
+	res.Reset()
+	res.Resolve(rootID)
+
+	for key, sym := range s.GlobalIndex {
+		if sym.URI == uri {
+			delete(s.GlobalIndex, key)
+		}
+	}
 
 	for _, defID := range res.GlobalDefs {
 		node := tree.Nodes[defID]
 		identBytes := tree.Source[node.Start:node.End]
+		hash := ast.HashBytes(tree.Source[node.Start:node.End])
 
-		hash := ast.HashBytes(identBytes)
 		depth := getASTDepth(tree, defID)
 
 		s.setGlobalSymbol(GlobalKey{ReceiverHash: 0, PropHash: hash}, uri, defID, depth, string(identBytes))
@@ -2678,6 +2666,7 @@ func (s *Server) applyDocument(uri string, doc *Document) {
 			fieldHash := ast.HashBytes(name)
 
 			buf := make([]byte, 0, len(identBytes)+1+len(name))
+
 			buf = append(buf, identBytes...)
 			buf = append(buf, '.')
 			buf = append(buf, name...)
@@ -2685,11 +2674,15 @@ func (s *Server) applyDocument(uri string, doc *Document) {
 			s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fieldHash}, uri, defID, depth, string(buf))
 		})
 
+		// Module Aliasing
 		valID := doc.getAssignedValue(defID)
+
 		if valID != ast.InvalidNode {
 			valNode := tree.Nodes[valID]
+
 			if valNode.Kind == ast.KindIdent {
 				localDefID := doc.Resolver.References[valID]
+
 				if localDefID != ast.InvalidNode {
 					localName := doc.Source[doc.Tree.Nodes[localDefID].Start:doc.Tree.Nodes[localDefID].End]
 					globalBytes := tree.Source[node.Start:node.End]
@@ -2708,6 +2701,7 @@ func (s *Server) applyDocument(uri string, doc *Document) {
 							suffix := fd.ReceiverName[len(localName)+1:]
 
 							newRecHash := ast.HashBytesConcat(globalBytes, []byte{'.'}, suffix)
+
 							propBytes := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
 
 							buf := make([]byte, 0, len(identBytes)+2+len(suffix)+len(propBytes))
@@ -2725,6 +2719,7 @@ func (s *Server) applyDocument(uri string, doc *Document) {
 		}
 	}
 
+	// Index global table fields
 	for _, fd := range res.FieldDefs {
 		if fd.ReceiverDef == ast.InvalidNode {
 			if bytes.Equal(fd.ReceiverName, []byte("self")) {
@@ -2749,55 +2744,8 @@ func (s *Server) applyDocument(uri string, doc *Document) {
 			s.setGlobalSymbol(GlobalKey{ReceiverHash: fd.ReceiverHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(buf))
 		}
 	}
-}
 
-func (s *Server) updateDocument(uri string, source []byte) {
-	if existing, exists := s.Documents[uri]; exists {
-		if bytes.Equal(existing.Source, source) {
-			return
-		}
-	}
-
-	var (
-		doc  *Document
-		tree *ast.Tree
-	)
-
-	if existing, exists := s.Documents[uri]; exists {
-		doc = existing
-		doc.Source = source
-
-		tree = existing.Tree
-		tree.Reset(source)
-	} else {
-		tree = ast.NewTree(source)
-
-		doc = &Document{
-			Source:          source,
-			Tree:            tree,
-			Resolver:        semantic.New(tree),
-			ExportedGlobals: make(map[ast.NodeID]GlobalKey),
-		}
-	}
-
-	p := s.sharedParser
-
-	p.Reset(source, tree)
-
-	rootID := p.Parse()
-
-	if len(p.Errors) > 0 {
-		doc.Errors = make([]parser.ParseError, len(p.Errors))
-
-		copy(doc.Errors, p.Errors)
-	} else {
-		doc.Errors = nil
-	}
-
-	doc.Resolver.Reset()
-	doc.Resolver.Resolve(rootID)
-
-	s.applyDocument(uri, doc)
+	s.Documents[uri] = doc
 }
 
 func (s *Server) publishDiagnostics(uri string) {
@@ -3392,11 +3340,9 @@ func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, d
 	}
 }
 
-func (s *Server) indexEmbeddedStdlib() {
+func (s *Server) indexEmbeddedStdlib(indexed, unchanged *int) {
 	entries, err := stdlibFS.ReadDir("stdlib")
 	if err != nil {
-		s.Log.Warnln("No embedded stdlib found or stdlib folder missing")
-
 		return
 	}
 
@@ -3406,22 +3352,44 @@ func (s *Server) indexEmbeddedStdlib() {
 			if err == nil {
 				uri := "std:///" + e.Name()
 
+				if existing, ok := s.Documents[uri]; ok && bytes.Equal(existing.Source, b) {
+					s.activeURIs[uri] = true
+
+					*unchanged++
+
+					continue
+				}
+
 				s.updateDocument(uri, b)
+
+				s.activeURIs[uri] = true
+
+				*indexed++
 			}
 		}
 	}
-
-	s.Log.Println("Embedded stdlib indexed")
 }
 
 func (s *Server) isIgnored(fullPath, name string) bool {
 	for _, p := range s.compiledIgnores {
-		if p.Match != "" {
-			if matched, _ := filepath.Match(p.Match, name); matched {
-				return true
-			}
-		} else {
-			if strings.Contains(fullPath, p.Contains) || strings.HasSuffix(fullPath, p.Suffix) {
+		if p.HasSuffix != "" && strings.HasSuffix(name, p.HasSuffix) {
+			return true
+		}
+
+		if p.HasPrefix != "" && strings.HasPrefix(name, p.HasPrefix) {
+			return true
+		}
+
+		if p.ContainsPath != "" && strings.Contains(fullPath, p.ContainsPath) {
+			return true
+		}
+
+		if p.SuffixPath != "" && strings.HasSuffix(fullPath, p.SuffixPath) {
+			return true
+		}
+
+		if p.MatchFallback != "" {
+			if matched, _ := filepath.Match(p.MatchFallback, name); matched {
 				return true
 			}
 		}
