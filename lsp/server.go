@@ -322,12 +322,9 @@ func (s *Server) handleMessage(req Request) {
 		s.Log.Println("Starting workspace re-index...")
 
 		s.IsIndexing = true
-
 		start := time.Now()
 
 		s.activeURIs = make(map[string]bool, len(s.Documents))
-
-		s.GlobalIndex = make(map[GlobalKey]GlobalSymbol)
 
 		s.indexEmbeddedStdlib()
 
@@ -345,7 +342,7 @@ func (s *Server) handleMessage(req Request) {
 
 		for uri := range s.Documents {
 			if !s.activeURIs[uri] && !s.OpenFiles[uri] && !strings.HasPrefix(uri, "std:///") {
-				delete(s.Documents, uri)
+				s.clearDocument(uri)
 			}
 		}
 
@@ -354,6 +351,8 @@ func (s *Server) handleMessage(req Request) {
 				s.updateDocument(uri, doc.Source)
 			}
 		}
+
+		s.activeURIs = nil
 
 		took := time.Since(start)
 
@@ -2565,6 +2564,10 @@ func (s *Server) updateDocument(uri string, source []byte) {
 	)
 
 	if existing, exists := s.Documents[uri]; exists {
+		if bytes.Equal(existing.Source, source) {
+			return
+		}
+
 		doc = existing
 		doc.Source = source
 
