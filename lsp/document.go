@@ -426,9 +426,9 @@ func (doc *Document) HasDeprecatedTag(id ast.NodeID) (bool, string) {
 		if cEndLine == targetLine || cEndLine == stmtLine {
 			raw := doc.Source[c.Start:c.End]
 
-			foundIdx := bytes.Index(raw, depToken)
-			if foundIdx != -1 {
-				rest := raw[foundIdx+len(depToken):]
+			_, after, ok := bytes.Cut(raw, depToken)
+			if ok {
+				rest := after
 
 				endIdx := bytes.IndexByte(rest, '\n')
 				if endIdx == -1 {

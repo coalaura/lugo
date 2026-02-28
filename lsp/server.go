@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"io/fs"
 	"net/url"
@@ -471,19 +470,29 @@ func (s *Server) handleMessage(req Request) {
 				returnStr = ": (" + strings.Join(rTypes, ", ") + ")"
 			}
 
-			var code string
+			var (
+				code         string
+				matchedField *LuaDocField
+			)
 
 			if isFunc {
 				paramsStr := ctx.TargetDoc.getFunctionParams(valID, luadoc)
 
+				genericStr := ""
+				if len(luadoc.Generics) > 0 {
+					var gNames []string
+					for _, g := range luadoc.Generics {
+						gNames = append(gNames, g.Name)
+					}
+					genericStr = "<" + strings.Join(gNames, ", ") + ">"
+				}
+
 				if !ctx.IsProp && ctx.TargetDefID == ctx.IdentNodeID {
-					code = "local function " + ctx.DisplayName + "(" + paramsStr + ")" + returnStr
+					code = "local function " + ctx.DisplayName + genericStr + "(" + paramsStr + ")" + returnStr
 				} else {
-					code = "function " + ctx.DisplayName + "(" + paramsStr + ")" + returnStr
+					code = "function " + ctx.DisplayName + genericStr + "(" + paramsStr + ")" + returnStr
 				}
 			} else {
-				var matchedField *LuaDocField
-
 				if ctx.IsProp && ctx.TargetDefID != ctx.IdentNodeID {
 					for i := range luadoc.Fields {
 						if luadoc.Fields[i].Name == ctx.IdentName {
@@ -500,6 +509,40 @@ func (s *Server) handleMessage(req Request) {
 					luadoc.Description = matchedField.Desc
 					luadoc.Params = nil
 					luadoc.Returns = nil
+				} else if luadoc.Class != nil {
+					code = "class " + luadoc.Class.Name
+
+					if luadoc.Class.Parent != "" {
+						code += " : " + luadoc.Class.Parent
+					}
+
+					if luadoc.Class.Desc != "" {
+						if luadoc.Description != "" {
+							luadoc.Description = luadoc.Class.Desc + "\n\n" + luadoc.Description
+						} else {
+							luadoc.Description = luadoc.Class.Desc
+						}
+					}
+				} else if luadoc.Alias != nil {
+					code = "alias " + luadoc.Alias.Name + " = " + luadoc.Alias.Type
+
+					if luadoc.Alias.Desc != "" {
+						if luadoc.Description != "" {
+							luadoc.Description = luadoc.Alias.Desc + "\n\n" + luadoc.Description
+						} else {
+							luadoc.Description = luadoc.Alias.Desc
+						}
+					}
+				} else if luadoc.Type != nil {
+					code = ctx.DisplayName + ": " + luadoc.Type.Type + valStr
+
+					if luadoc.Type.Desc != "" {
+						if luadoc.Description != "" {
+							luadoc.Description = luadoc.Type.Desc + "\n\n" + luadoc.Description
+						} else {
+							luadoc.Description = luadoc.Type.Desc
+						}
+					}
 				} else if ctx.IsProp {
 					code = ctx.DisplayName + valStr
 				} else if ctx.TargetURI == uri && ctx.TargetDefID == doc.Resolver.References[ctx.IdentNodeID] {
@@ -520,48 +563,112 @@ func (s *Server) handleMessage(req Request) {
 			var docBuilder strings.Builder
 
 			if luadoc.IsDeprecated {
-				docBuilder.WriteString("\n---\n**@deprecated**")
+				docBuilder.WriteString("**@deprecated**")
 
 				if luadoc.DeprecatedMsg != "" {
 					docBuilder.WriteString(" - " + luadoc.DeprecatedMsg)
 				}
 
-				docBuilder.WriteString("\n")
+				docBuilder.WriteString("\n\n")
 			}
 
 			if luadoc.Description != "" {
-				docBuilder.WriteString("\n---\n" + luadoc.Description + "\n")
+				docBuilder.WriteString(luadoc.Description + "\n\n")
+			}
+
+			if len(luadoc.Generics) > 0 {
+				for _, g := range luadoc.Generics {
+					docBuilder.WriteString("* `@generic` `" + g.Name + "`")
+
+					if g.Parent != "" {
+						docBuilder.WriteString(" : `" + g.Parent + "`")
+					}
+
+					docBuilder.WriteString("\n")
+				}
+
+				docBuilder.WriteString("\n")
 			}
 
 			if len(luadoc.Params) > 0 {
-				docBuilder.WriteString("\n")
-
 				for _, p := range luadoc.Params {
-					fmt.Fprintf(&docBuilder, "* `@param` `%s` `%s`", p.Name, p.Type)
+					docBuilder.WriteString("* `@param` `" + p.Name + "`")
+
+					if p.Type != "" {
+						docBuilder.WriteString(" `" + p.Type + "`")
+					}
 
 					if p.Desc != "" {
-						fmt.Fprintf(&docBuilder, " - %s", p.Desc)
+						docBuilder.WriteString(" - " + p.Desc)
 					}
 
 					docBuilder.WriteString("\n")
 				}
+
+				docBuilder.WriteString("\n")
 			}
 
 			if len(luadoc.Returns) > 0 {
-				docBuilder.WriteString("\n")
-
 				for _, r := range luadoc.Returns {
-					fmt.Fprintf(&docBuilder, "* `@return` `%s`", r.Type)
+					docBuilder.WriteString("* `@return` `" + r.Type + "`")
 
 					if r.Desc != "" {
-						fmt.Fprintf(&docBuilder, " - %s", r.Desc)
+						docBuilder.WriteString(" - " + r.Desc)
 					}
 
 					docBuilder.WriteString("\n")
 				}
+
+				docBuilder.WriteString("\n")
 			}
 
-			hoverText = "```lua\n" + code + "\n```" + docBuilder.String()
+			if len(luadoc.Fields) > 0 && matchedField == nil {
+				docBuilder.WriteString("**Fields**\n")
+
+				for _, f := range luadoc.Fields {
+					docBuilder.WriteString("* `" + f.Name + "`")
+
+					if f.Type != "" {
+						docBuilder.WriteString(" `" + f.Type + "`")
+					}
+
+					if f.Desc != "" {
+						docBuilder.WriteString(" - " + f.Desc)
+					}
+
+					docBuilder.WriteString("\n")
+				}
+
+				docBuilder.WriteString("\n")
+			}
+
+			if len(luadoc.Overloads) > 0 {
+				docBuilder.WriteString("**Overloads**\n")
+
+				for _, o := range luadoc.Overloads {
+					docBuilder.WriteString("```lua\n" + o + "\n```\n")
+				}
+
+				docBuilder.WriteString("\n")
+			}
+
+			if len(luadoc.See) > 0 {
+				docBuilder.WriteString("**See also**\n")
+
+				for _, s := range luadoc.See {
+					docBuilder.WriteString("* `" + s + "`\n")
+				}
+
+				docBuilder.WriteString("\n")
+			}
+
+			docString := strings.TrimSpace(docBuilder.String())
+
+			hoverText = "```lua\n" + code + "\n```"
+
+			if docString != "" {
+				hoverText += "\n---\n" + docString
+			}
 
 			if fromFile != "" {
 				if after, ok := strings.CutPrefix(ctx.TargetURI, "std:///"); ok {
