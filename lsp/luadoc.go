@@ -89,6 +89,15 @@ func findTypeEnd(s []byte) int {
 		} else if c == ')' || c == '>' || c == '}' || c == ']' {
 			depth--
 		} else if (c == ' ' || c == '\t') && depth <= 0 {
+			var j int
+
+			for j = i - 1; j >= 0 && (s[j] == ' ' || s[j] == '\t'); j-- {
+			}
+
+			if j >= 0 && (s[j] == ':' || s[j] == ',' || s[j] == '|') {
+				continue // Type is still going (e.g., 'fun(): boolean' or 'string | number')
+			}
+
 			return i
 		}
 	}
