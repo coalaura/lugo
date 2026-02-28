@@ -92,6 +92,8 @@ type Server struct {
 	KnownGlobalGlobs  []string
 	IsIndexing        bool
 
+	activeURIs map[string]bool
+
 	IgnoreGlobs     []string
 	compiledIgnores []IgnorePattern
 
@@ -323,15 +325,8 @@ func (s *Server) handleMessage(req Request) {
 
 		start := time.Now()
 
-		openDocs := make(map[string]*Document)
+		s.activeURIs = make(map[string]bool, len(s.Documents))
 
-		for uri, doc := range s.Documents {
-			if s.OpenFiles[uri] {
-				openDocs[uri] = doc
-			}
-		}
-
-		s.Documents = make(map[string]*Document)
 		s.GlobalIndex = make(map[GlobalKey]GlobalSymbol)
 
 		s.indexEmbeddedStdlib()
@@ -348,8 +343,16 @@ func (s *Server) handleMessage(req Request) {
 			s.indexWorkspace(s.RootURI)
 		}
 
-		for uri, doc := range openDocs {
-			s.updateDocument(uri, doc.Source)
+		for uri := range s.Documents {
+			if !s.activeURIs[uri] && !s.OpenFiles[uri] && !strings.HasPrefix(uri, "std:///") {
+				delete(s.Documents, uri)
+			}
+		}
+
+		for uri, doc := range s.Documents {
+			if s.OpenFiles[uri] && !s.activeURIs[uri] && !strings.HasPrefix(uri, "std:///") {
+				s.updateDocument(uri, doc.Source)
+			}
 		}
 
 		took := time.Since(start)
@@ -2535,6 +2538,10 @@ func (s *Server) indexWorkspace(rootPathOrURI string) {
 					}
 
 					s.updateDocument(uri, b)
+
+					if s.activeURIs != nil {
+						s.activeURIs[uri] = true
+					}
 
 					indexed++
 				} else {

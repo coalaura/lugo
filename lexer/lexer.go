@@ -1,14 +1,24 @@
 package lexer
 
 import (
+	"bytes"
+
 	"github.com/coalaura/lugo/token"
 )
+
+var isIdentChar [256]bool
 
 type Lexer struct {
 	source []byte
 	cursor uint32
 	read   uint32
 	ch     byte
+}
+
+func init() {
+	for i := range 256 {
+		isIdentChar[i] = (i >= 'a' && i <= 'z') || (i >= 'A' && i <= 'Z') || (i >= '0' && i <= '9') || i == '_'
+	}
 }
 
 func New(source []byte) *Lexer {
@@ -19,6 +29,15 @@ func New(source []byte) *Lexer {
 	l.advance()
 
 	return l
+}
+
+func (l *Lexer) Reset(source []byte) {
+	l.source = source
+	l.cursor = 0
+	l.read = 0
+	l.ch = 0
+
+	l.advance()
 }
 
 func (l *Lexer) advance() {
@@ -191,19 +210,60 @@ func (l *Lexer) Next() token.Token {
 }
 
 func (l *Lexer) skipWhitespace() {
-	for l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
-		l.advance()
+	if l.ch != ' ' && l.ch != '\t' && l.ch != '\n' && l.ch != '\r' {
+		return
+	}
+
+	src := l.source
+	read := l.cursor
+
+	for read < uint32(len(src)) {
+		c := src[read]
+
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			read++
+		} else {
+			break
+		}
+	}
+
+	l.cursor = read
+
+	if read < uint32(len(src)) {
+		l.ch = src[read]
+		l.read = read + 1
+	} else {
+		l.ch = 0
+		l.read = read
 	}
 }
 
 func (l *Lexer) readIdent(start uint32) token.Token {
-	for isLetter(l.ch) || isDigit(l.ch) {
-		l.advance()
+	src := l.source
+	read := l.cursor
+
+	for read < uint32(len(src)) {
+		if isIdentChar[src[read]] {
+			read++
+		} else {
+			break
+		}
+	}
+
+	l.cursor = read
+
+	if read < uint32(len(src)) {
+		l.ch = src[read]
+		l.read = read + 1
+	} else {
+		l.ch = 0
+		l.read = read
 	}
 
 	// The compiler explicitly optimizes switch string(bytes) to do zero heap allocations.
 	// This is significantly faster than a map hash lookup.
 	kind := token.Ident
+
 	switch string(l.source[start:l.cursor]) {
 	case "and":
 		kind = token.And
@@ -289,20 +349,35 @@ func (l *Lexer) readNumber(start uint32) token.Token {
 }
 
 func (l *Lexer) readString(start uint32, quote byte) token.Token {
-	for l.ch != 0 {
-		if l.ch == '\\' {
-			l.advance() // Skip escape char
+	src := l.source
+	read := l.cursor
 
-			if l.ch != 0 {
-				l.advance() // Skip the actual escaped character
+	for read < uint32(len(src)) {
+		c := src[read]
+
+		if c == '\\' {
+			read++
+
+			if read < uint32(len(src)) {
+				read++
 			}
-		} else if l.ch == quote {
-			l.advance()
+		} else if c == quote {
+			read++
 
 			break
 		} else {
-			l.advance()
+			read++
 		}
+	}
+
+	l.cursor = read
+
+	if read < uint32(len(src)) {
+		l.ch = src[read]
+		l.read = read + 1
+	} else {
+		l.ch = 0
+		l.read = read
 	}
 
 	return token.Token{Kind: token.String, Start: start, End: l.cursor}
@@ -349,7 +424,7 @@ func (l *Lexer) readLongString(start uint32) token.Token {
 }
 
 func (l *Lexer) readComment(start uint32) token.Token {
-	l.advance()
+	l.advance() // consume second '-'
 
 	if l.ch == '[' {
 		peekChar := l.peek()
@@ -366,8 +441,24 @@ func (l *Lexer) readComment(start uint32) token.Token {
 		}
 	}
 
-	for l.ch != '\n' && l.ch != 0 {
-		l.advance()
+	src := l.source
+	read := l.cursor
+
+	idx := bytes.IndexByte(src[read:], '\n')
+	if idx == -1 {
+		read = uint32(len(src))
+	} else {
+		read += uint32(idx)
+	}
+
+	l.cursor = read
+
+	if read < uint32(len(src)) {
+		l.ch = src[read]
+		l.read = read + 1
+	} else {
+		l.ch = 0
+		l.read = read
 	}
 
 	return token.Token{Kind: token.Comment, Start: start, End: l.cursor}
