@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coalaura/lugo/ast"
@@ -68,6 +70,19 @@ type SemanticToken struct {
 	End       uint32
 	TokenType uint32
 	Modifiers uint32
+}
+
+type IndexJob struct {
+	Path  string
+	URI   string
+	IsStd bool
+}
+
+type IndexResult struct {
+	URI       string
+	Doc       *Document
+	Err       error
+	Unchanged bool
 }
 
 type IgnorePattern struct {
@@ -322,22 +337,141 @@ func (s *Server) handleMessage(req Request) {
 		s.Log.Println("Starting workspace re-index...")
 
 		s.IsIndexing = true
+
 		start := time.Now()
 
 		s.activeURIs = make(map[string]bool, len(s.Documents))
 
-		s.indexEmbeddedStdlib()
+		existingDocs := make(map[string]*Document, len(s.Documents))
+		maps.Copy(existingDocs, s.Documents)
 
-		for _, libPath := range s.LibraryPaths {
-			s.Log.Printf("Indexing external library: %s\n", libPath)
+		jobs := make(chan IndexJob, 1024)
+		results := make(chan IndexResult, 1024)
 
-			s.indexWorkspace(libPath)
+		numWorkers := runtime.GOMAXPROCS(0)
+
+		var wg sync.WaitGroup
+
+		for range numWorkers {
+			wg.Go(func() {
+				p := parser.New(nil, nil)
+
+				for job := range jobs {
+					var (
+						b   []byte
+						err error
+					)
+
+					if job.IsStd {
+						filename := job.URI[7:]
+
+						b, err = stdlibFS.ReadFile("stdlib/" + filename)
+					} else {
+						b, err = os.ReadFile(job.Path)
+					}
+
+					if err != nil {
+						results <- IndexResult{URI: job.URI, Err: err}
+
+						continue
+					}
+
+					oldDoc := existingDocs[job.URI]
+
+					if oldDoc != nil && bytes.Equal(oldDoc.Source, b) {
+						results <- IndexResult{URI: job.URI, Unchanged: true}
+
+						continue
+					}
+
+					var (
+						doc  *Document
+						tree *ast.Tree
+					)
+
+					if oldDoc != nil {
+						doc = oldDoc
+						doc.Source = b
+
+						tree = oldDoc.Tree
+						tree.Reset(b)
+					} else {
+						tree = ast.NewTree(b)
+
+						doc = &Document{
+							Source:          b,
+							Tree:            tree,
+							Resolver:        semantic.New(tree),
+							ExportedGlobals: make(map[ast.NodeID]GlobalKey),
+						}
+					}
+
+					p.Reset(b, tree)
+
+					rootID := p.Parse()
+
+					if len(p.Errors) > 0 {
+						doc.Errors = make([]parser.ParseError, len(p.Errors))
+
+						copy(doc.Errors, p.Errors)
+					}
+
+					doc.Resolver.Reset()
+					doc.Resolver.Resolve(rootID)
+
+					results <- IndexResult{URI: job.URI, Doc: doc}
+				}
+			})
 		}
 
-		if s.RootURI != "" {
-			s.Log.Printf("Indexing workspace: %s", s.RootURI)
+		go func() {
+			entries, _ := stdlibFS.ReadDir("stdlib")
 
-			s.indexWorkspace(s.RootURI)
+			for _, e := range entries {
+				if strings.HasSuffix(e.Name(), ".lua") {
+					jobs <- IndexJob{URI: "std:///" + e.Name(), IsStd: true}
+				}
+			}
+
+			for _, libPath := range s.LibraryPaths {
+				s.queueWorkspace(libPath, jobs)
+			}
+
+			if s.RootURI != "" {
+				s.queueWorkspace(s.RootURI, jobs)
+			}
+
+			close(jobs)
+
+			wg.Wait()
+
+			close(results)
+		}()
+
+		var (
+			indexed   int
+			unchanged int
+			failed    int
+		)
+
+		for res := range results {
+			s.activeURIs[res.URI] = true
+
+			if res.Err != nil {
+				failed++
+
+				continue
+			}
+
+			if res.Unchanged {
+				unchanged++
+
+				continue
+			}
+
+			s.applyDocument(res.URI, res.Doc)
+
+			indexed++
 		}
 
 		for uri := range s.Documents {
@@ -354,11 +488,11 @@ func (s *Server) handleMessage(req Request) {
 
 		s.activeURIs = nil
 
+		s.IsIndexing = false
+
 		took := time.Since(start)
 
-		s.Log.Printf("Re-indexed workspace in %s\n", took)
-
-		s.IsIndexing = false
+		s.Log.Printf("Re-indexed workspace in %s (indexed=%d, unchanged=%d, failed=%d)\n", took, indexed, unchanged, failed)
 
 		start = time.Now()
 
@@ -2441,19 +2575,14 @@ func (s *Server) handleMessage(req Request) {
 	}
 }
 
-func (s *Server) indexWorkspace(rootPathOrURI string) {
+func (s *Server) queueWorkspace(rootPathOrURI string, jobs chan<- IndexJob) {
 	var path string
-
 	if strings.HasPrefix(rootPathOrURI, "file://") {
 		u, err := url.Parse(rootPathOrURI)
 		if err != nil {
-			s.Log.Errorf("Invalid workspace URI format: %s\n", rootPathOrURI)
-
 			return
 		}
-
 		path = u.Path
-
 		if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") {
 			path = path[1:]
 		}
@@ -2462,26 +2591,17 @@ func (s *Server) indexWorkspace(rootPathOrURI string) {
 	}
 
 	path = strings.ReplaceAll(path, "/", string(filepath.Separator))
-
 	if realPath, err := filepath.EvalSymlinks(path); err == nil {
 		path = realPath
 	}
 
-	var (
-		indexed uint64
-		failed  uint64
-		skipped uint64
-	)
-
 	visited := make(map[string]bool)
 
 	var walk func(dir string)
-
 	walk = func(dir string) {
 		if visited[dir] {
 			return
 		}
-
 		visited[dir] = true
 
 		entries, err := os.ReadDir(dir)
@@ -2491,19 +2611,13 @@ func (s *Server) indexWorkspace(rootPathOrURI string) {
 
 		for _, e := range entries {
 			fullPath := filepath.Join(dir, e.Name())
-
 			isDir := e.IsDir()
 			name := e.Name()
 
 			if s.isIgnored(fullPath, name) {
-				if !isDir {
-					skipped++
-				}
-
 				continue
 			}
 
-			// Check if its a symlink
 			if e.Type()&fs.ModeSymlink != 0 {
 				realPath, err := filepath.EvalSymlinks(fullPath)
 				if err == nil {
@@ -2511,118 +2625,51 @@ func (s *Server) indexWorkspace(rootPathOrURI string) {
 					if err == nil {
 						isDir = stat.IsDir()
 						name = stat.Name()
-
 						fullPath = realPath
 					} else {
-						failed++
-
 						continue
 					}
 				} else {
-					failed++
-
-					continue // Broken symlink
+					continue
 				}
 			}
 
 			if isDir {
 				walk(fullPath)
 			} else if strings.HasSuffix(name, ".lua") {
-				b, fsErr := os.ReadFile(fullPath)
-				if fsErr == nil {
-					uri := s.pathToURI(fullPath)
-
-					if runtime.GOOS == "windows" {
-						uri = strings.ToLower(uri)
-					}
-
-					s.updateDocument(uri, b)
-
-					if s.activeURIs != nil {
-						s.activeURIs[uri] = true
-					}
-
-					indexed++
-				} else {
-					failed++
+				uri := s.pathToURI(fullPath)
+				if runtime.GOOS == "windows" {
+					uri = strings.ToLower(uri)
 				}
-			} else {
-				skipped++
+				jobs <- IndexJob{Path: fullPath, URI: uri, IsStd: false}
 			}
 		}
 	}
 
 	walk(path)
-
-	s.Log.Printf("Workspace indexing complete (indexed=%d, failed=%d, skipped=%d)\n", indexed, failed, skipped)
 }
 
-func (s *Server) updateDocument(uri string, source []byte) {
-	var (
-		tree *ast.Tree
-		doc  *Document
-	)
-
-	if existing, exists := s.Documents[uri]; exists {
-		if bytes.Equal(existing.Source, source) {
-			return
-		}
-
-		doc = existing
-		doc.Source = source
-
-		if doc.ExportedGlobals != nil {
-			for _, key := range doc.ExportedGlobals {
-				delete(s.GlobalIndex, key)
-			}
+func (s *Server) applyDocument(uri string, doc *Document) {
+	if doc.ExportedGlobals != nil {
+		for _, key := range doc.ExportedGlobals {
+			delete(s.GlobalIndex, key)
 		}
 
 		clear(doc.ExportedGlobals)
-
-		tree = existing.Tree
-		tree.Reset(source)
 	} else {
-		tree = ast.NewTree(source)
-
-		doc = &Document{
-			Source:          source,
-			Tree:            tree,
-			Resolver:        semantic.New(tree),
-			ExportedGlobals: make(map[ast.NodeID]GlobalKey),
-		}
-
-		s.Documents[uri] = doc
+		doc.ExportedGlobals = make(map[ast.NodeID]GlobalKey)
 	}
 
-	p := s.sharedParser
-	p.Reset(source, tree)
-
-	rootID := p.Parse()
-
-	if len(p.Errors) > 0 {
-		doc.Errors = make([]parser.ParseError, len(p.Errors))
-
-		copy(doc.Errors, p.Errors)
-	} else {
-		doc.Errors = nil
-	}
+	s.Documents[uri] = doc
 
 	res := doc.Resolver
-
-	res.Reset()
-	res.Resolve(rootID)
-
-	for key, sym := range s.GlobalIndex {
-		if sym.URI == uri {
-			delete(s.GlobalIndex, key)
-		}
-	}
+	tree := doc.Tree
 
 	for _, defID := range res.GlobalDefs {
 		node := tree.Nodes[defID]
 		identBytes := tree.Source[node.Start:node.End]
-		hash := ast.HashBytes(tree.Source[node.Start:node.End])
 
+		hash := ast.HashBytes(identBytes)
 		depth := getASTDepth(tree, defID)
 
 		s.setGlobalSymbol(GlobalKey{ReceiverHash: 0, PropHash: hash}, uri, defID, depth, string(identBytes))
@@ -2631,7 +2678,6 @@ func (s *Server) updateDocument(uri string, source []byte) {
 			fieldHash := ast.HashBytes(name)
 
 			buf := make([]byte, 0, len(identBytes)+1+len(name))
-
 			buf = append(buf, identBytes...)
 			buf = append(buf, '.')
 			buf = append(buf, name...)
@@ -2639,15 +2685,11 @@ func (s *Server) updateDocument(uri string, source []byte) {
 			s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fieldHash}, uri, defID, depth, string(buf))
 		})
 
-		// Module Aliasing
 		valID := doc.getAssignedValue(defID)
-
 		if valID != ast.InvalidNode {
 			valNode := tree.Nodes[valID]
-
 			if valNode.Kind == ast.KindIdent {
 				localDefID := doc.Resolver.References[valID]
-
 				if localDefID != ast.InvalidNode {
 					localName := doc.Source[doc.Tree.Nodes[localDefID].Start:doc.Tree.Nodes[localDefID].End]
 					globalBytes := tree.Source[node.Start:node.End]
@@ -2666,7 +2708,6 @@ func (s *Server) updateDocument(uri string, source []byte) {
 							suffix := fd.ReceiverName[len(localName)+1:]
 
 							newRecHash := ast.HashBytesConcat(globalBytes, []byte{'.'}, suffix)
-
 							propBytes := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
 
 							buf := make([]byte, 0, len(identBytes)+2+len(suffix)+len(propBytes))
@@ -2684,7 +2725,6 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		}
 	}
 
-	// Index global table fields
 	for _, fd := range res.FieldDefs {
 		if fd.ReceiverDef == ast.InvalidNode {
 			if bytes.Equal(fd.ReceiverName, []byte("self")) {
@@ -2709,8 +2749,55 @@ func (s *Server) updateDocument(uri string, source []byte) {
 			s.setGlobalSymbol(GlobalKey{ReceiverHash: fd.ReceiverHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(buf))
 		}
 	}
+}
 
-	s.Documents[uri] = doc
+func (s *Server) updateDocument(uri string, source []byte) {
+	if existing, exists := s.Documents[uri]; exists {
+		if bytes.Equal(existing.Source, source) {
+			return
+		}
+	}
+
+	var (
+		doc  *Document
+		tree *ast.Tree
+	)
+
+	if existing, exists := s.Documents[uri]; exists {
+		doc = existing
+		doc.Source = source
+
+		tree = existing.Tree
+		tree.Reset(source)
+	} else {
+		tree = ast.NewTree(source)
+
+		doc = &Document{
+			Source:          source,
+			Tree:            tree,
+			Resolver:        semantic.New(tree),
+			ExportedGlobals: make(map[ast.NodeID]GlobalKey),
+		}
+	}
+
+	p := s.sharedParser
+
+	p.Reset(source, tree)
+
+	rootID := p.Parse()
+
+	if len(p.Errors) > 0 {
+		doc.Errors = make([]parser.ParseError, len(p.Errors))
+
+		copy(doc.Errors, p.Errors)
+	} else {
+		doc.Errors = nil
+	}
+
+	doc.Resolver.Reset()
+	doc.Resolver.Resolve(rootID)
+
+	s.applyDocument(uri, doc)
 }
 
 func (s *Server) publishDiagnostics(uri string) {
