@@ -56,6 +56,7 @@ type ServerCapabilities struct {
 	WorkspaceSymbolProvider bool                   `json:"workspaceSymbolProvider"`
 	InlayHintProvider       bool                   `json:"inlayHintProvider"`
 	CodeActionProvider      bool                   `json:"codeActionProvider"`
+	FoldingRangeProvider    bool                   `json:"foldingRangeProvider"`
 	CodeLensProvider        *CodeLensOptions       `json:"codeLensProvider,omitempty"`
 	SignatureHelpProvider   *SignatureHelpOptions  `json:"signatureHelpProvider,omitempty"`
 	CompletionProvider      *CompletionOptions     `json:"completionProvider,omitempty"`
@@ -370,4 +371,16 @@ type SemanticTokensParams struct {
 
 type SemanticTokens struct {
 	Data []uint32 `json:"data"`
+}
+
+type FoldingRangeParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+type FoldingRange struct {
+	StartLine      uint32 `json:"startLine"`
+	StartCharacter uint32 `json:"startCharacter,omitempty"`
+	EndLine        uint32 `json:"endLine"`
+	EndCharacter   uint32 `json:"endCharacter,omitempty"`
+	Kind           string `json:"kind,omitempty"`
 }

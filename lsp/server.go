@@ -216,6 +216,7 @@ func (s *Server) handleMessage(req Request) {
 				WorkspaceSymbolProvider: true,
 				InlayHintProvider:       true,
 				CodeActionProvider:      true,
+				FoldingRangeProvider:    true,
 				CodeLensProvider: &CodeLensOptions{
 					ResolveProvider: true,
 				},
@@ -1780,6 +1781,65 @@ func (s *Server) handleMessage(req Request) {
 			RPC:    "2.0",
 			ID:     req.ID,
 			Result: actions,
+		})
+	case "textDocument/foldingRange":
+		var params FoldingRangeParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		ranges := make([]FoldingRange, 0, 64)
+
+		for i := 1; i < len(doc.Tree.Nodes); i++ {
+			node := doc.Tree.Nodes[i]
+
+			switch node.Kind {
+			case ast.KindFunctionExpr, ast.KindTableExpr, ast.KindDo, ast.KindWhile, ast.KindRepeat, ast.KindIf, ast.KindElseIf, ast.KindElse, ast.KindForNum, ast.KindForIn, ast.KindString:
+				sLine, sCol := doc.Tree.Position(node.Start)
+				eLine, eCol := doc.Tree.Position(node.End)
+
+				// Only fold if it spans multiple lines
+				if sLine < eLine {
+					ranges = append(ranges, FoldingRange{
+						StartLine:      sLine,
+						StartCharacter: sCol,
+						EndLine:        eLine,
+						EndCharacter:   eCol,
+					})
+				}
+			}
+		}
+
+		for _, c := range doc.Tree.Comments {
+			sLine, sCol := doc.Tree.Position(c.Start)
+			eLine, eCol := doc.Tree.Position(c.End)
+
+			if sLine < eLine {
+				ranges = append(ranges, FoldingRange{
+					StartLine:      sLine,
+					StartCharacter: sCol,
+					EndLine:        eLine,
+					EndCharacter:   eCol,
+					Kind:           "comment",
+				})
+			}
+		}
+
+		WriteMessage(s.Writer, Response{
+			RPC:    "2.0",
+			ID:     req.ID,
+			Result: ranges,
 		})
 	case "textDocument/semanticTokens/full":
 		var params SemanticTokensParams
