@@ -207,10 +207,12 @@ func (s *Server) handleMessage(req Request) {
 
 		result := InitializeResult{
 			Capabilities: ServerCapabilities{
-				TextDocumentSync:        1,
-				DefinitionProvider:      true,
-				HoverProvider:           true,
-				RenameProvider:          true,
+				TextDocumentSync:   1,
+				DefinitionProvider: true,
+				HoverProvider:      true,
+				RenameProvider: map[string]bool{
+					"prepareProvider": true,
+				},
 				ReferencesProvider:      true,
 				DocumentSymbolProvider:  true,
 				WorkspaceSymbolProvider: true,
@@ -1346,6 +1348,102 @@ func (s *Server) handleMessage(req Request) {
 			ID:     req.ID,
 			Result: results,
 		})
+	case "textDocument/prepareRename":
+		var params PrepareRenameParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
+
+		ctx := s.resolveSymbolAt(uri, offset)
+		if ctx == nil {
+			WriteMessage(s.Writer, Response{
+				RPC: "2.0",
+				ID:  req.ID,
+				Error: ResponseError{
+					Code:    -32602,
+					Message: "Cannot rename this element.",
+				},
+			})
+
+			return
+		}
+
+		node := doc.Tree.Nodes[ctx.IdentNodeID]
+		sLine, sCol := doc.Tree.Position(node.Start)
+		eLine, eCol := doc.Tree.Position(node.End)
+
+		WriteMessage(s.Writer, Response{
+			RPC: "2.0",
+			ID:  req.ID,
+			Result: PrepareRenameResult{
+				Range: Range{
+					Start: Position{Line: sLine, Character: sCol},
+					End:   Position{Line: eLine, Character: eCol},
+				},
+				Placeholder: ctx.IdentName,
+			},
+		})
+	case "textDocument/linkedEditingRange":
+		var params LinkedEditingRangeParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
+
+		ctx := s.resolveSymbolAt(uri, offset)
+		if ctx == nil || ctx.IsGlobal || ctx.TargetDoc == nil || ctx.TargetDoc != doc || ctx.TargetDefID == ast.InvalidNode {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		var ranges []Range
+
+		for i, def := range doc.Resolver.References {
+			if def == ctx.TargetDefID {
+				node := doc.Tree.Nodes[i]
+				sLine, sCol := doc.Tree.Position(node.Start)
+				eLine, eCol := doc.Tree.Position(node.End)
+
+				ranges = append(ranges, Range{
+					Start: Position{Line: sLine, Character: sCol},
+					End:   Position{Line: eLine, Character: eCol},
+				})
+			}
+		}
+
+		WriteMessage(s.Writer, Response{
+			RPC: "2.0",
+			ID:  req.ID,
+			Result: LinkedEditingRanges{
+				Ranges: ranges,
+			},
+		})
 	case "textDocument/rename":
 		var params RenameParams
 
@@ -1373,8 +1471,19 @@ func (s *Server) handleMessage(req Request) {
 		}
 
 		changes := make(map[string][]TextEdit)
+		seen := make(map[string]map[ast.NodeID]bool)
 
 		addEdit := func(dDoc *Document, dUri string, nodeID ast.NodeID) {
+			if seen[dUri] == nil {
+				seen[dUri] = make(map[ast.NodeID]bool)
+			}
+
+			if seen[dUri][nodeID] {
+				return
+			}
+
+			seen[dUri][nodeID] = true
+
 			node := dDoc.Tree.Nodes[nodeID]
 
 			startLine, startCol := dDoc.Tree.Position(node.Start)
@@ -1389,13 +1498,15 @@ func (s *Server) handleMessage(req Request) {
 			})
 		}
 
-		if !ctx.IsGlobal && ctx.TargetDefID != ast.InvalidNode {
+		if ctx.TargetDefID != ast.InvalidNode {
 			for i, def := range ctx.TargetDoc.Resolver.References {
 				if def == ctx.TargetDefID {
 					addEdit(ctx.TargetDoc, ctx.TargetURI, ast.NodeID(i))
 				}
 			}
-		} else {
+		}
+
+		if ctx.IsGlobal {
 			for dUri, dDoc := range s.Documents {
 				if ctx.GKey.ReceiverHash == 0 {
 					for _, id := range dDoc.Resolver.GlobalDefs {
@@ -2698,10 +2809,22 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 func (s *Server) getReferences(ctx *SymbolContext, includeDeclaration bool) []Location {
 	var locations []Location
 
+	seen := make(map[string]map[ast.NodeID]bool)
+
 	addRef := func(dDoc *Document, dUri string, nodeID ast.NodeID) {
 		if !includeDeclaration && dUri == ctx.TargetURI && nodeID == ctx.TargetDefID {
 			return
 		}
+
+		if seen[dUri] == nil {
+			seen[dUri] = make(map[ast.NodeID]bool)
+		}
+
+		if seen[dUri][nodeID] {
+			return
+		}
+
+		seen[dUri][nodeID] = true
 
 		node := dDoc.Tree.Nodes[nodeID]
 
@@ -2717,13 +2840,15 @@ func (s *Server) getReferences(ctx *SymbolContext, includeDeclaration bool) []Lo
 		})
 	}
 
-	if !ctx.IsGlobal && ctx.TargetDefID != ast.InvalidNode {
+	if ctx.TargetDefID != ast.InvalidNode {
 		for i, def := range ctx.TargetDoc.Resolver.References {
 			if def == ctx.TargetDefID {
 				addRef(ctx.TargetDoc, ctx.TargetURI, ast.NodeID(i))
 			}
 		}
-	} else {
+	}
+
+	if ctx.IsGlobal {
 		for dUri, dDoc := range s.Documents {
 			if ctx.GKey.ReceiverHash == 0 {
 				for _, id := range dDoc.Resolver.GlobalDefs {

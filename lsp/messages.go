@@ -47,20 +47,21 @@ type InitializeResult struct {
 }
 
 type ServerCapabilities struct {
-	TextDocumentSync        int                    `json:"textDocumentSync"`
-	DefinitionProvider      bool                   `json:"definitionProvider"`
-	HoverProvider           bool                   `json:"hoverProvider"`
-	RenameProvider          bool                   `json:"renameProvider"`
-	ReferencesProvider      bool                   `json:"referencesProvider"`
-	DocumentSymbolProvider  bool                   `json:"documentSymbolProvider"`
-	WorkspaceSymbolProvider bool                   `json:"workspaceSymbolProvider"`
-	InlayHintProvider       bool                   `json:"inlayHintProvider"`
-	CodeActionProvider      bool                   `json:"codeActionProvider"`
-	FoldingRangeProvider    bool                   `json:"foldingRangeProvider"`
-	CodeLensProvider        *CodeLensOptions       `json:"codeLensProvider,omitempty"`
-	SignatureHelpProvider   *SignatureHelpOptions  `json:"signatureHelpProvider,omitempty"`
-	CompletionProvider      *CompletionOptions     `json:"completionProvider,omitempty"`
-	SemanticTokensProvider  *SemanticTokensOptions `json:"semanticTokensProvider,omitempty"`
+	TextDocumentSync           int                    `json:"textDocumentSync"`
+	DefinitionProvider         bool                   `json:"definitionProvider"`
+	HoverProvider              bool                   `json:"hoverProvider"`
+	RenameProvider             any                    `json:"renameProvider"`
+	ReferencesProvider         bool                   `json:"referencesProvider"`
+	DocumentSymbolProvider     bool                   `json:"documentSymbolProvider"`
+	WorkspaceSymbolProvider    bool                   `json:"workspaceSymbolProvider"`
+	InlayHintProvider          bool                   `json:"inlayHintProvider"`
+	CodeActionProvider         bool                   `json:"codeActionProvider"`
+	FoldingRangeProvider       bool                   `json:"foldingRangeProvider"`
+	LinkedEditingRangeProvider bool                   `json:"linkedEditingRangeProvider"`
+	CodeLensProvider           *CodeLensOptions       `json:"codeLensProvider,omitempty"`
+	SignatureHelpProvider      *SignatureHelpOptions  `json:"signatureHelpProvider,omitempty"`
+	CompletionProvider         *CompletionOptions     `json:"completionProvider,omitempty"`
+	SemanticTokensProvider     *SemanticTokensOptions `json:"semanticTokensProvider,omitempty"`
 }
 
 type TextDocumentItem struct {
@@ -383,4 +384,29 @@ type FoldingRange struct {
 	EndLine        uint32 `json:"endLine"`
 	EndCharacter   uint32 `json:"endCharacter,omitempty"`
 	Kind           string `json:"kind,omitempty"`
+}
+
+type ResponseError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+type PrepareRenameParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type PrepareRenameResult struct {
+	Range       Range  `json:"range"`
+	Placeholder string `json:"placeholder"`
+}
+
+type LinkedEditingRangeParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type LinkedEditingRanges struct {
+	Ranges      []Range `json:"ranges"`
+	WordPattern string  `json:"wordPattern,omitempty"`
 }
