@@ -1,10 +1,10 @@
 {
     "name": "lugo-vscode",
     "displayName": "Lugo - Lua LSP",
-    "description": " A high-performance, zero-allocation Lua 5.4 parser and Language Server (LSP).",
+    "description": "A high-performance, zero-allocation Lua 5.4 parser and Language Server (LSP).",
     "publisher": "coalaura",
     "icon": "logo.png",
-    "version": "0.2.1",
+    "version": "0.3.0",
     "repository": {
         "type": "git",
         "url": "https://github.com/coalaura/lugo.git"
