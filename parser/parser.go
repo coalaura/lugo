@@ -70,12 +70,14 @@ type Parser struct {
 	curr      token.Token
 	peek      token.Token
 	loopDepth int
+	listStack []ast.NodeID
 }
 
-func New(source []byte) *Parser {
+func New(source []byte, tree *ast.Tree) *Parser {
 	p := &Parser{
-		lex:  lexer.New(source),
-		tree: ast.NewTree(source),
+		lex:       lexer.New(source),
+		tree:      tree,
+		listStack: make([]ast.NodeID, 0, 256),
 	}
 
 	p.nextToken()
@@ -91,12 +93,14 @@ func (p *Parser) GetTree() *ast.Tree {
 func (p *Parser) Parse() ast.NodeID {
 	block := p.parseBlock(token.EOF)
 
-	return p.tree.AddNode(ast.Node{
+	p.tree.Root = p.tree.AddNode(ast.Node{
 		Kind:  ast.KindFile,
 		Start: 0,
 		End:   uint32(len(p.tree.Source)),
 		Left:  block,
 	})
+
+	return p.tree.Root
 }
 
 func (p *Parser) nextToken() {
@@ -172,7 +176,7 @@ func (p *Parser) sync() {
 func (p *Parser) parseBlock(stopTokens ...token.Kind) ast.NodeID {
 	start := p.curr.Start
 
-	var stmts []ast.NodeID
+	stackStart := len(p.listStack)
 
 	for p.curr.Kind != token.EOF && !p.isAt(stopTokens...) {
 		if p.curr.Kind == token.Semicolon {
@@ -184,7 +188,7 @@ func (p *Parser) parseBlock(stopTokens ...token.Kind) ast.NodeID {
 		stmt := p.parseStatement()
 
 		if stmt != ast.InvalidNode {
-			stmts = append(stmts, stmt)
+			p.listStack = append(p.listStack, stmt)
 
 			if p.tree.Nodes[stmt].Kind == ast.KindReturn {
 				if p.curr.Kind != token.EOF && !p.isAt(stopTokens...) {
@@ -196,14 +200,16 @@ func (p *Parser) parseBlock(stopTokens ...token.Kind) ast.NodeID {
 		}
 	}
 
+	count := len(p.listStack) - stackStart
 	extraStart := uint32(len(p.tree.ExtraList))
 
-	p.tree.ExtraList = append(p.tree.ExtraList, stmts...)
+	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
+	p.listStack = p.listStack[:stackStart]
 
 	return p.tree.AddNode(ast.Node{
 		Kind:  ast.KindBlock,
 		Start: start, End: p.curr.End,
-		Extra: extraStart, Count: uint16(len(stmts)),
+		Extra: extraStart, Count: uint16(count),
 	})
 }
 
@@ -304,7 +310,7 @@ func (p *Parser) parseLocal() ast.NodeID {
 		})
 	}
 
-	var names []ast.NodeID
+	stackStart := len(p.listStack)
 
 	for {
 		if p.curr.Kind != token.Ident {
@@ -338,8 +344,7 @@ func (p *Parser) parseLocal() ast.NodeID {
 		}
 
 		p.tree.Nodes[ident].Extra = uint32(attr)
-
-		names = append(names, ident)
+		p.listStack = append(p.listStack, ident)
 
 		if p.curr.Kind == token.Comma {
 			p.nextToken()
@@ -348,11 +353,13 @@ func (p *Parser) parseLocal() ast.NodeID {
 		}
 	}
 
+	count := len(p.listStack) - stackStart
 	extraStart := uint32(len(p.tree.ExtraList))
 
-	p.tree.ExtraList = append(p.tree.ExtraList, names...)
+	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
+	p.listStack = p.listStack[:stackStart]
 
-	lhsList := p.tree.AddNode(ast.Node{Kind: ast.KindNameList, Extra: extraStart, Count: uint16(len(names))})
+	lhsList := p.tree.AddNode(ast.Node{Kind: ast.KindNameList, Extra: extraStart, Count: uint16(count)})
 
 	var rhsList ast.NodeID = ast.InvalidNode
 
@@ -383,8 +390,7 @@ func (p *Parser) parseIf() ast.NodeID {
 	}
 
 	thenBlock := p.parseBlock(token.ElseIf, token.Else, token.End)
-
-	var elseifs []ast.NodeID
+	stackStart := len(p.listStack)
 
 	for p.curr.Kind == token.ElseIf {
 		elseifStart := p.curr.Start
@@ -406,7 +412,7 @@ func (p *Parser) parseIf() ast.NodeID {
 			Left: cond, Right: blk,
 		})
 
-		elseifs = append(elseifs, elseifNode)
+		p.listStack = append(p.listStack, elseifNode)
 	}
 
 	var elseBlock ast.NodeID = ast.InvalidNode
@@ -430,23 +436,21 @@ func (p *Parser) parseIf() ast.NodeID {
 		p.error("expected 'end'")
 	}
 
+	if elseBlock != ast.InvalidNode {
+		p.listStack = append(p.listStack, elseBlock)
+	}
+
+	count := len(p.listStack) - stackStart
 	extraStart := uint32(len(p.tree.ExtraList))
 
-	p.tree.ExtraList = append(p.tree.ExtraList, elseifs...)
-
-	count := uint16(len(elseifs))
-
-	if elseBlock != ast.InvalidNode {
-		p.tree.ExtraList = append(p.tree.ExtraList, elseBlock)
-
-		count++
-	}
+	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
+	p.listStack = p.listStack[:stackStart]
 
 	return p.tree.AddNode(ast.Node{
 		Kind:  ast.KindIf,
 		Start: start, End: p.prev.End,
 		Left: condition, Right: thenBlock,
-		Extra: extraStart, Count: count,
+		Extra: extraStart, Count: uint16(count),
 	})
 }
 
@@ -538,10 +542,11 @@ func (p *Parser) parseFor() ast.NodeID {
 	if p.curr.Kind == token.Assign {
 		p.nextToken() // consume '='
 
-		var exprs []ast.NodeID
+		stackStart := len(p.listStack)
 
 		initExpr := p.parseExpression(Lowest)
-		exprs = append(exprs, initExpr)
+
+		p.listStack = append(p.listStack, initExpr)
 
 		if p.curr.Kind == token.Comma {
 			p.nextToken()
@@ -550,13 +555,15 @@ func (p *Parser) parseFor() ast.NodeID {
 		}
 
 		limitExpr := p.parseExpression(Lowest)
-		exprs = append(exprs, limitExpr)
+
+		p.listStack = append(p.listStack, limitExpr)
 
 		if p.curr.Kind == token.Comma {
 			p.nextToken()
 
 			stepExpr := p.parseExpression(Lowest)
-			exprs = append(exprs, stepExpr)
+
+			p.listStack = append(p.listStack, stepExpr)
 		}
 
 		if p.curr.Kind == token.Do {
@@ -577,17 +584,20 @@ func (p *Parser) parseFor() ast.NodeID {
 			p.error("expected 'end'")
 		}
 
+		count := len(p.listStack) - stackStart
 		extraStart := uint32(len(p.tree.ExtraList))
 
-		p.tree.ExtraList = append(p.tree.ExtraList, exprs...)
+		p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
+		p.listStack = p.listStack[:stackStart]
 
 		return p.tree.AddNode(ast.Node{
 			Kind: ast.KindForNum, Start: start, End: end,
-			Left: firstIdent, Right: block, Extra: extraStart, Count: uint16(len(exprs)),
+			Left: firstIdent, Right: block, Extra: extraStart, Count: uint16(count),
 		})
 	}
 
-	names := []ast.NodeID{firstIdent}
+	stackStart := len(p.listStack)
+	p.listStack = append(p.listStack, firstIdent)
 
 	for p.curr.Kind == token.Comma {
 		p.nextToken()
@@ -595,7 +605,7 @@ func (p *Parser) parseFor() ast.NodeID {
 		if p.curr.Kind == token.Ident {
 			ident := p.tree.AddNode(ast.Node{Kind: ast.KindIdent, Start: p.curr.Start, End: p.curr.End})
 
-			names = append(names, ident)
+			p.listStack = append(p.listStack, ident)
 
 			p.nextToken()
 		} else {
@@ -605,12 +615,14 @@ func (p *Parser) parseFor() ast.NodeID {
 		}
 	}
 
+	count := len(p.listStack) - stackStart
 	extraStartNames := uint32(len(p.tree.ExtraList))
 
-	p.tree.ExtraList = append(p.tree.ExtraList, names...)
+	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
+	p.listStack = p.listStack[:stackStart]
 
 	nameList := p.tree.AddNode(ast.Node{
-		Kind: ast.KindNameList, Extra: extraStartNames, Count: uint16(len(names)),
+		Kind: ast.KindNameList, Extra: extraStartNames, Count: uint16(count),
 		Start: p.tree.Nodes[firstIdent].Start, End: p.curr.End,
 	})
 
@@ -781,13 +793,12 @@ func (p *Parser) parseLabel() ast.NodeID {
 func (p *Parser) parseExprList() ast.NodeID {
 	start := p.curr.Start
 
-	var exprs []ast.NodeID
+	stackStart := len(p.listStack)
 
 	for {
 		expr := p.parseExpression(Lowest)
-
 		if expr != ast.InvalidNode {
-			exprs = append(exprs, expr)
+			p.listStack = append(p.listStack, expr)
 		}
 
 		if p.curr.Kind == token.Comma {
@@ -797,18 +808,20 @@ func (p *Parser) parseExprList() ast.NodeID {
 		}
 	}
 
-	if len(exprs) == 0 {
+	count := len(p.listStack) - stackStart
+	if count == 0 {
 		return ast.InvalidNode
 	}
 
 	extraStart := uint32(len(p.tree.ExtraList))
+	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
 
-	p.tree.ExtraList = append(p.tree.ExtraList, exprs...)
+	p.listStack = p.listStack[:stackStart]
 
 	return p.tree.AddNode(ast.Node{
 		Kind:  ast.KindExprList,
 		Start: start, End: p.curr.End,
-		Extra: extraStart, Count: uint16(len(exprs)),
+		Extra: extraStart, Count: uint16(count),
 	})
 }
 
@@ -1005,7 +1018,7 @@ func (p *Parser) parseTableConstructor() ast.NodeID {
 
 	p.nextToken()
 
-	var fields []ast.NodeID
+	stackStart := len(p.listStack)
 
 	for p.curr.Kind != token.RBrace && p.curr.Kind != token.EOF {
 		var field ast.NodeID
@@ -1037,6 +1050,7 @@ func (p *Parser) parseTableConstructor() ast.NodeID {
 			})
 		} else if p.curr.Kind == token.Ident && p.peek.Kind == token.Assign {
 			fieldStart := p.curr.Start
+
 			key := p.tree.AddNode(ast.Node{Kind: ast.KindIdent, Start: p.curr.Start, End: p.curr.End})
 
 			p.nextToken()
@@ -1052,7 +1066,7 @@ func (p *Parser) parseTableConstructor() ast.NodeID {
 			field = p.parseExpression(Lowest)
 		}
 
-		fields = append(fields, field)
+		p.listStack = append(p.listStack, field)
 
 		if p.curr.Kind == token.Comma || p.curr.Kind == token.Semicolon {
 			p.nextToken()
@@ -1069,22 +1083,22 @@ func (p *Parser) parseTableConstructor() ast.NodeID {
 		p.error("expected '}'")
 	}
 
+	count := len(p.listStack) - stackStart
 	extraStart := uint32(len(p.tree.ExtraList))
 
-	p.tree.ExtraList = append(p.tree.ExtraList, fields...)
+	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
+	p.listStack = p.listStack[:stackStart]
 
 	return p.tree.AddNode(ast.Node{
-		Kind: ast.KindTableExpr, Start: start, End: end, Extra: extraStart, Count: uint16(len(fields)),
+		Kind: ast.KindTableExpr, Start: start, End: end, Extra: extraStart, Count: uint16(count),
 	})
 }
 
 func (p *Parser) parseCallArgs(left ast.NodeID, callToken token.Kind) ast.NodeID {
 	start := p.tree.Nodes[left].Start
+	stackStart := len(p.listStack)
 
-	var (
-		args []ast.NodeID
-		end  uint32
-	)
+	var end uint32
 
 	switch callToken {
 	case token.LParen:
@@ -1094,7 +1108,7 @@ func (p *Parser) parseCallArgs(left ast.NodeID, callToken token.Kind) ast.NodeID
 			arg := p.parseExpression(Lowest)
 
 			if arg != ast.InvalidNode {
-				args = append(args, arg)
+				p.listStack = append(p.listStack, arg)
 			}
 
 			if p.curr.Kind == token.Comma {
@@ -1114,7 +1128,7 @@ func (p *Parser) parseCallArgs(left ast.NodeID, callToken token.Kind) ast.NodeID
 	case token.String:
 		arg := p.tree.AddNode(ast.Node{Kind: ast.KindString, Start: p.curr.Start, End: p.curr.End})
 
-		args = append(args, arg)
+		p.listStack = append(p.listStack, arg)
 
 		end = p.curr.End
 
@@ -1122,17 +1136,19 @@ func (p *Parser) parseCallArgs(left ast.NodeID, callToken token.Kind) ast.NodeID
 	case token.LBrace:
 		arg := p.parseTableConstructor()
 
-		args = append(args, arg)
+		p.listStack = append(p.listStack, arg)
 
 		end = p.tree.Nodes[arg].End
 	}
 
+	count := len(p.listStack) - stackStart
 	extraStart := uint32(len(p.tree.ExtraList))
 
-	p.tree.ExtraList = append(p.tree.ExtraList, args...)
+	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
+	p.listStack = p.listStack[:stackStart]
 
 	return p.tree.AddNode(ast.Node{
-		Kind: ast.KindCallExpr, Start: start, End: end, Left: left, Extra: extraStart, Count: uint16(len(args)),
+		Kind: ast.KindCallExpr, Start: start, End: end, Left: left, Extra: extraStart, Count: uint16(count),
 	})
 }
 
@@ -1143,7 +1159,7 @@ func (p *Parser) parseFunctionBody(start uint32) ast.NodeID {
 		p.nextToken() // consume '('
 	}
 
-	var params []ast.NodeID
+	stackStart := len(p.listStack)
 
 	for p.curr.Kind != token.RParen && p.curr.Kind != token.EOF {
 		if p.curr.Kind == token.Ident || p.curr.Kind == token.Vararg {
@@ -1155,7 +1171,7 @@ func (p *Parser) parseFunctionBody(start uint32) ast.NodeID {
 				p.tree.Nodes[param].Kind = ast.KindVararg
 			}
 
-			params = append(params, param)
+			p.listStack = append(p.listStack, param)
 
 			p.nextToken()
 
@@ -1191,14 +1207,16 @@ func (p *Parser) parseFunctionBody(start uint32) ast.NodeID {
 		p.error("expected 'end'")
 	}
 
+	count := len(p.listStack) - stackStart
 	extraStart := uint32(len(p.tree.ExtraList))
 
-	p.tree.ExtraList = append(p.tree.ExtraList, params...)
+	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
+	p.listStack = p.listStack[:stackStart]
 
 	return p.tree.AddNode(ast.Node{
 		Kind:  ast.KindFunctionExpr,
 		Start: start, End: end,
-		Extra: extraStart, Count: uint16(len(params)),
+		Extra: extraStart, Count: uint16(count),
 		Right: block,
 	})
 }

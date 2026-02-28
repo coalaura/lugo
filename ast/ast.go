@@ -84,6 +84,7 @@ type Node struct {
 // Reusing this for multiple files results in zero allocs.
 type Tree struct {
 	Source []byte
+	Root   NodeID
 
 	Nodes     []Node
 	Comments  []token.Token // Store comment boundaries continuously
@@ -151,27 +152,40 @@ func (t *Tree) Offset(line, col uint32) uint32 {
 	return offset
 }
 
-// NodeAt finds the narrowest AST node containing the given byte offset.
+// NodeAt finds the narrowest AST node containing the given byte offset in O(depth) time.
 func (t *Tree) NodeAt(offset uint32) NodeID {
-	var (
-		best   NodeID = InvalidNode
-		minLen uint32 = 0xFFFFFFFF
-	)
-
-	for i := 1; i < len(t.Nodes); i++ {
-		n := t.Nodes[i]
-
-		if n.Start <= offset && offset <= n.End {
-			length := n.End - n.Start
-
-			if length < minLen {
-				minLen = length
-				best = NodeID(i)
-			}
-		}
+	curr := t.Root
+	if curr == InvalidNode || offset < t.Nodes[curr].Start || offset > t.Nodes[curr].End {
+		return InvalidNode
 	}
 
-	return best
+	for {
+		node := t.Nodes[curr]
+
+		var next NodeID = InvalidNode
+
+		check := func(childID NodeID) {
+			if childID != InvalidNode && next == InvalidNode {
+				c := t.Nodes[childID]
+				if offset >= c.Start && offset <= c.End {
+					next = childID
+				}
+			}
+		}
+
+		check(node.Left)
+		check(node.Right)
+
+		for i := uint16(0); i < node.Count; i++ {
+			check(t.ExtraList[node.Extra+uint32(i)])
+		}
+
+		if next != InvalidNode {
+			curr = next
+		} else {
+			return curr
+		}
+	}
 }
 
 // AddNode pushes a node to the flat array and returns its ID.
@@ -199,6 +213,22 @@ func (t *Tree) AddNode(n Node) NodeID {
 	}
 
 	return id
+}
+
+func (t *Tree) Reset(source []byte) {
+	t.Source = source
+	t.Nodes = t.Nodes[:1] // Keep InvalidNode at index 0
+	t.ExtraList = t.ExtraList[:0]
+	t.Comments = t.Comments[:0]
+
+	t.LineOffsets = t.LineOffsets[:0]
+	t.LineOffsets = append(t.LineOffsets, 0)
+
+	for i, b := range source {
+		if b == '\n' {
+			t.LineOffsets = append(t.LineOffsets, uint32(i+1))
+		}
+	}
 }
 
 // HashBytes implements the FNV-1a 64-bit hash algorithm for zero-alloc map keys

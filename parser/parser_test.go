@@ -51,7 +51,7 @@ func TestParser_Valid(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := parser.New([]byte(tt.input))
+			p := parser.New([]byte(tt.input), nil)
 
 			p.Parse()
 
@@ -77,7 +77,7 @@ func TestParser_ErrorRecovery(t *testing.T) {
 		local b = 10
 	`
 
-	p := parser.New([]byte(input))
+	p := parser.New([]byte(input), nil)
 
 	p.Parse()
 

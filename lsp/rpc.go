@@ -2,33 +2,32 @@ package lsp
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
-	"strconv"
 )
 
-const ContentLengthPrefix = "Content-Length: "
+var contentLengthPrefix = []byte("Content-Length: ")
 
 func ReadMessage(r *bufio.Reader) ([]byte, error) {
 	var length int
 
 	for {
-		header, err := r.ReadString('\n')
+		line, err := r.ReadSlice('\n')
 		if err != nil {
 			return nil, err
 		}
 
-		if header == "\r\n" {
+		if len(line) <= 2 && line[0] == '\r' {
 			break
 		}
 
-		if len(header) > len(ContentLengthPrefix) && header[:len(ContentLengthPrefix)] == ContentLengthPrefix {
-			lengthStr := header[len(ContentLengthPrefix) : len(header)-2]
+		if bytes.HasPrefix(line, contentLengthPrefix) {
+			valBytes := line[len(contentLengthPrefix) : len(line)-2]
 
-			length, err = strconv.Atoi(lengthStr)
-			if err != nil {
-				return nil, err
+			for _, b := range valBytes {
+				length = length*10 + int(b-'0')
 			}
 		}
 	}

@@ -57,6 +57,34 @@ func New(tree *ast.Tree) *Resolver {
 	}
 }
 
+func (r *Resolver) Reset() {
+	nodeCount := len(r.Tree.Nodes)
+
+	if cap(r.References) >= nodeCount {
+		r.References = r.References[:nodeCount]
+
+		clear(r.References)
+	} else {
+		r.References = make([]ast.NodeID, nodeCount)
+	}
+
+	if cap(r.UsageCount) >= nodeCount {
+		r.UsageCount = r.UsageCount[:nodeCount]
+
+		clear(r.UsageCount)
+	} else {
+		r.UsageCount = make([]uint16, nodeCount)
+	}
+
+	r.GlobalDefs = r.GlobalDefs[:0]
+	r.GlobalRefs = r.GlobalRefs[:0]
+	r.FieldDefs = r.FieldDefs[:0]
+	r.PendingFields = r.PendingFields[:0]
+	r.scopeStack = r.scopeStack[:0]
+	r.LocalDefs = r.LocalDefs[:0]
+	r.ShadowedOuter = r.ShadowedOuter[:0]
+}
+
 func (r *Resolver) Resolve(root ast.NodeID) {
 	r.visit(root)
 

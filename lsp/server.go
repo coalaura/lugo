@@ -1586,8 +1586,6 @@ func (s *Server) indexWorkspace(rootPathOrURI string) {
 			} else if strings.HasSuffix(name, ".lua") {
 				b, fsErr := os.ReadFile(fullPath)
 				if fsErr == nil {
-					b = bytes.Clone(b)
-
 					uri := s.pathToURI(fullPath)
 
 					if runtime.GOOS == "windows" {
@@ -1612,25 +1610,39 @@ func (s *Server) indexWorkspace(rootPathOrURI string) {
 }
 
 func (s *Server) updateDocument(uri string, source []byte) {
-	p := parser.New(source)
+	var (
+		tree *ast.Tree
+		doc  *Document
+	)
+
+	if existing, exists := s.Documents[uri]; exists {
+		doc = existing
+		doc.Source = source
+
+		tree = existing.Tree
+		tree.Reset(source)
+	} else {
+		tree = ast.NewTree(source)
+
+		doc = &Document{
+			Source:   source,
+			Tree:     tree,
+			Resolver: semantic.New(tree),
+		}
+
+		s.Documents[uri] = doc
+	}
+
+	p := parser.New(source, tree)
 
 	rootID := p.Parse()
-	tree := p.GetTree()
 
-	res := semantic.New(tree)
+	doc.Errors = p.Errors
 
+	res := doc.Resolver
+
+	res.Reset()
 	res.Resolve(rootID)
-
-	doc := &Document{
-		Source:   source,
-		Tree:     tree,
-		Resolver: res,
-		Errors:   p.Errors,
-	}
-
-	if len(doc.Errors) != 0 {
-		s.Log.Println(uri, string(source))
-	}
 
 	for key, sym := range s.GlobalIndex {
 		if sym.URI == uri {
