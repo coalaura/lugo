@@ -50,10 +50,13 @@ func New(tree *ast.Tree) *Resolver {
 		Tree:          tree,
 		References:    make([]ast.NodeID, len(tree.Nodes)),
 		UsageCount:    make([]uint16, len(tree.Nodes)),
-		LocalDefs:     make([]ast.NodeID, 0, 128),
-		ShadowedOuter: make([]ShadowPair, 0, 16),
+		LocalDefs:     make([]ast.NodeID, 0, 512),
+		ShadowedOuter: make([]ShadowPair, 0, 64),
 		PendingFields: make([]FieldRef, 0, 128),
-		scopeStack:    make([]ast.NodeID, 0, 64),
+		FieldDefs:     make([]FieldDef, 0, 512),
+		GlobalDefs:    make([]ast.NodeID, 0, 256),
+		GlobalRefs:    make([]ast.NodeID, 0, 512),
+		scopeStack:    make([]ast.NodeID, 0, 256),
 	}
 }
 
@@ -160,14 +163,15 @@ func (r *Resolver) resolveReference(identID ast.NodeID, isDef bool) {
 		return
 	}
 
-	targetSrc := r.source(identID)
+	targetNode := r.Tree.Nodes[identID]
+	targetSrc := r.Tree.Source[targetNode.Start:targetNode.End]
 
 	for i := len(r.scopeStack) - 1; i >= 0; i-- {
 		defID := r.scopeStack[i]
+		defNode := r.Tree.Nodes[defID]
 
-		if bytes.Equal(targetSrc, r.source(defID)) {
+		if bytes.Equal(targetSrc, r.Tree.Source[defNode.Start:defNode.End]) {
 			r.References[identID] = defID
-
 			r.UsageCount[defID]++
 
 			return

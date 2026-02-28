@@ -117,6 +117,7 @@ func NewTree(source []byte) *Tree {
 		Source:      source,
 		Nodes:       make([]Node, 1, 1024), // reserve index 0
 		ExtraList:   make([]NodeID, 0, 1024),
+		Comments:    make([]token.Token, 0, 128),
 		LineOffsets: lines,
 	}
 
@@ -250,6 +251,29 @@ func (t *Tree) Reset(source []byte) {
 // HashBytes implements the FNV-1a 64-bit hash algorithm for zero-alloc map keys
 func HashBytes(b []byte) uint64 {
 	var hash uint64 = 14695981039346656037
+
+	for _, c := range b {
+		hash ^= uint64(c)
+		hash *= 1099511628211
+	}
+
+	return hash
+}
+
+// HashBytesConcat computes the FNV-1a hash of multiple byte slices separated by a dot,
+// without allocating a new concatenated slice on the heap.
+func HashBytesConcat(a, sep, b []byte) uint64 {
+	var hash uint64 = 14695981039346656037
+
+	for _, c := range a {
+		hash ^= uint64(c)
+		hash *= 1099511628211
+	}
+
+	for _, c := range sep {
+		hash ^= uint64(c)
+		hash *= 1099511628211
+	}
 
 	for _, c := range b {
 		hash ^= uint64(c)

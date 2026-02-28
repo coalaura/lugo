@@ -118,11 +118,12 @@ func (l *Lexer) Next() token.Token {
 
 		return token.Token{Kind: token.BitXor, Start: start, End: l.cursor}
 	case '<':
-		if l.ch == '=' {
+		switch l.ch {
+		case '=':
 			l.advance()
 
 			return token.Token{Kind: token.LessEq, Start: start, End: l.cursor}
-		} else if l.ch == '<' {
+		case '<':
 			l.advance()
 
 			return token.Token{Kind: token.ShiftLeft, Start: start, End: l.cursor}
@@ -130,11 +131,12 @@ func (l *Lexer) Next() token.Token {
 
 		return token.Token{Kind: token.Less, Start: start, End: l.cursor}
 	case '>':
-		if l.ch == '=' {
+		switch l.ch {
+		case '=':
 			l.advance()
 
 			return token.Token{Kind: token.GreaterEq, Start: start, End: l.cursor}
-		} else if l.ch == '>' {
+		case '>':
 			l.advance()
 
 			return token.Token{Kind: token.ShiftRight, Start: start, End: l.cursor}

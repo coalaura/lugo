@@ -70,6 +70,12 @@ type SemanticToken struct {
 	Modifiers uint32
 }
 
+type IgnorePattern struct {
+	Match    string
+	Contains string
+	Suffix   string
+}
+
 type Server struct {
 	Version           string
 	Reader            *bufio.Reader
@@ -84,8 +90,10 @@ type Server struct {
 	LibraryPaths      []string
 	lowerLibraryPaths []string
 	KnownGlobalGlobs  []string
-	IgnoreGlobs       []string
 	IsIndexing        bool
+
+	IgnoreGlobs     []string
+	compiledIgnores []IgnorePattern
 
 	semTokensBuf []SemanticToken
 	semDataBuf   []uint32
@@ -198,6 +206,26 @@ func (s *Server) handleMessage(req Request) {
 			}
 
 			s.IgnoreGlobs = params.InitializationOptions.IgnoreGlobs
+
+			s.compiledIgnores = make([]IgnorePattern, 0, len(s.IgnoreGlobs))
+
+			for _, g := range s.IgnoreGlobs {
+				if strings.ContainsAny(g, "*?[") {
+					s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{Match: g})
+				} else {
+					cleanGlob := strings.TrimPrefix(strings.TrimPrefix(g, "**/"), "*/")
+					cleanGlob = strings.TrimSuffix(strings.TrimSuffix(cleanGlob, "/**"), "/*")
+
+					if cleanGlob != "" {
+						cleanPath := filepath.FromSlash(cleanGlob)
+
+						s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{
+							Contains: string(filepath.Separator) + cleanPath + string(filepath.Separator),
+							Suffix:   string(filepath.Separator) + cleanPath,
+						})
+					}
+				}
+			}
 
 			s.KnownGlobals = make(map[string]bool)
 			s.KnownGlobalGlobs = []string{}
@@ -2592,7 +2620,13 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		doc.ExtractLuaDocFields(defID, func(name []byte) {
 			fieldHash := ast.HashBytes(name)
 
-			s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fieldHash}, uri, defID, depth, string(identBytes)+"."+string(name))
+			buf := make([]byte, 0, len(identBytes)+1+len(name))
+
+			buf = append(buf, identBytes...)
+			buf = append(buf, '.')
+			buf = append(buf, name...)
+
+			s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fieldHash}, uri, defID, depth, string(buf))
 		})
 
 		// Module Aliasing
@@ -2612,20 +2646,27 @@ func (s *Server) updateDocument(uri string, source []byte) {
 						if bytes.Equal(fd.ReceiverName, localName) {
 							propBytes := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
 
-							s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(identBytes)+"."+string(propBytes))
+							buf := make([]byte, 0, len(identBytes)+1+len(propBytes))
+							buf = append(buf, identBytes...)
+							buf = append(buf, '.')
+							buf = append(buf, propBytes...)
+
+							s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(buf))
 						} else if len(fd.ReceiverName) > len(localName) && bytes.HasPrefix(fd.ReceiverName, localName) && fd.ReceiverName[len(localName)] == '.' {
 							suffix := fd.ReceiverName[len(localName)+1:]
 
-							newRec := make([]byte, 0, len(globalBytes)+1+len(suffix))
-							newRec = append(newRec, globalBytes...)
-							newRec = append(newRec, '.')
-							newRec = append(newRec, suffix...)
-
-							newRecHash := ast.HashBytes(newRec)
+							newRecHash := ast.HashBytesConcat(globalBytes, []byte{'.'}, suffix)
 
 							propBytes := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
 
-							s.setGlobalSymbol(GlobalKey{ReceiverHash: newRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(identBytes)+"."+string(suffix)+"."+string(propBytes))
+							buf := make([]byte, 0, len(identBytes)+2+len(suffix)+len(propBytes))
+							buf = append(buf, identBytes...)
+							buf = append(buf, '.')
+							buf = append(buf, suffix...)
+							buf = append(buf, '.')
+							buf = append(buf, propBytes...)
+
+							s.setGlobalSymbol(GlobalKey{ReceiverHash: newRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(buf))
 						}
 					}
 				}
@@ -2644,13 +2685,18 @@ func (s *Server) updateDocument(uri string, source []byte) {
 
 			propBytes := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
 
-			sep := "."
+			sep := byte('.')
 
 			if doc.Tree.Nodes[doc.Tree.Nodes[fd.NodeID].Parent].Kind == ast.KindMethodName {
-				sep = ":"
+				sep = ':'
 			}
 
-			s.setGlobalSymbol(GlobalKey{ReceiverHash: fd.ReceiverHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(fd.ReceiverName)+sep+string(propBytes))
+			buf := make([]byte, 0, len(fd.ReceiverName)+1+len(propBytes))
+			buf = append(buf, fd.ReceiverName...)
+			buf = append(buf, sep)
+			buf = append(buf, propBytes...)
+
+			s.setGlobalSymbol(GlobalKey{ReceiverHash: fd.ReceiverHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(buf))
 		}
 	}
 
@@ -3272,22 +3318,15 @@ func (s *Server) indexEmbeddedStdlib() {
 }
 
 func (s *Server) isIgnored(fullPath, name string) bool {
-	for _, g := range s.IgnoreGlobs {
-		if matched, _ := filepath.Match(g, name); matched {
-			return true
-		}
-
-		cleanGlob := strings.TrimPrefix(strings.TrimPrefix(g, "**/"), "*/")
-		cleanGlob = strings.TrimSuffix(strings.TrimSuffix(cleanGlob, "/**"), "/*")
-
-		if cleanGlob == "" {
-			continue
-		}
-
-		cleanPath := filepath.FromSlash(cleanGlob)
-
-		if strings.Contains(fullPath, string(filepath.Separator)+cleanPath+string(filepath.Separator)) || strings.HasSuffix(fullPath, string(filepath.Separator)+cleanPath) {
-			return true
+	for _, p := range s.compiledIgnores {
+		if p.Match != "" {
+			if matched, _ := filepath.Match(p.Match, name); matched {
+				return true
+			}
+		} else {
+			if strings.Contains(fullPath, p.Contains) || strings.HasSuffix(fullPath, p.Suffix) {
+				return true
+			}
 		}
 	}
 
