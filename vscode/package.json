@@ -4,7 +4,7 @@
     "description": "A high-performance, zero-allocation Lua 5.4 parser and Language Server (LSP).",
     "publisher": "coalaura",
     "icon": "logo.png",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "galleryBanner": {
 		"color": "#161928",
 		"theme": "dark"
