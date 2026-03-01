@@ -2966,7 +2966,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			if s.DiagUnusedVariables && doc.Resolver.UsageCount[defID] == 0 {
 				s.diagBuf = append(s.diagBuf, Diagnostic{
 					Range:    r,
-					Severity: SeverityHint,
+					Severity: SeverityWarning,
 					Code:     "unused-local",
 					Tags:     []DiagnosticTag{Unnecessary},
 					Message:  "Unused local variable: '" + string(nameBytes) + "'. If this is intentional, prefix the name with an underscore (e.g., '_" + string(nameBytes) + "').",
@@ -3112,7 +3112,7 @@ func (s *Server) publishDiagnostics(uri string) {
 								Start: Position{Line: sLine, Character: sCol},
 								End:   Position{Line: eLine, Character: eCol},
 							},
-							Severity: SeverityHint,
+							Severity: SeverityWarning,
 							Tags:     []DiagnosticTag{Unnecessary},
 							Message:  "Unreachable code detected.",
 						})
