@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"iter"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -40,6 +41,12 @@ type GlobalSymbol struct {
 type GlobalKey struct {
 	ReceiverHash uint64 // 0 if it's a root global
 	PropHash     uint64
+}
+
+type GlobalReference struct {
+	Doc    *Document
+	URI    string
+	NodeID ast.NodeID
 }
 
 type CallerKey struct {
@@ -498,17 +505,9 @@ func (s *Server) handleMessage(req Request) {
 		ctx := s.resolveSymbolAt(uri, offset)
 
 		if ctx != nil && ctx.TargetDefID != ast.InvalidNode {
-			defNode := ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID]
-
-			startLine, startCol := ctx.TargetDoc.Tree.Position(defNode.Start)
-			endLine, endCol := ctx.TargetDoc.Tree.Position(defNode.End)
-
 			loc := Location{
-				URI: ctx.TargetURI,
-				Range: Range{
-					Start: Position{Line: startLine, Character: startCol},
-					End:   Position{Line: endLine, Character: endCol},
-				},
+				URI:   ctx.TargetURI,
+				Range: getNodeRange(ctx.TargetDoc.Tree, ctx.TargetDefID),
 			}
 
 			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []Location{loc}})
@@ -856,17 +855,11 @@ func (s *Server) handleMessage(req Request) {
 			}
 		}
 
-		identNode := doc.Tree.Nodes[ctx.IdentNodeID]
-
-		startLine, startCol := doc.Tree.Position(identNode.Start)
-		endLine, endCol := doc.Tree.Position(identNode.End)
+		r := getNodeRange(doc.Tree, ctx.IdentNodeID)
 
 		result := Hover{
 			Contents: MarkupContent{Kind: "markdown", Value: hoverText},
-			Range: &Range{
-				Start: Position{Line: startLine, Character: startCol},
-				End:   Position{Line: endLine, Character: endCol},
-			},
+			Range:    &r,
 		}
 
 		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: result})
@@ -1010,16 +1003,8 @@ func (s *Server) handleMessage(req Request) {
 					continue
 				}
 
-				identNode := doc.Tree.Nodes[identNodeID]
-
-				startLine, startCol := doc.Tree.Position(identNode.Start)
-				endLine, endCol := doc.Tree.Position(identNode.End)
-
 				lenses = append(lenses, CodeLens{
-					Range: Range{
-						Start: Position{Line: startLine, Character: startCol},
-						End:   Position{Line: endLine, Character: endCol},
-					},
+					Range: getNodeRange(doc.Tree, identNodeID),
 					Data: map[string]any{
 						"uri":    uri,
 						"nodeId": identNodeID,
@@ -1321,16 +1306,6 @@ func (s *Server) handleMessage(req Request) {
 			return
 		}
 
-		getRange := func(start, end uint32) Range {
-			sLine, sCol := doc.Tree.Position(start)
-			eLine, eCol := doc.Tree.Position(end)
-
-			return Range{
-				Start: Position{Line: sLine, Character: sCol},
-				End:   Position{Line: eLine, Character: eCol},
-			}
-		}
-
 		var walkTable func(tableID ast.NodeID) []DocumentSymbol
 
 		walkTable = func(tableID ast.NodeID) []DocumentSymbol {
@@ -1364,8 +1339,8 @@ func (s *Server) handleMessage(req Request) {
 					syms = append(syms, DocumentSymbol{
 						Name:           name,
 						Kind:           kind,
-						Range:          getRange(fieldNode.Start, fieldNode.End),
-						SelectionRange: getRange(keyNode.Start, keyNode.End),
+						Range:          getNodeRange(doc.Tree, fieldID),
+						SelectionRange: getNodeRange(doc.Tree, fieldNode.Left),
 						Children:       children,
 					})
 				}
@@ -1405,8 +1380,8 @@ func (s *Server) handleMessage(req Request) {
 				syms = append(syms, DocumentSymbol{
 					Name:           name,
 					Kind:           kind,
-					Range:          getRange(node.Start, node.End),
-					SelectionRange: getRange(nameNode.Start, nameNode.End),
+					Range:          getNodeRange(doc.Tree, nodeID),
+					SelectionRange: getNodeRange(doc.Tree, node.Left),
 				})
 			case ast.KindLocalAssign, ast.KindAssign:
 				lhsList := doc.Tree.Nodes[node.Left]
@@ -1435,23 +1410,23 @@ func (s *Server) handleMessage(req Request) {
 							syms = append(syms, DocumentSymbol{
 								Name:           name,
 								Kind:           SymbolKindFunction,
-								Range:          getRange(node.Start, node.End),
-								SelectionRange: getRange(lNode.Start, lNode.End),
+								Range:          getNodeRange(doc.Tree, nodeID),
+								SelectionRange: getNodeRange(doc.Tree, lID),
 							})
 						} else if rNode.Kind == ast.KindTableExpr {
 							syms = append(syms, DocumentSymbol{
 								Name:           name,
 								Kind:           SymbolKindClass,
-								Range:          getRange(node.Start, node.End),
-								SelectionRange: getRange(lNode.Start, lNode.End),
+								Range:          getNodeRange(doc.Tree, nodeID),
+								SelectionRange: getNodeRange(doc.Tree, lID),
 								Children:       walkTable(rID),
 							})
 						} else if node.Kind == ast.KindLocalAssign {
 							syms = append(syms, DocumentSymbol{
 								Name:           name,
 								Kind:           SymbolKindVariable,
-								Range:          getRange(lNode.Start, lNode.End),
-								SelectionRange: getRange(lNode.Start, lNode.End),
+								Range:          getNodeRange(doc.Tree, lID),
+								SelectionRange: getNodeRange(doc.Tree, lID),
 							})
 						}
 					}
@@ -1507,7 +1482,6 @@ func (s *Server) handleMessage(req Request) {
 				continue
 			}
 
-			node := doc.Tree.Nodes[sym.NodeID]
 			kind := SymbolKindVariable
 
 			valID := doc.getAssignedValue(sym.NodeID)
@@ -1529,18 +1503,12 @@ func (s *Server) handleMessage(req Request) {
 				kind = SymbolKindField
 			}
 
-			startLine, startCol := doc.Tree.Position(node.Start)
-			endLine, endCol := doc.Tree.Position(node.End)
-
 			results = append(results, SymbolInformation{
 				Name: sym.Name,
 				Kind: kind,
 				Location: Location{
-					URI: sym.URI,
-					Range: Range{
-						Start: Position{Line: startLine, Character: startCol},
-						End:   Position{Line: endLine, Character: endCol},
-					},
+					URI:   sym.URI,
+					Range: getNodeRange(doc.Tree, sym.NodeID),
 				},
 			})
 
@@ -1593,18 +1561,11 @@ func (s *Server) handleMessage(req Request) {
 			return
 		}
 
-		node := doc.Tree.Nodes[ctx.IdentNodeID]
-		sLine, sCol := doc.Tree.Position(node.Start)
-		eLine, eCol := doc.Tree.Position(node.End)
-
 		WriteMessage(s.Writer, Response{
 			RPC: "2.0",
 			ID:  req.ID,
 			Result: PrepareRenameResult{
-				Range: Range{
-					Start: Position{Line: sLine, Character: sCol},
-					End:   Position{Line: eLine, Character: eCol},
-				},
+				Range:       getNodeRange(doc.Tree, ctx.IdentNodeID),
 				Placeholder: ctx.IdentName,
 			},
 		})
@@ -1638,14 +1599,7 @@ func (s *Server) handleMessage(req Request) {
 
 		for i, def := range doc.Resolver.References {
 			if def == ctx.TargetDefID {
-				node := doc.Tree.Nodes[i]
-				sLine, sCol := doc.Tree.Position(node.Start)
-				eLine, eCol := doc.Tree.Position(node.End)
-
-				ranges = append(ranges, Range{
-					Start: Position{Line: sLine, Character: sCol},
-					End:   Position{Line: eLine, Character: eCol},
-				})
+				ranges = append(ranges, getNodeRange(doc.Tree, ast.NodeID(i)))
 			}
 		}
 
@@ -1763,19 +1717,12 @@ func (s *Server) handleMessage(req Request) {
 
 				cKey := CallerKey{URI: loc.URI, Def: enclosingFuncDefID}
 
-				callNode := refDoc.Tree.Nodes[callNodeID]
-
-				sL, sC := refDoc.Tree.Position(callNode.Start)
-				eL, eC := refDoc.Tree.Position(callNode.End)
-
-				callers[cKey] = append(callers[cKey], Range{
-					Start: Position{Line: sL, Character: sC},
-					End:   Position{Line: eL, Character: eC},
-				})
+				callers[cKey] = append(callers[cKey], getNodeRange(refDoc.Tree, callNodeID))
 			}
 		}
 
 		var result []CallHierarchyIncomingCall
+
 		for key, ranges := range callers {
 			cDoc := s.Documents[key.URI]
 			if cDoc == nil {
@@ -1869,13 +1816,7 @@ func (s *Server) handleMessage(req Request) {
 					if ctx != nil && ctx.TargetDefID != ast.InvalidNode && ctx.TargetDoc != nil {
 						tKey := TargetKey{URI: ctx.TargetURI, Def: ctx.TargetDefID}
 
-						sL, sC := doc.Tree.Position(node.Start)
-						eL, eC := doc.Tree.Position(node.End)
-
-						targets[tKey] = append(targets[tKey], Range{
-							Start: Position{Line: sL, Character: sC},
-							End:   Position{Line: eL, Character: eC},
-						})
+						targets[tKey] = append(targets[tKey], getNodeRange(doc.Tree, id))
 					}
 				}
 			}
@@ -1951,16 +1892,8 @@ func (s *Server) handleMessage(req Request) {
 
 			seen[dUri][nodeID] = true
 
-			node := dDoc.Tree.Nodes[nodeID]
-
-			startLine, startCol := dDoc.Tree.Position(node.Start)
-			endLine, endCol := dDoc.Tree.Position(node.End)
-
 			changes[dUri] = append(changes[dUri], TextEdit{
-				Range: Range{
-					Start: Position{Line: startLine, Character: startCol},
-					End:   Position{Line: endLine, Character: endCol},
-				},
+				Range:   getNodeRange(dDoc.Tree, nodeID),
 				NewText: params.NewName,
 			})
 		}
@@ -2822,7 +2755,7 @@ func (s *Server) updateDocument(uri string, source []byte) {
 
 		s.setGlobalSymbol(GlobalKey{ReceiverHash: 0, PropHash: hash}, uri, defID, depth, string(identBytes))
 
-		doc.ExtractLuaDocFields(defID, func(name []byte) {
+		for name := range doc.ExtractLuaDocFields(defID) {
 			fieldHash := ast.HashBytes(name)
 
 			buf := make([]byte, 0, len(identBytes)+1+len(name))
@@ -2832,7 +2765,7 @@ func (s *Server) updateDocument(uri string, source []byte) {
 			buf = append(buf, name...)
 
 			s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fieldHash}, uri, defID, depth, string(buf))
-		})
+		}
 
 		// Module Aliasing
 		valID := doc.getAssignedValue(defID)
@@ -2976,18 +2909,14 @@ func (s *Server) publishDiagnostics(uri string) {
 
 	// 1. Parse Errors
 	for _, err := range doc.Errors {
-		startLine, startCol := doc.Tree.Position(err.Start)
-		endLine, endCol := doc.Tree.Position(err.End)
+		r := getRange(doc.Tree, err.Start, err.End)
 
-		if startLine == endLine && startCol == endCol {
-			endCol++
+		if r.Start == r.End {
+			r.End.Character++
 		}
 
 		s.diagBuf = append(s.diagBuf, Diagnostic{
-			Range: Range{
-				Start: Position{Line: startLine, Character: startCol},
-				End:   Position{Line: endLine, Character: endCol},
-			},
+			Range:    r,
 			Severity: SeverityError,
 			Code:     "parse-error",
 			Message:  err.Message,
@@ -3012,9 +2941,6 @@ func (s *Server) publishDiagnostics(uri string) {
 			key := GlobalKey{ReceiverHash: 0, PropHash: hash}
 
 			if _, exists := s.GlobalIndex[key]; !exists {
-				startLine, startCol := doc.Tree.Position(node.Start)
-				endLine, endCol := doc.Tree.Position(node.End)
-
 				identStr := string(identBytes)
 				msg := fmt.Sprintf("Undefined global '%s'.", identStr)
 
@@ -3028,10 +2954,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				}
 
 				s.diagBuf = append(s.diagBuf, Diagnostic{
-					Range: Range{
-						Start: Position{Line: startLine, Character: startCol},
-						End:   Position{Line: endLine, Character: endCol},
-					},
+					Range:    getNodeRange(doc.Tree, refID),
 					Severity: SeverityWarning,
 					Code:     "undefined-global",
 					Message:  msg,
@@ -3071,14 +2994,8 @@ func (s *Server) publishDiagnostics(uri string) {
 				}
 			}
 
-			startLine, startCol := doc.Tree.Position(node.Start)
-			endLine, endCol := doc.Tree.Position(node.End)
-
 			s.diagBuf = append(s.diagBuf, Diagnostic{
-				Range: Range{
-					Start: Position{Line: startLine, Character: startCol},
-					End:   Position{Line: endLine, Character: endCol},
-				},
+				Range:    getNodeRange(doc.Tree, defID),
 				Severity: SeverityWarning,
 				Code:     "implicit-global",
 				Message:  fmt.Sprintf("Implicit global creation '%s'. Did you forget the 'local' keyword?", string(identBytes)),
@@ -3096,13 +3013,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				continue
 			}
 
-			startLine, startCol := doc.Tree.Position(node.Start)
-			endLine, endCol := doc.Tree.Position(node.End)
-
-			r := Range{
-				Start: Position{Line: startLine, Character: startCol},
-				End:   Position{Line: endLine, Character: endCol},
-			}
+			r := getNodeRange(doc.Tree, defID)
 
 			if doc.Resolver.UsageCount[defID] == 0 {
 				category := "variable"
@@ -3180,11 +3091,6 @@ func (s *Server) publishDiagnostics(uri string) {
 						var related []DiagnosticRelatedInformation
 
 						if symDoc, ok := s.Documents[sym.URI]; ok {
-							sNode := symDoc.Tree.Nodes[sym.NodeID]
-
-							sLine, sCol := symDoc.Tree.Position(sNode.Start)
-							eLine, eCol := symDoc.Tree.Position(sNode.End)
-
 							var fromFile string
 
 							if sym.URI != uri {
@@ -3193,11 +3099,8 @@ func (s *Server) publishDiagnostics(uri string) {
 
 							related = append(related, DiagnosticRelatedInformation{
 								Location: Location{
-									URI: sym.URI,
-									Range: Range{
-										Start: Position{Line: sLine, Character: sCol},
-										End:   Position{Line: eLine, Character: eCol},
-									},
+									URI:   sym.URI,
+									Range: getNodeRange(symDoc.Tree, sym.NodeID),
 								},
 								Message: fmt.Sprintf("Global '%s' defined here%s", string(nameBytes), fromFile),
 							})
@@ -3222,32 +3125,18 @@ func (s *Server) publishDiagnostics(uri string) {
 			node := doc.Tree.Nodes[pair.Shadowing]
 			nameBytes := doc.Source[node.Start:node.End]
 
-			startLine, startCol := doc.Tree.Position(node.Start)
-			endLine, endCol := doc.Tree.Position(node.End)
-
 			var related []DiagnosticRelatedInformation
-
-			shadowedNode := doc.Tree.Nodes[pair.Shadowed]
-
-			sLine, sCol := doc.Tree.Position(shadowedNode.Start)
-			eLine, eCol := doc.Tree.Position(shadowedNode.End)
 
 			related = append(related, DiagnosticRelatedInformation{
 				Location: Location{
-					URI: uri,
-					Range: Range{
-						Start: Position{Line: sLine, Character: sCol},
-						End:   Position{Line: eLine, Character: eCol},
-					},
+					URI:   uri,
+					Range: getNodeRange(doc.Tree, pair.Shadowed),
 				},
 				Message: fmt.Sprintf("Outer local '%s' defined here", string(nameBytes)),
 			})
 
 			s.diagBuf = append(s.diagBuf, Diagnostic{
-				Range: Range{
-					Start: Position{Line: startLine, Character: startCol},
-					End:   Position{Line: endLine, Character: endCol},
-				},
+				Range:              getNodeRange(doc.Tree, pair.Shadowing),
 				Severity:           SeverityWarning,
 				Code:               "shadow-outer",
 				Message:            fmt.Sprintf("Local variable '%s' shadows a variable from an outer scope.", string(nameBytes)),
@@ -3271,17 +3160,10 @@ func (s *Server) publishDiagnostics(uri string) {
 					exprLine, _ := doc.Tree.Position(firstExprNode.Start)
 
 					if exprLine > retLine {
-						sLine, sCol := doc.Tree.Position(firstExprNode.Start)
-
 						lastExprID := doc.Tree.ExtraList[exprList.Extra+uint32(exprList.Count-1)]
-						lastExprNode := doc.Tree.Nodes[lastExprID]
-						eLine, eCol := doc.Tree.Position(lastExprNode.End)
 
 						s.diagBuf = append(s.diagBuf, Diagnostic{
-							Range: Range{
-								Start: Position{Line: sLine, Character: sCol},
-								End:   Position{Line: eLine, Character: eCol},
-							},
+							Range:    getRange(doc.Tree, firstExprNode.Start, doc.Tree.Nodes[lastExprID].End),
 							Severity: SeverityWarning,
 							Code:     "ambiguous-return",
 							Message:  "Ambiguous return: expression on the next line is executed as the return value. Use 'return;' to separate statements.",
@@ -3299,17 +3181,8 @@ func (s *Server) publishDiagnostics(uri string) {
 					if terminalFound {
 						lastStmtID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
 
-						startNode := doc.Tree.Nodes[stmtID]
-						endNode := doc.Tree.Nodes[lastStmtID]
-
-						sLine, sCol := doc.Tree.Position(startNode.Start)
-						eLine, eCol := doc.Tree.Position(endNode.End)
-
 						s.diagBuf = append(s.diagBuf, Diagnostic{
-							Range: Range{
-								Start: Position{Line: sLine, Character: sCol},
-								End:   Position{Line: eLine, Character: eCol},
-							},
+							Range:    getRange(doc.Tree, doc.Tree.Nodes[stmtID].Start, doc.Tree.Nodes[lastStmtID].End),
 							Severity: SeverityWarning,
 							Code:     "unreachable-code",
 							Tags:     []DiagnosticTag{Unnecessary},
@@ -3340,9 +3213,6 @@ func (s *Server) publishDiagnostics(uri string) {
 			if ctx != nil && ctx.TargetDefID != ast.InvalidNode && ctx.TargetDefID != ast.NodeID(i) {
 				isDep, msg := ctx.TargetDoc.HasDeprecatedTag(ctx.TargetDefID)
 				if isDep {
-					startLine, startCol := doc.Tree.Position(node.Start)
-					endLine, endCol := doc.Tree.Position(node.End)
-
 					diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", ctx.DisplayName)
 
 					if msg != "" {
@@ -3352,10 +3222,7 @@ func (s *Server) publishDiagnostics(uri string) {
 					}
 
 					s.diagBuf = append(s.diagBuf, Diagnostic{
-						Range: Range{
-							Start: Position{Line: startLine, Character: startCol},
-							End:   Position{Line: endLine, Character: endCol},
-						},
+						Range:    getNodeRange(doc.Tree, ast.NodeID(i)),
 						Severity: SeverityHint,
 						Code:     "deprecated",
 						Tags:     []DiagnosticTag{Deprecated},
@@ -3527,42 +3394,8 @@ func (s *Server) getReferences(ctx *SymbolContext, includeDeclaration bool) []Lo
 		}
 	}
 
-	if ctx.IsGlobal {
-		for dUri, dDoc := range s.Documents {
-			if ctx.GKey.ReceiverHash == 0 {
-				for _, id := range dDoc.Resolver.GlobalDefs {
-					node := dDoc.Tree.Nodes[id]
-
-					if ast.HashBytes(dDoc.Source[node.Start:node.End]) == ctx.GKey.PropHash {
-						addRef(dDoc, dUri, id)
-					}
-				}
-
-				for _, id := range dDoc.Resolver.GlobalRefs {
-					node := dDoc.Tree.Nodes[id]
-
-					if ast.HashBytes(dDoc.Source[node.Start:node.End]) == ctx.GKey.PropHash {
-						if dDoc.Resolver.References[id] == ast.InvalidNode {
-							addRef(dDoc, dUri, id)
-						}
-					}
-				}
-			} else {
-				for _, fd := range dDoc.Resolver.FieldDefs {
-					if fd.ReceiverHash == ctx.GKey.ReceiverHash && fd.PropHash == ctx.GKey.PropHash {
-						addRef(dDoc, dUri, fd.NodeID)
-					}
-				}
-
-				for _, pf := range dDoc.Resolver.PendingFields {
-					if pf.ReceiverHash == ctx.GKey.ReceiverHash && pf.PropHash == ctx.GKey.PropHash {
-						if dDoc.Resolver.References[pf.PropNodeID] == ast.InvalidNode {
-							addRef(dDoc, dUri, pf.PropNodeID)
-						}
-					}
-				}
-			}
-		}
+	for ref := range s.iterateGlobalReferences(ctx) {
+		addRef(ref.Doc, ref.URI, ref.NodeID)
 	}
 
 	if locations == nil {
@@ -3622,44 +3455,20 @@ func (s *Server) getDocumentHighlights(uri string, doc *Document, ctx *SymbolCon
 		}
 	}
 
-	if ctx.IsGlobal {
-		for _, id := range doc.Resolver.GlobalDefs {
-			if ast.HashBytes(doc.Source[doc.Tree.Nodes[id].Start:doc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
-				if ctx.GKey.ReceiverHash == 0 {
-					addHighlight(id, WriteHighlight)
+	for ref := range s.iterateGlobalReferences(ctx) {
+		if ref.URI == uri {
+			kind := ReadHighlight
+
+			if isWriteAccess(ref.Doc.Tree, ref.NodeID) {
+				kind = WriteHighlight
+			} else {
+				pNode := ref.Doc.Tree.Nodes[ref.Doc.Tree.Nodes[ref.NodeID].Parent]
+				if pNode.Kind == ast.KindFunctionStmt || pNode.Kind == ast.KindLocalFunction {
+					kind = WriteHighlight
 				}
 			}
-		}
-		for _, id := range doc.Resolver.GlobalRefs {
-			if ast.HashBytes(doc.Source[doc.Tree.Nodes[id].Start:doc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
-				if ctx.GKey.ReceiverHash == 0 && doc.Resolver.References[id] == ast.InvalidNode {
-					kind := ReadHighlight
 
-					if isWriteAccess(doc.Tree, id) {
-						kind = WriteHighlight
-					}
-
-					addHighlight(id, kind)
-				}
-			}
-		}
-		for _, fd := range doc.Resolver.FieldDefs {
-			if fd.ReceiverHash == ctx.GKey.ReceiverHash && fd.PropHash == ctx.GKey.PropHash {
-				addHighlight(fd.NodeID, WriteHighlight)
-			}
-		}
-		for _, pf := range doc.Resolver.PendingFields {
-			if pf.ReceiverHash == ctx.GKey.ReceiverHash && pf.PropHash == ctx.GKey.PropHash {
-				if doc.Resolver.References[pf.PropNodeID] == ast.InvalidNode {
-					kind := ReadHighlight
-
-					if isWriteAccess(doc.Tree, pf.PropNodeID) {
-						kind = WriteHighlight
-					}
-
-					addHighlight(pf.PropNodeID, kind)
-				}
-			}
+			addHighlight(ref.NodeID, kind)
 		}
 	}
 
@@ -3973,29 +3782,15 @@ func (s *Server) buildCallHierarchyItemFromDef(uri string, doc *Document, defID 
 		kind = SymbolKindFunction
 	}
 
-	sLine, sCol := doc.Tree.Position(node.Start)
-	eLine, eCol := doc.Tree.Position(node.End)
-
-	selRange := Range{
-		Start: Position{Line: sLine, Character: sCol},
-		End:   Position{Line: eLine, Character: eCol},
-	}
-
+	selRange := getNodeRange(doc.Tree, defID)
 	fullRange := selRange
+
 	if isFunc {
-		fNode := doc.Tree.Nodes[valID]
-
-		fSL, fSC := doc.Tree.Position(fNode.Start)
-		fEL, fEC := doc.Tree.Position(fNode.End)
-
-		fullRange = Range{
-			Start: Position{Line: fSL, Character: fSC},
-			End:   Position{Line: fEL, Character: fEC},
-		}
+		fullRange = getNodeRange(doc.Tree, valID)
 	} else if node.Kind == ast.KindFile {
 		fullRange = Range{
 			Start: Position{Line: 0, Character: 0},
-			End:   Position{Line: sLine, Character: sCol},
+			End:   selRange.Start,
 		}
 
 		if len(doc.Tree.LineOffsets) > 0 {
@@ -4120,6 +3915,54 @@ func (s *Server) getEnclosingFunctionDef(doc *Document, id ast.NodeID) ast.NodeI
 	return doc.Tree.Root
 }
 
+func (s *Server) iterateGlobalReferences(ctx *SymbolContext) iter.Seq[GlobalReference] {
+	return func(yield func(GlobalReference) bool) {
+		if !ctx.IsGlobal {
+			return
+		}
+
+		for dUri, dDoc := range s.Documents {
+			if ctx.GKey.ReceiverHash == 0 {
+				for _, id := range dDoc.Resolver.GlobalDefs {
+					if ast.HashBytes(dDoc.Source[dDoc.Tree.Nodes[id].Start:dDoc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
+						if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: id}) {
+							return
+						}
+					}
+				}
+
+				for _, id := range dDoc.Resolver.GlobalRefs {
+					if ast.HashBytes(dDoc.Source[dDoc.Tree.Nodes[id].Start:dDoc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
+						if dDoc.Resolver.References[id] == ast.InvalidNode {
+							if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: id}) {
+								return
+							}
+						}
+					}
+				}
+			} else {
+				for _, fd := range dDoc.Resolver.FieldDefs {
+					if fd.ReceiverHash == ctx.GKey.ReceiverHash && fd.PropHash == ctx.GKey.PropHash {
+						if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: fd.NodeID}) {
+							return
+						}
+					}
+				}
+
+				for _, pf := range dDoc.Resolver.PendingFields {
+					if pf.ReceiverHash == ctx.GKey.ReceiverHash && pf.PropHash == ctx.GKey.PropHash {
+						if dDoc.Resolver.References[pf.PropNodeID] == ast.InvalidNode {
+							if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: pf.PropNodeID}) {
+								return
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 func (s *Server) compileIgnorePatterns() {
 	s.compiledIgnores = make([]IgnorePattern, 0, len(s.IgnoreGlobs))
 
@@ -4176,6 +4019,22 @@ func (s *Server) suggestGlobal(name string) string {
 	}
 
 	return bestMatch
+}
+
+func getRange(tree *ast.Tree, start, end uint32) Range {
+	sLine, sCol := tree.Position(start)
+	eLine, eCol := tree.Position(end)
+
+	return Range{
+		Start: Position{Line: sLine, Character: sCol},
+		End:   Position{Line: eLine, Character: eCol},
+	}
+}
+
+func getNodeRange(tree *ast.Tree, nodeID ast.NodeID) Range {
+	node := tree.Nodes[nodeID]
+
+	return getRange(tree, node.Start, node.End)
 }
 
 func isWriteAccess(tree *ast.Tree, nodeID ast.NodeID) bool {

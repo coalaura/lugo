@@ -2,11 +2,13 @@ package lsp
 
 import (
 	"bytes"
+	"iter"
 	"strings"
 
 	"github.com/coalaura/lugo/ast"
 	"github.com/coalaura/lugo/parser"
 	"github.com/coalaura/lugo/semantic"
+	"github.com/coalaura/lugo/token"
 )
 
 type Document struct {
@@ -157,47 +159,60 @@ func (doc *Document) findCommentIndex(offset uint32) int {
 	return low - 1
 }
 
+// IterateCommentsAbove finds the contiguous block of comments directly above an AST node
+// and yields each comment in reverse order (bottom-up).
+func (doc *Document) IterateCommentsAbove(id ast.NodeID) iter.Seq[token.Token] {
+	return func(yield func(token.Token) bool) {
+		if id == ast.InvalidNode {
+			return
+		}
+
+		stmtID := id
+
+		for {
+			parentID := doc.Tree.Nodes[stmtID].Parent
+			if parentID == ast.InvalidNode {
+				break
+			}
+
+			pKind := doc.Tree.Nodes[parentID].Kind
+			if pKind == ast.KindBlock || pKind == ast.KindFile || pKind == ast.KindTableExpr {
+				break
+			}
+
+			stmtID = parentID
+		}
+
+		stmtStart := doc.Tree.Nodes[stmtID].Start
+		stmtLine, _ := doc.Tree.Position(stmtStart)
+		targetLine := stmtLine - 1
+
+		idx := doc.findCommentIndex(stmtStart)
+
+		for i := idx; i >= 0; i-- {
+			c := doc.Tree.Comments[i]
+
+			cStartLine, _ := doc.Tree.Position(c.Start)
+			cEndLine, _ := doc.Tree.Position(c.End)
+
+			if cEndLine == targetLine || cEndLine == stmtLine {
+				if !yield(c) {
+					return
+				}
+
+				targetLine = cStartLine - 1
+			} else if cEndLine < targetLine {
+				break
+			}
+		}
+	}
+}
+
 func (doc *Document) getCommentsAbove(id ast.NodeID) []byte {
-	if id == ast.InvalidNode {
-		return nil
-	}
+	var validComments []token.Token
 
-	stmtID := id
-
-	for {
-		parentID := doc.Tree.Nodes[stmtID].Parent
-		if parentID == ast.InvalidNode {
-			break
-		}
-
-		pKind := doc.Tree.Nodes[parentID].Kind
-		if pKind == ast.KindBlock || pKind == ast.KindFile || pKind == ast.KindTableExpr {
-			break
-		}
-
-		stmtID = parentID
-	}
-
-	stmtStart := doc.Tree.Nodes[stmtID].Start
-	stmtLine, _ := doc.Tree.Position(stmtStart)
-	targetLine := stmtLine - 1
-
-	var validComments []int
-
-	idx := doc.findCommentIndex(stmtStart)
-
-	for i := idx; i >= 0; i-- {
-		c := doc.Tree.Comments[i]
-
-		cStartLine, _ := doc.Tree.Position(c.Start)
-		cEndLine, _ := doc.Tree.Position(c.End)
-
-		if cEndLine == targetLine || cEndLine == stmtLine {
-			validComments = append(validComments, i)
-			targetLine = cStartLine - 1
-		} else if cEndLine < targetLine {
-			break
-		}
+	for c := range doc.IterateCommentsAbove(id) {
+		validComments = append(validComments, c)
 	}
 
 	if len(validComments) == 0 {
@@ -207,7 +222,7 @@ func (doc *Document) getCommentsAbove(id ast.NodeID) []byte {
 	var b []byte
 
 	for i := len(validComments) - 1; i >= 0; i-- {
-		c := doc.Tree.Comments[validComments[i]]
+		c := validComments[i]
 		rawC := doc.Source[c.Start:c.End]
 
 		b = cleanLuaCommentBytes(b, rawC)
@@ -308,48 +323,15 @@ func (doc *Document) GetLocalsAt(offset uint32, yield func(name []byte, defID as
 
 // ExtractLuaDocFields performs a highly optimized, zero-allocation byte scan
 // for @field annotations in the comments directly above a node.
-func (doc *Document) ExtractLuaDocFields(id ast.NodeID, yield func(name []byte)) {
-	if id == ast.InvalidNode {
-		return
-	}
+func (doc *Document) ExtractLuaDocFields(id ast.NodeID) iter.Seq[[]byte] {
+	return func(yield func([]byte) bool) {
+		fieldToken := []byte("@field")
 
-	stmtID := id
-
-	for {
-		parentID := doc.Tree.Nodes[stmtID].Parent
-		if parentID == ast.InvalidNode {
-			break
-		}
-
-		pKind := doc.Tree.Nodes[parentID].Kind
-		if pKind == ast.KindBlock || pKind == ast.KindFile || pKind == ast.KindTableExpr {
-			break
-		}
-
-		stmtID = parentID
-	}
-
-	stmtStart := doc.Tree.Nodes[stmtID].Start
-	stmtLine, _ := doc.Tree.Position(stmtStart)
-	targetLine := stmtLine - 1
-
-	fieldToken := []byte("@field")
-
-	idx := doc.findCommentIndex(stmtStart)
-
-	for i := idx; i >= 0; i-- {
-		c := doc.Tree.Comments[i]
-		if c.End > stmtStart {
-			continue
-		}
-
-		cStartLine, _ := doc.Tree.Position(c.Start)
-		cEndLine, _ := doc.Tree.Position(c.End)
-
-		if cEndLine == targetLine || cEndLine == stmtLine {
+		for c := range doc.IterateCommentsAbove(id) {
 			raw := doc.Source[c.Start:c.End]
 
 			idx := bytes.Index(raw, fieldToken)
+
 			for idx != -1 {
 				rest := raw[idx+6:]
 
@@ -383,7 +365,9 @@ func (doc *Document) ExtractLuaDocFields(id ast.NodeID, yield func(name []byte))
 						name = name[:len(name)-1]
 					}
 
-					yield(name)
+					if !yield(name) {
+						return
+					}
 				}
 
 				next := bytes.Index(rest, fieldToken)
@@ -393,74 +377,40 @@ func (doc *Document) ExtractLuaDocFields(id ast.NodeID, yield func(name []byte))
 
 				idx += 6 + next
 			}
-
-			targetLine = cStartLine - 1
-		} else if cEndLine < targetLine {
-			break
 		}
 	}
 }
 
 // HasDeprecatedTag performs a fast, zero-allocation byte scan for @deprecated comments directly above a node.
 func (doc *Document) HasDeprecatedTag(id ast.NodeID) (bool, string) {
-	if id == ast.InvalidNode {
-		return false, ""
-	}
-
-	stmtID := id
-
-	for {
-		parentID := doc.Tree.Nodes[stmtID].Parent
-		if parentID == ast.InvalidNode {
-			break
-		}
-
-		pKind := doc.Tree.Nodes[parentID].Kind
-		if pKind == ast.KindBlock || pKind == ast.KindFile || pKind == ast.KindTableExpr {
-			break
-		}
-
-		stmtID = parentID
-	}
-
-	stmtStart := doc.Tree.Nodes[stmtID].Start
-	stmtLine, _ := doc.Tree.Position(stmtStart)
-	targetLine := stmtLine - 1
-
 	depToken := []byte("@deprecated")
 
-	idx := doc.findCommentIndex(stmtStart)
+	var (
+		found bool
+		msg   string
+	)
 
-	for i := idx; i >= 0; i-- {
-		c := doc.Tree.Comments[i]
+	for c := range doc.IterateCommentsAbove(id) {
+		raw := doc.Source[c.Start:c.End]
 
-		cStartLine, _ := doc.Tree.Position(c.Start)
-		cEndLine, _ := doc.Tree.Position(c.End)
+		_, after, ok := bytes.Cut(raw, depToken)
+		if ok {
+			rest := after
 
-		if cEndLine == targetLine || cEndLine == stmtLine {
-			raw := doc.Source[c.Start:c.End]
-
-			_, after, ok := bytes.Cut(raw, depToken)
-			if ok {
-				rest := after
-
-				endIdx := bytes.IndexByte(rest, '\n')
-				if endIdx == -1 {
-					endIdx = len(rest)
-				}
-
-				msgBytes := cleanLuaCommentBytes(nil, rest[:endIdx])
-
-				return true, string(bytes.TrimSpace(msgBytes))
+			endIdx := bytes.IndexByte(rest, '\n')
+			if endIdx == -1 {
+				endIdx = len(rest)
 			}
 
-			targetLine = cStartLine - 1
-		} else if cEndLine < targetLine {
+			msgBytes := cleanLuaCommentBytes(nil, rest[:endIdx])
+			msg = string(bytes.TrimSpace(msgBytes))
+			found = true
+
 			break
 		}
 	}
 
-	return false, ""
+	return found, msg
 }
 
 func cleanLuaCommentBytes(dst, raw []byte) []byte {

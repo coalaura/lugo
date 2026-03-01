@@ -216,11 +216,7 @@ func (p *Parser) parseBlock(stopTokens ...token.Kind) ast.NodeID {
 		}
 	}
 
-	count := len(p.listStack) - stackStart
-	extraStart := uint32(len(p.tree.ExtraList))
-
-	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
-	p.listStack = p.listStack[:stackStart]
+	extraStart, count := p.flushListStack(stackStart)
 
 	return p.tree.AddNode(ast.Node{
 		Kind:  ast.KindBlock,
@@ -369,11 +365,7 @@ func (p *Parser) parseLocal() ast.NodeID {
 		}
 	}
 
-	count := len(p.listStack) - stackStart
-	extraStart := uint32(len(p.tree.ExtraList))
-
-	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
-	p.listStack = p.listStack[:stackStart]
+	extraStart, count := p.flushListStack(stackStart)
 
 	var (
 		lhsStart uint32
@@ -478,11 +470,7 @@ func (p *Parser) parseIf() ast.NodeID {
 		p.listStack = append(p.listStack, elseBlock)
 	}
 
-	count := len(p.listStack) - stackStart
-	extraStart := uint32(len(p.tree.ExtraList))
-
-	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
-	p.listStack = p.listStack[:stackStart]
+	extraStart, count := p.flushListStack(stackStart)
 
 	return p.tree.AddNode(ast.Node{
 		Kind:  ast.KindIf,
@@ -622,11 +610,7 @@ func (p *Parser) parseFor() ast.NodeID {
 			p.error("expected 'end'")
 		}
 
-		count := len(p.listStack) - stackStart
-		extraStart := uint32(len(p.tree.ExtraList))
-
-		p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
-		p.listStack = p.listStack[:stackStart]
+		extraStart, count := p.flushListStack(stackStart)
 
 		return p.tree.AddNode(ast.Node{
 			Kind: ast.KindForNum, Start: start, End: end,
@@ -1121,11 +1105,7 @@ func (p *Parser) parseTableConstructor() ast.NodeID {
 		p.error("expected '}'")
 	}
 
-	count := len(p.listStack) - stackStart
-	extraStart := uint32(len(p.tree.ExtraList))
-
-	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
-	p.listStack = p.listStack[:stackStart]
+	extraStart, count := p.flushListStack(stackStart)
 
 	return p.tree.AddNode(ast.Node{
 		Kind: ast.KindTableExpr, Start: start, End: end, Extra: extraStart, Count: uint16(count),
@@ -1179,11 +1159,7 @@ func (p *Parser) parseCallArgs(left ast.NodeID, callToken token.Kind) ast.NodeID
 		end = p.tree.Nodes[arg].End
 	}
 
-	count := len(p.listStack) - stackStart
-	extraStart := uint32(len(p.tree.ExtraList))
-
-	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
-	p.listStack = p.listStack[:stackStart]
+	extraStart, count := p.flushListStack(stackStart)
 
 	return p.tree.AddNode(ast.Node{
 		Kind: ast.KindCallExpr, Start: start, End: end, Left: left, Extra: extraStart, Count: uint16(count),
@@ -1245,11 +1221,7 @@ func (p *Parser) parseFunctionBody(start uint32) ast.NodeID {
 		p.error("expected 'end'")
 	}
 
-	count := len(p.listStack) - stackStart
-	extraStart := uint32(len(p.tree.ExtraList))
-
-	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
-	p.listStack = p.listStack[:stackStart]
+	extraStart, count := p.flushListStack(stackStart)
 
 	return p.tree.AddNode(ast.Node{
 		Kind:  ast.KindFunctionExpr,
@@ -1257,4 +1229,17 @@ func (p *Parser) parseFunctionBody(start uint32) ast.NodeID {
 		Extra: extraStart, Count: uint16(count),
 		Right: block,
 	})
+}
+
+func (p *Parser) flushListStack(stackStart int) (extraStart uint32, count uint16) {
+	count = uint16(len(p.listStack) - stackStart)
+	if count == 0 {
+		return 0, 0
+	}
+
+	extraStart = uint32(len(p.tree.ExtraList))
+	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
+	p.listStack = p.listStack[:stackStart]
+
+	return extraStart, count
 }

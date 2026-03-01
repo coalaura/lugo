@@ -100,18 +100,7 @@ func NewTree(source []byte) *Tree {
 	lines := make([]uint32, 1, 128)
 	lines[0] = 0
 
-	var offset int
-
-	for {
-		idx := bytes.IndexByte(source[offset:], '\n')
-		if idx == -1 {
-			break
-		}
-
-		offset += idx + 1
-
-		lines = append(lines, uint32(offset))
-	}
+	lines = computeLineOffsets(source, lines)
 
 	t := &Tree{
 		Source:      source,
@@ -234,6 +223,10 @@ func (t *Tree) Reset(source []byte) {
 
 	t.LineOffsets = t.LineOffsets[:1] // Keep 0 at index 0
 
+	t.LineOffsets = computeLineOffsets(source, t.LineOffsets)
+}
+
+func computeLineOffsets(source []byte, lines []uint32) []uint32 {
 	var offset int
 
 	for {
@@ -244,8 +237,10 @@ func (t *Tree) Reset(source []byte) {
 
 		offset += idx + 1
 
-		t.LineOffsets = append(t.LineOffsets, uint32(offset))
+		lines = append(lines, uint32(offset))
 	}
+
+	return lines
 }
 
 // HashBytes implements the FNV-1a 64-bit hash algorithm for zero-alloc map keys
