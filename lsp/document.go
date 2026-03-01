@@ -15,6 +15,9 @@ type Document struct {
 	Resolver        *semantic.Resolver
 	Errors          []parser.ParseError
 	ExportedGlobals map[ast.NodeID][]GlobalKey
+
+	TypeCache []TypeSet
+	Inferring []bool
 }
 
 func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {

@@ -668,20 +668,57 @@ func (s *Server) handleMessage(req Request) {
 							luadoc.Description = luadoc.Type.Desc
 						}
 					}
-				} else if ctx.IsProp {
-					code = ctx.DisplayName + valStr
-				} else if ctx.TargetURI == uri && ctx.TargetDefID == doc.Resolver.References[ctx.IdentNodeID] {
-					var attrStr string
+				} else {
+					var baseType TypeSet
 
-					if ast.Attr(ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Extra) == ast.AttrConst {
-						attrStr = " <const>"
-					} else if ast.Attr(ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Extra) == ast.AttrClose {
-						attrStr = " <close>"
+					if ctx.TargetDoc != nil && ctx.TargetDefID != ast.InvalidNode {
+						baseType = ctx.TargetDoc.InferType(ctx.TargetDefID)
+					} else if ctx.IsProp {
+						pID := doc.Tree.Nodes[ctx.IdentNodeID].Parent
+						if pID != ast.InvalidNode {
+							pNode := doc.Tree.Nodes[pID]
+							if pNode.Kind == ast.KindMemberExpr || pNode.Kind == ast.KindMethodCall {
+								baseType = doc.InferType(pID)
+							}
+						}
 					}
 
-					code = "local " + ctx.DisplayName + attrStr + valStr
-				} else {
-					code = "global " + ctx.DisplayName + valStr
+					if ctx.IsProp {
+						inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
+
+						typeStr := inferred.Format()
+						if typeStr != "any" {
+							code = ctx.DisplayName + ": " + typeStr + valStr
+						} else {
+							code = ctx.DisplayName + valStr
+						}
+					} else if ctx.TargetURI == uri && ctx.TargetDefID == doc.Resolver.References[ctx.IdentNodeID] {
+						var attrStr string
+
+						if ast.Attr(ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Extra) == ast.AttrConst {
+							attrStr = " <const>"
+						} else if ast.Attr(ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Extra) == ast.AttrClose {
+							attrStr = " <close>"
+						}
+
+						inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
+
+						typeStr := inferred.Format()
+						if typeStr != "any" {
+							code = "local " + ctx.DisplayName + attrStr + ": " + typeStr + valStr
+						} else {
+							code = "local " + ctx.DisplayName + attrStr + valStr
+						}
+					} else {
+						inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
+
+						typeStr := inferred.Format()
+						if typeStr != "any" {
+							code = "global " + ctx.DisplayName + ": " + typeStr + valStr
+						} else {
+							code = "global " + ctx.DisplayName + valStr
+						}
+					}
 				}
 			}
 
@@ -803,10 +840,30 @@ func (s *Server) handleMessage(req Request) {
 				}
 			}
 		} else {
+			var baseType TypeSet
+
 			if ctx.IsProp {
-				hoverText = "```lua\n" + ctx.DisplayName + " (field)\n```"
+				pID := doc.Tree.Nodes[ctx.IdentNodeID].Parent
+				if pID != ast.InvalidNode {
+					baseType = doc.InferType(pID)
+				}
+			}
+
+			inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
+			typeStr := inferred.Format()
+
+			if ctx.IsProp {
+				if typeStr != "any" {
+					hoverText = "```lua\n" + ctx.DisplayName + ": " + typeStr + "\n```"
+				} else {
+					hoverText = "```lua\n" + ctx.DisplayName + " (field)\n```"
+				}
 			} else {
-				hoverText = "```lua\nglobal " + ctx.DisplayName + "\n```"
+				if typeStr != "any" {
+					hoverText = "```lua\nglobal " + ctx.DisplayName + ": " + typeStr + "\n```"
+				} else {
+					hoverText = "```lua\nglobal " + ctx.DisplayName + "\n```"
+				}
 			}
 		}
 
@@ -2738,6 +2795,17 @@ func (s *Server) updateDocument(uri string, source []byte) {
 	p.Reset(source, tree)
 
 	rootID := p.Parse()
+
+	if cap(doc.TypeCache) >= len(tree.Nodes) {
+		doc.TypeCache = doc.TypeCache[:len(tree.Nodes)]
+		clear(doc.TypeCache)
+
+		doc.Inferring = doc.Inferring[:len(tree.Nodes)]
+		clear(doc.Inferring)
+	} else {
+		doc.TypeCache = make([]TypeSet, len(tree.Nodes))
+		doc.Inferring = make([]bool, len(tree.Nodes))
+	}
 
 	if len(p.Errors) > 0 {
 		if cap(doc.Errors) >= len(p.Errors) {
