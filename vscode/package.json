@@ -137,7 +137,13 @@
                     "default": true,
                     "description": "Enable document highlights for variables and function/method calls.",
                     "order": 15
-                }
+                },
+                "lugo.features.hoverEvaluation": {
+					"type": "boolean",
+					"default": true,
+					"description": "Evaluate and display the result of constant expressions on hover (e.g. 1 + 2 -> 3).",
+					"order": 16
+				}
             }
         }
     },

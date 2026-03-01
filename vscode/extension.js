@@ -76,7 +76,8 @@ async function startClient(context) {
 		diagAmbiguousReturns = config.get("diagnostics.ambiguousReturns") !== false,
 		diagDeprecated = config.get("diagnostics.deprecated") !== false,
 		inlayParamHints = config.get("inlayHints.parameterNames") !== false,
-		featureDocumentHighlight = config.get("features.documentHighlight") !== false;
+		featureDocumentHighlight = config.get("features.documentHighlight") !== false,
+		featureHoverEvaluation = config.get("features.hoverEvaluation") !== false;
 
 	const filesConfig = vscode.workspace.getConfiguration("files"),
 		searchConfig = vscode.workspace.getConfiguration("search");
@@ -136,6 +137,7 @@ async function startClient(context) {
 			diagnosticsDeprecated: diagDeprecated,
 			inlayHintsParameterNames: inlayParamHints,
 			featuresDocumentHighlight: featureDocumentHighlight,
+			featuresHoverEvaluation: featureHoverEvaluation,
 		},
 	};
 

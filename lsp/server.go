@@ -128,6 +128,7 @@ type Server struct {
 	DiagDeprecated       bool
 	InlayParamHints      bool
 	FeatureDocHighlight  bool
+	FeatureHoverEval     bool
 }
 
 func NewServer(version string) *Server {
@@ -259,6 +260,7 @@ func (s *Server) handleMessage(req Request) {
 			s.DiagDeprecated = params.InitializationOptions.DiagnosticsDeprecated
 			s.InlayParamHints = params.InitializationOptions.InlayHintsParameterNames
 			s.FeatureDocHighlight = params.InitializationOptions.FeaturesDocumentHighlight
+			s.FeatureHoverEval = params.InitializationOptions.FeaturesHoverEvaluation
 		}
 
 		result := InitializeResult{
@@ -530,337 +532,354 @@ func (s *Server) handleMessage(req Request) {
 		doc, ok := s.Documents[uri]
 		if !ok {
 			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
 			return
 		}
 
 		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
 		ctx := s.resolveSymbolAt(uri, offset)
 
-		if ctx == nil {
+		var (
+			hoverText string
+			fromFile  string
+			r         *Range
+		)
+
+		if ctx != nil {
+			parsedRange := getNodeRange(doc.Tree, ctx.IdentNodeID)
+			r = &parsedRange
+
+			if ctx.TargetURI != "" && ctx.TargetURI != uri {
+				fromFile = filepath.Base(ctx.TargetURI)
+			}
+
+			if ctx.TargetDoc != nil && ctx.TargetDefID != ast.InvalidNode {
+				rawComments := ctx.TargetDoc.getCommentsAbove(ctx.TargetDefID)
+				luadoc := parseLuaDoc(rawComments)
+
+				valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
+				isFunc := valID != ast.InvalidNode && ctx.TargetDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr
+
+				var valStr string
+
+				if valID != ast.InvalidNode {
+					vNode := ctx.TargetDoc.Tree.Nodes[valID]
+
+					switch vNode.Kind {
+					case ast.KindNumber, ast.KindString, ast.KindTrue, ast.KindFalse, ast.KindNil:
+						valStr = " = " + string(ctx.TargetDoc.Source[vNode.Start:vNode.End])
+					}
+				}
+
+				var returnStr string
+
+				if len(luadoc.Returns) == 1 {
+					returnStr = ": " + luadoc.Returns[0].Type
+				} else if len(luadoc.Returns) > 1 {
+					var rTypes []string
+
+					for _, r := range luadoc.Returns {
+						rTypes = append(rTypes, r.Type)
+					}
+
+					returnStr = ": (" + strings.Join(rTypes, ", ") + ")"
+				}
+
+				var (
+					code         string
+					matchedField *LuaDocField
+				)
+
+				if isFunc {
+					paramsStr := ctx.TargetDoc.getFunctionParams(valID, luadoc)
+
+					genericStr := ""
+					if len(luadoc.Generics) > 0 {
+						var gNames []string
+						for _, g := range luadoc.Generics {
+							gNames = append(gNames, g.Name)
+						}
+						genericStr = "<" + strings.Join(gNames, ", ") + ">"
+					}
+
+					if !ctx.IsProp && ctx.TargetDefID == ctx.IdentNodeID {
+						code = "local function " + ctx.DisplayName + genericStr + "(" + paramsStr + ")" + returnStr
+					} else {
+						code = "function " + ctx.DisplayName + genericStr + "(" + paramsStr + ")" + returnStr
+					}
+				} else {
+					if ctx.IsProp && ctx.TargetDefID != ctx.IdentNodeID {
+						for i := range luadoc.Fields {
+							if luadoc.Fields[i].Name == ctx.IdentName {
+								matchedField = &luadoc.Fields[i]
+								break
+							}
+						}
+					}
+
+					if matchedField != nil {
+						code = ctx.DisplayName + ": " + matchedField.Type + valStr
+
+						luadoc.Description = matchedField.Desc
+						luadoc.Params = nil
+						luadoc.Returns = nil
+					} else if luadoc.Class != nil {
+						code = "class " + luadoc.Class.Name
+
+						if luadoc.Class.Parent != "" {
+							code += " : " + luadoc.Class.Parent
+						}
+
+						if luadoc.Class.Desc != "" {
+							if luadoc.Description != "" {
+								luadoc.Description = luadoc.Class.Desc + "\n\n" + luadoc.Description
+							} else {
+								luadoc.Description = luadoc.Class.Desc
+							}
+						}
+					} else if luadoc.Alias != nil {
+						code = "alias " + luadoc.Alias.Name + " = " + luadoc.Alias.Type
+
+						if luadoc.Alias.Desc != "" {
+							if luadoc.Description != "" {
+								luadoc.Description = luadoc.Alias.Desc + "\n\n" + luadoc.Description
+							} else {
+								luadoc.Description = luadoc.Alias.Desc
+							}
+						}
+					} else if luadoc.Type != nil {
+						code = ctx.DisplayName + ": " + luadoc.Type.Type + valStr
+
+						if luadoc.Type.Desc != "" {
+							if luadoc.Description != "" {
+								luadoc.Description = luadoc.Type.Desc + "\n\n" + luadoc.Description
+							} else {
+								luadoc.Description = luadoc.Type.Desc
+							}
+						}
+					} else {
+						var baseType TypeSet
+
+						if ctx.TargetDoc != nil && ctx.TargetDefID != ast.InvalidNode {
+							baseType = ctx.TargetDoc.InferType(ctx.TargetDefID)
+						} else if ctx.IsProp {
+							pID := doc.Tree.Nodes[ctx.IdentNodeID].Parent
+							if pID != ast.InvalidNode {
+								pNode := doc.Tree.Nodes[pID]
+								if pNode.Kind == ast.KindMemberExpr || pNode.Kind == ast.KindMethodCall {
+									baseType = doc.InferType(pID)
+								}
+							}
+						}
+
+						if ctx.IsProp {
+							inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
+
+							typeStr := inferred.Format()
+							if typeStr != "any" {
+								code = ctx.DisplayName + ": " + typeStr + valStr
+							} else {
+								code = ctx.DisplayName + valStr
+							}
+						} else if ctx.TargetURI == uri && ctx.TargetDefID == doc.Resolver.References[ctx.IdentNodeID] {
+							var attrStr string
+
+							if ast.Attr(ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Extra) == ast.AttrConst {
+								attrStr = " <const>"
+							} else if ast.Attr(ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Extra) == ast.AttrClose {
+								attrStr = " <close>"
+							}
+
+							inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
+
+							typeStr := inferred.Format()
+							if typeStr != "any" {
+								code = "local " + ctx.DisplayName + attrStr + ": " + typeStr + valStr
+							} else {
+								code = "local " + ctx.DisplayName + attrStr + valStr
+							}
+						} else {
+							inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
+
+							typeStr := inferred.Format()
+							if typeStr != "any" {
+								code = "global " + ctx.DisplayName + ": " + typeStr + valStr
+							} else {
+								code = "global " + ctx.DisplayName + valStr
+							}
+						}
+					}
+				}
+
+				var docBuilder strings.Builder
+
+				if luadoc.IsDeprecated {
+					docBuilder.WriteString("**@deprecated**")
+
+					if luadoc.DeprecatedMsg != "" {
+						docBuilder.WriteString(" - " + luadoc.DeprecatedMsg)
+					}
+
+					docBuilder.WriteString("\n\n")
+				}
+
+				if luadoc.Description != "" {
+					docBuilder.WriteString(luadoc.Description + "\n\n")
+				}
+
+				if len(luadoc.Generics) > 0 {
+					for _, g := range luadoc.Generics {
+						docBuilder.WriteString("* `@generic` `" + g.Name + "`")
+
+						if g.Parent != "" {
+							docBuilder.WriteString(" : `" + g.Parent + "`")
+						}
+
+						docBuilder.WriteString("\n")
+					}
+
+					docBuilder.WriteString("\n")
+				}
+
+				if len(luadoc.Params) > 0 {
+					for _, p := range luadoc.Params {
+						docBuilder.WriteString("* `@param` `" + p.Name + "`")
+
+						if p.Type != "" {
+							docBuilder.WriteString(" `" + p.Type + "`")
+						}
+
+						if p.Desc != "" {
+							docBuilder.WriteString(" - " + p.Desc)
+						}
+
+						docBuilder.WriteString("\n")
+					}
+
+					docBuilder.WriteString("\n")
+				}
+
+				if len(luadoc.Returns) > 0 {
+					for _, ret := range luadoc.Returns {
+						docBuilder.WriteString("* `@return` `" + ret.Type + "`")
+
+						if ret.Desc != "" {
+							docBuilder.WriteString(" - " + ret.Desc)
+						}
+
+						docBuilder.WriteString("\n")
+					}
+
+					docBuilder.WriteString("\n")
+				}
+
+				if len(luadoc.Fields) > 0 && matchedField == nil {
+					docBuilder.WriteString("**Fields**\n")
+
+					for _, f := range luadoc.Fields {
+						docBuilder.WriteString("* `" + f.Name + "`")
+
+						if f.Type != "" {
+							docBuilder.WriteString(" `" + f.Type + "`")
+						}
+
+						if f.Desc != "" {
+							docBuilder.WriteString(" - " + f.Desc)
+						}
+
+						docBuilder.WriteString("\n")
+					}
+
+					docBuilder.WriteString("\n")
+				}
+
+				if len(luadoc.Overloads) > 0 {
+					docBuilder.WriteString("**Overloads**\n")
+
+					for _, o := range luadoc.Overloads {
+						docBuilder.WriteString("```lua\n" + o + "\n```\n")
+					}
+
+					docBuilder.WriteString("\n")
+				}
+
+				if len(luadoc.See) > 0 {
+					docBuilder.WriteString("**See also**\n")
+
+					for _, see := range luadoc.See {
+						docBuilder.WriteString("* `" + see + "`\n")
+					}
+
+					docBuilder.WriteString("\n")
+				}
+
+				docString := strings.TrimSpace(docBuilder.String())
+
+				hoverText = "```lua\n" + code + "\n```"
+
+				if docString != "" {
+					hoverText += "\n---\n" + docString
+				}
+
+				if fromFile != "" {
+					if after, ok := strings.CutPrefix(ctx.TargetURI, "std:///"); ok {
+						hoverText += "\n---\n*Standard Library (`" + after + "`)*"
+					} else {
+						hoverText += "\n---\n*Defined in `" + fromFile + "`*"
+					}
+				}
+			} else {
+				var baseType TypeSet
+
+				if ctx.IsProp {
+					pID := doc.Tree.Nodes[ctx.IdentNodeID].Parent
+					if pID != ast.InvalidNode {
+						baseType = doc.InferType(pID)
+					}
+				}
+
+				inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
+				typeStr := inferred.Format()
+
+				if ctx.IsProp {
+					if typeStr != "any" {
+						hoverText = "```lua\n" + ctx.DisplayName + ": " + typeStr + "\n```"
+					} else {
+						hoverText = "```lua\n" + ctx.DisplayName + " (field)\n```"
+					}
+				} else {
+					if typeStr != "any" {
+						hoverText = "```lua\nglobal " + ctx.DisplayName + ": " + typeStr + "\n```"
+					} else {
+						hoverText = "```lua\nglobal " + ctx.DisplayName + "\n```"
+					}
+				}
+			}
+		}
+
+		if s.FeatureHoverEval {
+			if startOff, endOff, evalVal, ok := doc.FindEvaluableParent(offset); ok {
+				evalStr := fmt.Sprintf("\n---\n*Evaluates to:*\n```lua\n%s\n```", evalVal)
+
+				if hoverText != "" {
+					hoverText += evalStr
+				} else {
+					hoverText = strings.TrimPrefix(evalStr, "\n---\n")
+				}
+
+				evalRange := getRange(doc.Tree, startOff, endOff)
+				r = &evalRange
+			}
+		}
+
+		if hoverText == "" {
 			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
 
 			return
 		}
 
-		var (
-			hoverText string
-			fromFile  string
-		)
-
-		if ctx.TargetURI != "" && ctx.TargetURI != uri {
-			fromFile = filepath.Base(ctx.TargetURI)
-		}
-
-		if ctx.TargetDoc != nil && ctx.TargetDefID != ast.InvalidNode {
-			rawComments := ctx.TargetDoc.getCommentsAbove(ctx.TargetDefID)
-			luadoc := parseLuaDoc(rawComments)
-
-			valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
-			isFunc := valID != ast.InvalidNode && ctx.TargetDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr
-
-			var valStr string
-
-			if valID != ast.InvalidNode {
-				vNode := ctx.TargetDoc.Tree.Nodes[valID]
-
-				switch vNode.Kind {
-				case ast.KindNumber, ast.KindString, ast.KindTrue, ast.KindFalse, ast.KindNil:
-					valStr = " = " + string(ctx.TargetDoc.Source[vNode.Start:vNode.End])
-				}
-			}
-
-			var returnStr string
-
-			if len(luadoc.Returns) == 1 {
-				returnStr = ": " + luadoc.Returns[0].Type
-			} else if len(luadoc.Returns) > 1 {
-				var rTypes []string
-
-				for _, r := range luadoc.Returns {
-					rTypes = append(rTypes, r.Type)
-				}
-
-				returnStr = ": (" + strings.Join(rTypes, ", ") + ")"
-			}
-
-			var (
-				code         string
-				matchedField *LuaDocField
-			)
-
-			if isFunc {
-				paramsStr := ctx.TargetDoc.getFunctionParams(valID, luadoc)
-
-				genericStr := ""
-				if len(luadoc.Generics) > 0 {
-					var gNames []string
-					for _, g := range luadoc.Generics {
-						gNames = append(gNames, g.Name)
-					}
-					genericStr = "<" + strings.Join(gNames, ", ") + ">"
-				}
-
-				if !ctx.IsProp && ctx.TargetDefID == ctx.IdentNodeID {
-					code = "local function " + ctx.DisplayName + genericStr + "(" + paramsStr + ")" + returnStr
-				} else {
-					code = "function " + ctx.DisplayName + genericStr + "(" + paramsStr + ")" + returnStr
-				}
-			} else {
-				if ctx.IsProp && ctx.TargetDefID != ctx.IdentNodeID {
-					for i := range luadoc.Fields {
-						if luadoc.Fields[i].Name == ctx.IdentName {
-							matchedField = &luadoc.Fields[i]
-
-							break
-						}
-					}
-				}
-
-				if matchedField != nil {
-					code = ctx.DisplayName + ": " + matchedField.Type + valStr
-
-					luadoc.Description = matchedField.Desc
-					luadoc.Params = nil
-					luadoc.Returns = nil
-				} else if luadoc.Class != nil {
-					code = "class " + luadoc.Class.Name
-
-					if luadoc.Class.Parent != "" {
-						code += " : " + luadoc.Class.Parent
-					}
-
-					if luadoc.Class.Desc != "" {
-						if luadoc.Description != "" {
-							luadoc.Description = luadoc.Class.Desc + "\n\n" + luadoc.Description
-						} else {
-							luadoc.Description = luadoc.Class.Desc
-						}
-					}
-				} else if luadoc.Alias != nil {
-					code = "alias " + luadoc.Alias.Name + " = " + luadoc.Alias.Type
-
-					if luadoc.Alias.Desc != "" {
-						if luadoc.Description != "" {
-							luadoc.Description = luadoc.Alias.Desc + "\n\n" + luadoc.Description
-						} else {
-							luadoc.Description = luadoc.Alias.Desc
-						}
-					}
-				} else if luadoc.Type != nil {
-					code = ctx.DisplayName + ": " + luadoc.Type.Type + valStr
-
-					if luadoc.Type.Desc != "" {
-						if luadoc.Description != "" {
-							luadoc.Description = luadoc.Type.Desc + "\n\n" + luadoc.Description
-						} else {
-							luadoc.Description = luadoc.Type.Desc
-						}
-					}
-				} else {
-					var baseType TypeSet
-
-					if ctx.TargetDoc != nil && ctx.TargetDefID != ast.InvalidNode {
-						baseType = ctx.TargetDoc.InferType(ctx.TargetDefID)
-					} else if ctx.IsProp {
-						pID := doc.Tree.Nodes[ctx.IdentNodeID].Parent
-						if pID != ast.InvalidNode {
-							pNode := doc.Tree.Nodes[pID]
-							if pNode.Kind == ast.KindMemberExpr || pNode.Kind == ast.KindMethodCall {
-								baseType = doc.InferType(pID)
-							}
-						}
-					}
-
-					if ctx.IsProp {
-						inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
-
-						typeStr := inferred.Format()
-						if typeStr != "any" {
-							code = ctx.DisplayName + ": " + typeStr + valStr
-						} else {
-							code = ctx.DisplayName + valStr
-						}
-					} else if ctx.TargetURI == uri && ctx.TargetDefID == doc.Resolver.References[ctx.IdentNodeID] {
-						var attrStr string
-
-						if ast.Attr(ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Extra) == ast.AttrConst {
-							attrStr = " <const>"
-						} else if ast.Attr(ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Extra) == ast.AttrClose {
-							attrStr = " <close>"
-						}
-
-						inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
-
-						typeStr := inferred.Format()
-						if typeStr != "any" {
-							code = "local " + ctx.DisplayName + attrStr + ": " + typeStr + valStr
-						} else {
-							code = "local " + ctx.DisplayName + attrStr + valStr
-						}
-					} else {
-						inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
-
-						typeStr := inferred.Format()
-						if typeStr != "any" {
-							code = "global " + ctx.DisplayName + ": " + typeStr + valStr
-						} else {
-							code = "global " + ctx.DisplayName + valStr
-						}
-					}
-				}
-			}
-
-			var docBuilder strings.Builder
-
-			if luadoc.IsDeprecated {
-				docBuilder.WriteString("**@deprecated**")
-
-				if luadoc.DeprecatedMsg != "" {
-					docBuilder.WriteString(" - " + luadoc.DeprecatedMsg)
-				}
-
-				docBuilder.WriteString("\n\n")
-			}
-
-			if luadoc.Description != "" {
-				docBuilder.WriteString(luadoc.Description + "\n\n")
-			}
-
-			if len(luadoc.Generics) > 0 {
-				for _, g := range luadoc.Generics {
-					docBuilder.WriteString("* `@generic` `" + g.Name + "`")
-
-					if g.Parent != "" {
-						docBuilder.WriteString(" : `" + g.Parent + "`")
-					}
-
-					docBuilder.WriteString("\n")
-				}
-
-				docBuilder.WriteString("\n")
-			}
-
-			if len(luadoc.Params) > 0 {
-				for _, p := range luadoc.Params {
-					docBuilder.WriteString("* `@param` `" + p.Name + "`")
-
-					if p.Type != "" {
-						docBuilder.WriteString(" `" + p.Type + "`")
-					}
-
-					if p.Desc != "" {
-						docBuilder.WriteString(" - " + p.Desc)
-					}
-
-					docBuilder.WriteString("\n")
-				}
-
-				docBuilder.WriteString("\n")
-			}
-
-			if len(luadoc.Returns) > 0 {
-				for _, r := range luadoc.Returns {
-					docBuilder.WriteString("* `@return` `" + r.Type + "`")
-
-					if r.Desc != "" {
-						docBuilder.WriteString(" - " + r.Desc)
-					}
-
-					docBuilder.WriteString("\n")
-				}
-
-				docBuilder.WriteString("\n")
-			}
-
-			if len(luadoc.Fields) > 0 && matchedField == nil {
-				docBuilder.WriteString("**Fields**\n")
-
-				for _, f := range luadoc.Fields {
-					docBuilder.WriteString("* `" + f.Name + "`")
-
-					if f.Type != "" {
-						docBuilder.WriteString(" `" + f.Type + "`")
-					}
-
-					if f.Desc != "" {
-						docBuilder.WriteString(" - " + f.Desc)
-					}
-
-					docBuilder.WriteString("\n")
-				}
-
-				docBuilder.WriteString("\n")
-			}
-
-			if len(luadoc.Overloads) > 0 {
-				docBuilder.WriteString("**Overloads**\n")
-
-				for _, o := range luadoc.Overloads {
-					docBuilder.WriteString("```lua\n" + o + "\n```\n")
-				}
-
-				docBuilder.WriteString("\n")
-			}
-
-			if len(luadoc.See) > 0 {
-				docBuilder.WriteString("**See also**\n")
-
-				for _, s := range luadoc.See {
-					docBuilder.WriteString("* `" + s + "`\n")
-				}
-
-				docBuilder.WriteString("\n")
-			}
-
-			docString := strings.TrimSpace(docBuilder.String())
-
-			hoverText = "```lua\n" + code + "\n```"
-
-			if docString != "" {
-				hoverText += "\n---\n" + docString
-			}
-
-			if fromFile != "" {
-				if after, ok := strings.CutPrefix(ctx.TargetURI, "std:///"); ok {
-					hoverText += "\n---\n*Standard Library (`" + after + "`)*"
-				} else {
-					hoverText += "\n---\n*Defined in `" + fromFile + "`*"
-				}
-			}
-		} else {
-			var baseType TypeSet
-
-			if ctx.IsProp {
-				pID := doc.Tree.Nodes[ctx.IdentNodeID].Parent
-				if pID != ast.InvalidNode {
-					baseType = doc.InferType(pID)
-				}
-			}
-
-			inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
-			typeStr := inferred.Format()
-
-			if ctx.IsProp {
-				if typeStr != "any" {
-					hoverText = "```lua\n" + ctx.DisplayName + ": " + typeStr + "\n```"
-				} else {
-					hoverText = "```lua\n" + ctx.DisplayName + " (field)\n```"
-				}
-			} else {
-				if typeStr != "any" {
-					hoverText = "```lua\nglobal " + ctx.DisplayName + ": " + typeStr + "\n```"
-				} else {
-					hoverText = "```lua\nglobal " + ctx.DisplayName + "\n```"
-				}
-			}
-		}
-
-		r := getNodeRange(doc.Tree, ctx.IdentNodeID)
-
 		result := Hover{
 			Contents: MarkupContent{Kind: "markdown", Value: hoverText},
-			Range:    &r,
+			Range:    r,
 		}
 
 		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: result})

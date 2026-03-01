@@ -44,6 +44,7 @@ type InitializationOptions struct {
 	DiagnosticsDeprecated       bool `json:"diagnosticsDeprecated"`
 	InlayHintsParameterNames    bool `json:"inlayHintsParameterNames"`
 	FeaturesDocumentHighlight   bool `json:"featuresDocumentHighlight"`
+	FeaturesHoverEvaluation     bool `json:"featuresHoverEvaluation"`
 }
 
 type InitializeResult struct {
