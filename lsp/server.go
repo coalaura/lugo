@@ -134,12 +134,7 @@ func NewServer(version string) *Server {
 }
 
 func (s *Server) Start() error {
-	exePath, err := os.Executable()
-	if err != nil {
-		return err
-	}
-
-	logPath := filepath.Join(filepath.Dir(exePath), "lsp.log")
+	logPath := filepath.Join(os.TempDir(), fmt.Sprintf("lugo-lsp-%d.log", os.Getpid()))
 
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
 	if err != nil {
@@ -147,6 +142,8 @@ func (s *Server) Start() error {
 	}
 
 	defer logFile.Close()
+
+	fmt.Fprintf(os.Stderr, "Lugo LSP logging to: %s\n", logPath)
 
 	s.Log = plain.New(
 		plain.WithTarget(logFile),
