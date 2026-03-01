@@ -151,6 +151,7 @@ type Diagnostic struct {
 	Message            string                         `json:"message"`
 	Tags               []DiagnosticTag                `json:"tags,omitempty"`
 	RelatedInformation []DiagnosticRelatedInformation `json:"relatedInformation,omitempty"`
+	Data               any                            `json:"data,omitempty"`
 }
 
 type DiagnosticRelatedInformation struct {

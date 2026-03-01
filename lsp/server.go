@@ -2262,6 +2262,25 @@ func (s *Server) handleMessage(req Request) {
 
 		for _, diag := range params.Context.Diagnostics {
 			switch diag.Code {
+			case "undefined-global":
+				if suggestion, ok := diag.Data.(string); ok && suggestion != "" {
+					actions = append(actions, CodeAction{
+						Title:       fmt.Sprintf("Change to '%s'", suggestion),
+						Kind:        "quickfix",
+						Diagnostics: []Diagnostic{diag},
+						IsPreferred: true,
+						Edit: &WorkspaceEdit{
+							Changes: map[string][]TextEdit{
+								uri: {
+									{
+										Range:   diag.Range,
+										NewText: suggestion,
+									},
+								},
+							},
+						},
+					})
+				}
 			case "unused-local":
 				actions = append(actions, CodeAction{
 					Title:       "Prefix unused variable with '_'",
@@ -2939,6 +2958,18 @@ func (s *Server) publishDiagnostics(uri string) {
 				startLine, startCol := doc.Tree.Position(node.Start)
 				endLine, endCol := doc.Tree.Position(node.End)
 
+				identStr := string(identBytes)
+				msg := fmt.Sprintf("Undefined global '%s'.", identStr)
+
+				suggestion := s.suggestGlobal(identStr)
+
+				var diagData any
+
+				if suggestion != "" {
+					msg = fmt.Sprintf("Undefined global '%s'. Did you mean '%s'?", identStr, suggestion)
+					diagData = suggestion
+				}
+
 				s.diagBuf = append(s.diagBuf, Diagnostic{
 					Range: Range{
 						Start: Position{Line: startLine, Character: startCol},
@@ -2946,7 +2977,8 @@ func (s *Server) publishDiagnostics(uri string) {
 					},
 					Severity: SeverityWarning,
 					Code:     "undefined-global",
-					Message:  fmt.Sprintf("Undefined global '%s'.", string(identBytes)),
+					Message:  msg,
+					Data:     diagData,
 				})
 			}
 		}
@@ -4060,6 +4092,35 @@ func (s *Server) compileIgnorePatterns() {
 	}
 }
 
+func (s *Server) suggestGlobal(name string) string {
+	var (
+		bestMatch string
+		minDist   = 3
+	)
+
+	check := func(candidate string) {
+		d := levenshteinFast(name, candidate, minDist-1)
+		if d < minDist {
+			minDist = d
+			bestMatch = candidate
+		}
+	}
+
+	// Prioritize known globals
+	for k := range s.KnownGlobals {
+		check(k)
+	}
+
+	// Then check workspace globals
+	for key, sym := range s.GlobalIndex {
+		if key.ReceiverHash == 0 {
+			check(sym.Name)
+		}
+	}
+
+	return bestMatch
+}
+
 func isWriteAccess(tree *ast.Tree, nodeID ast.NodeID) bool {
 	pID := tree.Nodes[nodeID].Parent
 	if pID == ast.InvalidNode {
@@ -4238,4 +4299,69 @@ func isRootLevel(tree *ast.Tree, id ast.NodeID) bool {
 	}
 
 	return false
+}
+
+// Fast, zero-allocation Levenshtein distance for strings up to 63 bytes.
+func levenshteinFast(s, t string, maxDist int) int {
+	if len(s) > len(t) {
+		s, t = t, s
+	}
+
+	ls := len(s)
+	lt := len(t)
+
+	if ls == 0 {
+		return lt
+	}
+
+	if lt-ls > maxDist {
+		return maxDist + 1
+	}
+
+	if lt > 63 {
+		return maxDist + 1
+	}
+
+	var (
+		v0 [64]int
+		v1 [64]int
+	)
+
+	for i := 0; i <= ls; i++ {
+		v0[i] = i
+	}
+
+	for i := range lt {
+		v1[0] = i + 1
+
+		minDistForRow := v1[0]
+
+		for j := range ls {
+			cost := 1
+
+			if t[i] == s[j] {
+				cost = 0
+			}
+
+			a := v1[j] + 1
+			b := v0[j+1] + 1
+			c := v0[j] + cost
+
+			m := min(c, min(b, a))
+
+			v1[j+1] = m
+
+			if m < minDistForRow {
+				minDistForRow = m
+			}
+		}
+
+		if minDistForRow > maxDist {
+			return maxDist + 1
+		}
+
+		v0 = v1
+	}
+
+	return v1[ls]
 }
