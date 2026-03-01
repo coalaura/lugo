@@ -29,6 +29,8 @@ Lugo implements a comprehensive suite of modern Language Server Protocol feature
 * **Document Highlights:** Click or move your cursor over any variable or function to instantly highlight all read/write usages within the current file.
 * **Smart Selection (Selection Range):** Press `Shift+Alt+RightArrow` to semantically expand your text selection based on the AST (Identifier -> Call Expression -> Statement -> Block -> Function -> File).
 * **Go to Definition & Hover:** Instant cross-file jumps. Fully parses LuaDoc (`@param`, `@return`, `@field`, `@class`, `@alias`, `@type`, `@generic`, `@overload`, `@see`, `@deprecated`) and renders beautifully formatted function signatures.
+* **Hover Evaluation:** Lugo statically evaluates constant expressions (math, bitwise operations, string concatenation, and logic) in real-time, displaying the computed result directly in the hover tooltip.
+* **Advanced Type Inference:** Lazily evaluates and caches types. Supports control-flow type narrowing (e.g., `type(x) == "string"`), loop variable unpacking (`ipairs`/`pairs`), and deep module aliasing.
 * **Find References & Code Lens:** Find all usages of a symbol across your workspace. Automatically embeds clickable Code Lens reference counters directly above function definitions.
 * **Rename & Linked Editing Ranges:** Instantly rename symbols across your workspace. Supports Linked Editing for simultaneous, multi-cursor renaming of local variables as you type.
 * **Call Hierarchy:** Visually explore a tree of incoming and outgoing function calls.
@@ -83,3 +85,4 @@ You can configure Lugo via your VS Code `settings.json` (also available via the 
 **Editor**
 * `lugo.inlayHints.parameterNames`: Enable inline parameter name hints for function and method calls.
 * `lugo.features.documentHighlight`: Enable document highlights for variables and function/method calls.
+* `lugo.features.hoverEvaluation`: Evaluate and display the result of constant expressions on hover (e.g., `1 + 2` -> `3`).
