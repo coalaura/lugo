@@ -26,22 +26,24 @@ Lugo implements a comprehensive suite of modern Language Server Protocol feature
 
 * **Intelligent Autocomplete:** Resilient, context-aware member access (`table.|`), locals, globals, and keywords. Works even when the surrounding syntax tree is temporarily broken.
 * **Semantic Tokens (Rich Highlighting):** Compiler-accurate syntax highlighting. Visually distinguishes locals from globals, properties from methods, and identifies modifiers like `readonly` (`<const>`), `deprecated`, and `defaultLibrary`.
+* **Document Highlights:** Click or move your cursor over any variable or function to instantly highlight all read/write usages within the current file.
+* **Smart Selection (Selection Range):** Press `Shift+Alt+RightArrow` to semantically expand your text selection based on the AST (Identifier -> Call Expression -> Statement -> Block -> Function -> File).
 * **Go to Definition & Hover:** Instant cross-file jumps. Fully parses LuaDoc (`@param`, `@return`, `@field`, `@class`, `@alias`, `@type`, `@generic`, `@overload`, `@see`, `@deprecated`) and renders beautifully formatted function signatures.
 * **Find References & Code Lens:** Find all usages of a symbol across your workspace. Automatically embeds clickable Code Lens reference counters directly above function definitions.
 * **Rename & Linked Editing Ranges:** Instantly rename symbols across your workspace. Supports Linked Editing for simultaneous, multi-cursor renaming of local variables as you type.
 * **Call Hierarchy:** Visually explore a tree of incoming and outgoing function calls.
 * **Document & Workspace Symbols:** Instant workspace-wide search (`Ctrl+T`) for fully qualified names (e.g., `OP.Math.Round`), and full VS Code "Outline" tree generation.
 * **Signature Help & Inlay Hints:** Real-time active-parameter tooltips and inline parameter name hints with smart implicit `self` offset calculation.
-* **Code Actions (Quick Fixes):** Fast automated fixes for common diagnostics (e.g., prefixing unused variables with `_`, or adding `local` to implicit globals).
+* **Code Actions (Quick Fixes):** Fast automated fixes for common diagnostics, including prefixing unused variables with `_`, adding `local` to implicit globals, and instantly fixing typos with highly optimized Levenshtein distance suggestions.
 * **Folding Ranges:** Accurately fold functions, tables, control flow blocks, and multi-line strings/comments.
 * **Virtual Standard Library:** Click on any standard library function to open a syntax-highlighted, read-only virtual tab streaming directly from the Go server's embedded filesystem (`std:///`).
 * **Fast-Path Smart Ignores:** Automatically inherits VS Code's native `files.exclude` and `search.exclude` settings. Lugo pre-compiles these into high-speed prefix/suffix byte matchers, instantly skipping ignored directories without the overhead of regex.
 
 ### Advanced Diagnostics
 Lugo performs workspace-wide analysis to catch bugs before runtime:
-* **Undefined Globals:** Detects typos with wildcard ignore support (e.g., `N_0x*`).
+* **Undefined Globals:** Detects typos with wildcard ignore support (e.g., `N_0x*`) and suggests the closest known global.
 * **Implicit Globals:** Warns when you forget the `local` keyword inside a function.
-* **Unused Variables:** Fades out unused local variables.
+* **Unused Variables:** Granular detection for unused locals, functions, parameters, and loop variables.
 * **Shadowing:** Warns when a local shadows an outer scope or global, providing a clickable link to the shadowed definition.
 * **Unreachable Code:** Detects dead code after `return`, `break`, or `goto`.
 * **Ambiguous Returns:** Catches Lua's infamous newline evaluation trap where expressions on the next line are accidentally returned.
@@ -69,7 +71,10 @@ You can configure Lugo via your VS Code `settings.json` (also available via the 
 **Diagnostics**
 * `lugo.diagnostics.undefinedGlobals`: Toggle undefined global warnings.
 * `lugo.diagnostics.implicitGlobals`: Toggle warnings for forgetting the `local` keyword.
-* `lugo.diagnostics.unusedVariables`: Toggle unused local variable detection.
+* `lugo.diagnostics.unusedLocal`: Toggle unused local variable detection.
+* `lugo.diagnostics.unusedFunction`: Toggle unused local function detection.
+* `lugo.diagnostics.unusedParameter`: Toggle unused parameter detection.
+* `lugo.diagnostics.unusedLoopVar`: Toggle unused loop variable detection.
 * `lugo.diagnostics.shadowing`: Toggle warnings when a local shadows an outer scope or global.
 * `lugo.diagnostics.unreachableCode`: Toggle graying out unreachable code.
 * `lugo.diagnostics.ambiguousReturns`: Toggle warnings for expressions accidentally returned due to newlines.
@@ -77,3 +82,4 @@ You can configure Lugo via your VS Code `settings.json` (also available via the 
 
 **Editor**
 * `lugo.inlayHints.parameterNames`: Enable inline parameter name hints for function and method calls.
+* `lugo.features.documentHighlight`: Enable document highlights for variables and function/method calls.
