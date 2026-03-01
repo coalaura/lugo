@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"time"
@@ -184,6 +185,29 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) handleMessage(req Request) {
+	defer func() {
+		if r := recover(); r != nil {
+			stack := debug.Stack()
+
+			s.Log.Errorf("CRITICAL PANIC in method %s: %v\n%s\n", req.Method, r, string(stack))
+
+			// Attempt to notify the client before we die
+			if req.ID != 0 {
+				WriteMessage(s.Writer, Response{
+					RPC: "2.0",
+					ID:  req.ID,
+					Error: ResponseError{
+						Code:    -32603, // InternalError
+						Message: fmt.Sprintf("Lugo LSP crashed critically: %v", r),
+					},
+				})
+			}
+
+			// Fail-fast
+			os.Exit(1)
+		}
+	}()
+
 	s.Log.Debugf("Received method: %s\n", req.Method)
 
 	switch req.Method {
