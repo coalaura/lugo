@@ -14,7 +14,7 @@ Most Lua language servers struggle when dropped into massive codebases (like gam
 
 **Lugo is different:**
 * **Blistering Performance:** In real-world benchmarks on modern hardware (e.g., AMD Ryzen 9 9950X3D), Lugo completely cold-indexes a **2,200+ file workspace** (including full AST generation, resolution, and publishing workspace-wide diagnostics) in **~1.5s**.
-* **Incremental Warm Starts:** Lugo hashes your workspace files. If you restart the server or trigger a re-index, it skips parsing unchanged files and reuses map memory pools (`clear()`), dropping warm re-indexes to just **~340ms**.
+* **Incremental Warm Starts:** Lugo hashes your workspace files. If you trigger a re-index, it skips parsing unchanged files and reuses map memory pools (`clear()`), dropping warm re-indexes to just **~500ms**.
 * **Zero-Allocation Architecture:** The parser, lexer, and symbol resolver are designed to never allocate heap strings during normal typing. Tight loops execute inside CPU registers, leveraging SIMD-accelerated byte scanning to maximize cache locality.
 * **Microscopic Memory Footprint:** Lugo only stores flat arrays of integers. Only actively open files keep their source strings in memory, meaning Lugo can index thousands of files while consuming a fraction of the RAM used by traditional LSPs.
 * **Dynamic by Design:** Instead of forcing strict typing on a dynamic language, Lugo embraces Lua. If you do `MySQL = this` in a local file, Lugo dynamically resolves all deep table fields (e.g., `MySQL.Await.Execute`) across your entire workspace in real-time.
