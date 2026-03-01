@@ -24,10 +24,12 @@ func ReadMessage(r *bufio.Reader) ([]byte, error) {
 		}
 
 		if bytes.HasPrefix(line, contentLengthPrefix) {
-			valBytes := line[len(contentLengthPrefix) : len(line)-2]
+			valBytes := bytes.TrimSpace(line[len(contentLengthPrefix):])
 
 			for _, b := range valBytes {
-				length = length*10 + int(b-'0')
+				if b >= '0' && b <= '9' {
+					length = length*10 + int(b-'0')
+				}
 			}
 		}
 	}

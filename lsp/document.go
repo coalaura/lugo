@@ -250,19 +250,27 @@ func (doc *Document) GetLocalsAt(offset uint32, yield func(name []byte, defID as
 
 		switch node.Kind {
 		case ast.KindBlock, ast.KindFile:
+			var lastStmtIdx int = -1
+
 			for i := uint16(0); i < node.Count; i++ {
 				stmtID := doc.Tree.ExtraList[node.Extra+uint32(i)]
-				stmtNode := doc.Tree.Nodes[stmtID]
-
-				if stmtNode.Start >= offset {
+				if doc.Tree.Nodes[stmtID].Start >= offset {
 					break
 				}
+
+				lastStmtIdx = int(i)
+			}
+
+			for i := lastStmtIdx; i >= 0; i-- {
+				stmtID := doc.Tree.ExtraList[node.Extra+uint32(i)]
+				stmtNode := doc.Tree.Nodes[stmtID]
 
 				switch stmtNode.Kind {
 				case ast.KindLocalAssign:
 					nameList := doc.Tree.Nodes[stmtNode.Left]
 
-					for j := uint16(0); j < nameList.Count; j++ {
+					// Iterate backwards to support `local a, a = 1, 2`
+					for j := int(nameList.Count) - 1; j >= 0; j-- {
 						identID := doc.Tree.ExtraList[nameList.Extra+uint32(j)]
 						identNode := doc.Tree.Nodes[identID]
 
@@ -285,14 +293,16 @@ func (doc *Document) GetLocalsAt(offset uint32, yield func(name []byte, defID as
 				funcExpr = node.Right
 			}
 
-			exprNode := doc.Tree.Nodes[funcExpr]
+			if funcExpr != ast.InvalidNode {
+				exprNode := doc.Tree.Nodes[funcExpr]
 
-			for i := uint16(0); i < exprNode.Count; i++ {
-				paramID := doc.Tree.ExtraList[exprNode.Extra+uint32(i)]
-				paramNode := doc.Tree.Nodes[paramID]
+				for i := uint16(0); i < exprNode.Count; i++ {
+					paramID := doc.Tree.ExtraList[exprNode.Extra+uint32(i)]
+					paramNode := doc.Tree.Nodes[paramID]
 
-				if !yield(doc.Source[paramNode.Start:paramNode.End], paramID) {
-					return
+					if !yield(doc.Source[paramNode.Start:paramNode.End], paramID) {
+						return
+					}
 				}
 			}
 		case ast.KindForNum:

@@ -3,6 +3,7 @@ package lsp
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1436,17 +1437,7 @@ func (s *Server) handleMessage(req Request) {
 			return syms
 		}
 
-		var rootID ast.NodeID = ast.InvalidNode
-
-		for i := len(doc.Tree.Nodes) - 1; i >= 1; i-- {
-			if doc.Tree.Nodes[i].Kind == ast.KindFile {
-				rootID = ast.NodeID(i)
-
-				break
-			}
-		}
-
-		symbols := walk(rootID)
+		symbols := walk(doc.Tree.Root)
 
 		if symbols == nil {
 			symbols = []DocumentSymbol{}
@@ -2518,15 +2509,7 @@ func (s *Server) handleMessage(req Request) {
 		}
 
 		slices.SortFunc(s.semTokensBuf, func(a, b SemanticToken) int {
-			if a.Start < b.Start {
-				return -1
-			}
-
-			if a.Start > b.Start {
-				return 1
-			}
-
-			return 0
+			return cmp.Compare(a.Start, b.Start)
 		})
 
 		s.semDataBuf = s.semDataBuf[:0]
@@ -2878,7 +2861,7 @@ func (s *Server) updateDocument(uri string, source []byte) {
 				actualKey := key
 				currRec := recHash
 
-				for i := 0; i < 10; i++ {
+				for range 10 {
 					if _, exists := s.GlobalIndex[actualKey]; exists {
 						break
 					}
@@ -3038,20 +3021,18 @@ func (s *Server) publishDiagnostics(uri string) {
 					}
 				}
 
-				nameStr := string(nameBytes)
-
 				var (
 					msg          string
 					code         string = "unused-local"
 					shouldReport bool
 				)
 
-				if nameStr == "..." {
+				if bytes.Equal(nameBytes, []byte("...")) {
 					category = "parameter"
 					msg = "Unused vararg '...'. Remove it from the parameter list if it is not needed."
 					code = "unused-vararg"
 				} else {
-					msg = fmt.Sprintf("Unused local %s '%s'. Prefix with '_' to ignore.", category, nameStr)
+					msg = fmt.Sprintf("Unused local %s '%s'. Prefix with '_' to ignore.", category, string(nameBytes))
 				}
 
 				switch category {
@@ -3477,23 +3458,10 @@ func (s *Server) getDocumentHighlights(uri string, doc *Document, ctx *SymbolCon
 	}
 
 	slices.SortFunc(highlights, func(a, b DocumentHighlight) int {
-		if a.Range.Start.Line < b.Range.Start.Line {
-			return -1
-		}
-
-		if a.Range.Start.Line > b.Range.Start.Line {
-			return 1
-		}
-
-		if a.Range.Start.Character < b.Range.Start.Character {
-			return -1
-		}
-
-		if a.Range.Start.Character > b.Range.Start.Character {
-			return 1
-		}
-
-		return 0
+		return cmp.Or(
+			cmp.Compare(a.Range.Start.Line, b.Range.Start.Line),
+			cmp.Compare(a.Range.Start.Character, b.Range.Start.Character),
+		)
 	})
 
 	return slices.CompactFunc(highlights, func(a, b DocumentHighlight) bool {

@@ -70,6 +70,7 @@ type Parser struct {
 	curr      token.Token
 	peek      token.Token
 	loopDepth int
+	depth     int
 	listStack []ast.NodeID
 }
 
@@ -97,6 +98,7 @@ func (p *Parser) Reset(source []byte, tree *ast.Tree) {
 	p.Errors = p.Errors[:0]
 	p.listStack = p.listStack[:0]
 	p.loopDepth = 0
+	p.depth = 0
 
 	p.nextToken()
 	p.nextToken()
@@ -848,6 +850,22 @@ func (p *Parser) parseExprList() ast.NodeID {
 }
 
 func (p *Parser) parseExpression(precedence int) ast.NodeID {
+	p.depth++
+
+	if p.depth > 200 {
+		if p.depth == 201 { // Only emit the error once
+			p.error("expression nesting too deep (possible cyclic/malicious code)")
+		}
+
+		p.depth--
+
+		return ast.InvalidNode
+	}
+
+	defer func() {
+		p.depth--
+	}()
+
 	leftID := p.parsePrefix()
 
 	if leftID == ast.InvalidNode {

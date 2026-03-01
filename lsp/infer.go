@@ -33,10 +33,9 @@ type TypeSet struct {
 func ParseTypeString(tStr string) TypeSet {
 	var t TypeSet
 
-	parts := strings.Split(tStr, "|")
-
-	for _, p := range parts {
+	for p := range strings.SplitSeq(tStr, "|") {
 		p = strings.TrimSpace(p)
+
 		if strings.HasSuffix(p, "?") {
 			p = p[:len(p)-1]
 
@@ -77,6 +76,10 @@ func ParseTypeString(tStr string) TypeSet {
 }
 
 func (t TypeSet) Format() string {
+	if t.Basics&TypeAny != 0 {
+		return "any"
+	}
+
 	var parts []string
 
 	if t.Basics&TypeNumber != 0 {
@@ -109,14 +112,6 @@ func (t TypeSet) Format() string {
 
 	if t.CustomName != "" {
 		parts = append(parts, t.CustomName)
-	}
-
-	if t.Basics&TypeAny != 0 {
-		if len(parts) == 0 {
-			return "any"
-		}
-
-		parts = append(parts, "any")
 	}
 
 	if t.Basics&TypeNil != 0 {
@@ -336,6 +331,10 @@ func (doc *Document) inferLoopVariable(defID, nameListID ast.NodeID, nameList as
 
 	funcID := firstExpr.Left
 	if doc.Tree.Nodes[funcID].Kind != ast.KindIdent {
+		return TypeSet{}
+	}
+
+	if doc.Resolver.References[funcID] != ast.InvalidNode {
 		return TypeSet{}
 	}
 
