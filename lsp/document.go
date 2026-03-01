@@ -14,7 +14,7 @@ type Document struct {
 	Tree            *ast.Tree
 	Resolver        *semantic.Resolver
 	Errors          []parser.ParseError
-	ExportedGlobals map[ast.NodeID]GlobalKey
+	ExportedGlobals map[ast.NodeID][]GlobalKey
 }
 
 func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {

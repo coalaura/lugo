@@ -2591,8 +2591,10 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		doc.Source = source
 
 		if doc.ExportedGlobals != nil {
-			for _, key := range doc.ExportedGlobals {
-				delete(s.GlobalIndex, key)
+			for _, keys := range doc.ExportedGlobals {
+				for _, key := range keys {
+					delete(s.GlobalIndex, key)
+				}
 			}
 		}
 
@@ -2607,7 +2609,7 @@ func (s *Server) updateDocument(uri string, source []byte) {
 			Source:          source,
 			Tree:            tree,
 			Resolver:        semantic.New(tree),
-			ExportedGlobals: make(map[ast.NodeID]GlobalKey),
+			ExportedGlobals: make(map[ast.NodeID][]GlobalKey),
 		}
 
 		s.Documents[uri] = doc
@@ -3159,9 +3161,9 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 		ctx.TargetURI = uri
 
 		if !ctx.IsGlobal && ctx.TargetDoc != nil && ctx.TargetDoc.ExportedGlobals != nil {
-			if gKey, exported := ctx.TargetDoc.ExportedGlobals[defID]; exported {
+			if keys, exported := ctx.TargetDoc.ExportedGlobals[defID]; exported && len(keys) > 0 {
 				ctx.IsGlobal = true
-				ctx.GKey = gKey
+				ctx.GKey = keys[0]
 			}
 		}
 	} else if gKey.PropHash != 0 {
@@ -3333,10 +3335,10 @@ func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, d
 
 	if doc, ok := s.Documents[uri]; ok {
 		if doc.ExportedGlobals == nil {
-			doc.ExportedGlobals = make(map[ast.NodeID]GlobalKey)
+			doc.ExportedGlobals = make(map[ast.NodeID][]GlobalKey)
 		}
 
-		doc.ExportedGlobals[nodeID] = key
+		doc.ExportedGlobals[nodeID] = append(doc.ExportedGlobals[nodeID], key)
 	}
 }
 
@@ -3400,8 +3402,10 @@ func (s *Server) isIgnored(fullPath, name string) bool {
 
 func (s *Server) clearDocument(uri string) {
 	if doc, ok := s.Documents[uri]; ok && doc.ExportedGlobals != nil {
-		for _, key := range doc.ExportedGlobals {
-			delete(s.GlobalIndex, key)
+		for _, keys := range doc.ExportedGlobals {
+			for _, key := range keys {
+				delete(s.GlobalIndex, key)
+			}
 		}
 	}
 
