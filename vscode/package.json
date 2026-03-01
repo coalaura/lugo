@@ -84,41 +84,47 @@
                     "description": "Enable diagnostics for unused local variables.",
                     "order": 6
                 },
+                "lugo.diagnostics.unusedExports": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable diagnostics for workspace-wide unused global exports and exported fields.",
+                    "order": 7
+                },
                 "lugo.diagnostics.shadowing": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable diagnostics when a local variable shadows a global or outer local.",
-                    "order": 7
+                    "order": 8
                 },
                 "lugo.diagnostics.unreachableCode": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable diagnostics for unreachable code (e.g. after a return or break).",
-                    "order": 8
+                    "order": 9
                 },
                 "lugo.diagnostics.ambiguousReturns": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable diagnostics for ambiguous returns where an expression on the next line is accidentally returned.",
-                    "order": 9
+                    "order": 10
                 },
                 "lugo.diagnostics.deprecated": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable diagnostics for usage of @deprecated symbols.",
-                    "order": 10
+                    "order": 11
                 },
                 "lugo.inlayHints.parameterNames": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable inline parameter name hints for function and method calls.",
-                    "order": 11
+                    "order": 12
                 },
                 "lugo.features.documentHighlight": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable document highlights for variables and function/method calls.",
-                    "order": 12
+                    "order": 13
                 }
             }
         }

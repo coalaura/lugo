@@ -10,11 +10,12 @@ import (
 )
 
 type Document struct {
-	Source          []byte
-	Tree            *ast.Tree
-	Resolver        *semantic.Resolver
-	Errors          []parser.ParseError
-	ExportedGlobals map[ast.NodeID][]GlobalKey
+	Source             []byte
+	Tree               *ast.Tree
+	Resolver           *semantic.Resolver
+	Errors             []parser.ParseError
+	ExportedGlobals    map[ast.NodeID][]GlobalKey
+	OutgoingGlobalRefs []GlobalKey
 }
 
 func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {

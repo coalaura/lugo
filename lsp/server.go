@@ -87,6 +87,7 @@ type Server struct {
 	Log               *plain.Plain
 	Documents         map[string]*Document
 	GlobalIndex       map[GlobalKey]GlobalSymbol
+	GlobalRefCount    map[GlobalKey]uint32
 	KnownGlobals      map[string]bool
 	OpenFiles         map[string]bool
 	RootURI           string
@@ -111,6 +112,7 @@ type Server struct {
 	DiagUndefinedGlobals bool
 	DiagImplicitGlobals  bool
 	DiagUnusedVariables  bool
+	DiagUnusedExports    bool
 	DiagShadowing        bool
 	DiagUnreachableCode  bool
 	DiagAmbiguousReturns bool
@@ -121,17 +123,18 @@ type Server struct {
 
 func NewServer(version string) *Server {
 	return &Server{
-		Version:      version,
-		Reader:       bufio.NewReader(os.Stdin),
-		Writer:       os.Stdout,
-		Documents:    make(map[string]*Document),
-		GlobalIndex:  make(map[GlobalKey]GlobalSymbol),
-		OpenFiles:    make(map[string]bool),
-		semTokensBuf: make([]SemanticToken, 0, 4096),
-		semDataBuf:   make([]uint32, 0, 4096*5),
-		sharedParser: parser.New(nil, ast.NewTree(nil)),
-		diagBuf:      make([]Diagnostic, 0, 1024),
-		IsIndexing:   true,
+		Version:        version,
+		Reader:         bufio.NewReader(os.Stdin),
+		Writer:         os.Stdout,
+		Documents:      make(map[string]*Document),
+		GlobalIndex:    make(map[GlobalKey]GlobalSymbol),
+		GlobalRefCount: make(map[GlobalKey]uint32),
+		OpenFiles:      make(map[string]bool),
+		semTokensBuf:   make([]SemanticToken, 0, 4096),
+		semDataBuf:     make([]uint32, 0, 4096*5),
+		sharedParser:   parser.New(nil, ast.NewTree(nil)),
+		diagBuf:        make([]Diagnostic, 0, 1024),
+		IsIndexing:     true,
 	}
 }
 
@@ -250,6 +253,7 @@ func (s *Server) handleMessage(req Request) {
 			s.DiagUndefinedGlobals = params.InitializationOptions.DiagnosticsUndefinedGlobals
 			s.DiagImplicitGlobals = params.InitializationOptions.DiagnosticsImplicitGlobals
 			s.DiagUnusedVariables = params.InitializationOptions.DiagnosticsUnusedVariables
+			s.DiagUnusedExports = params.InitializationOptions.DiagnosticsUnusedExports
 			s.DiagShadowing = params.InitializationOptions.DiagnosticsShadowing
 			s.DiagUnreachableCode = params.InitializationOptions.DiagnosticsUnreachableCode
 			s.DiagAmbiguousReturns = params.InitializationOptions.DiagnosticsAmbiguousReturns
@@ -2692,7 +2696,15 @@ func (s *Server) updateDocument(uri string, source []byte) {
 			}
 		}
 
+		for _, k := range doc.OutgoingGlobalRefs {
+			if s.GlobalRefCount[k] > 0 {
+				s.GlobalRefCount[k]--
+			}
+		}
+
 		clear(doc.ExportedGlobals)
+
+		doc.OutgoingGlobalRefs = doc.OutgoingGlobalRefs[:0]
 
 		tree = existing.Tree
 		tree.Reset(source)
@@ -2700,10 +2712,11 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		tree = ast.NewTree(source)
 
 		doc = &Document{
-			Source:          source,
-			Tree:            tree,
-			Resolver:        semantic.New(tree),
-			ExportedGlobals: make(map[ast.NodeID][]GlobalKey),
+			Source:             source,
+			Tree:               tree,
+			Resolver:           semantic.New(tree),
+			ExportedGlobals:    make(map[ast.NodeID][]GlobalKey),
+			OutgoingGlobalRefs: make([]GlobalKey, 0, 128),
 		}
 
 		s.Documents[uri] = doc
@@ -2838,6 +2851,60 @@ func (s *Server) updateDocument(uri string, source []byte) {
 			buf = append(buf, propBytes...)
 
 			s.setGlobalSymbol(GlobalKey{ReceiverHash: globalRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(buf))
+		}
+	}
+
+	for _, id := range res.GlobalRefs {
+		if res.References[id] == ast.InvalidNode {
+			hash := ast.HashBytes(doc.Source[doc.Tree.Nodes[id].Start:doc.Tree.Nodes[id].End])
+			key := GlobalKey{ReceiverHash: 0, PropHash: hash}
+
+			doc.OutgoingGlobalRefs = append(doc.OutgoingGlobalRefs, key)
+
+			s.GlobalRefCount[key]++
+		}
+	}
+
+	for _, pf := range res.PendingFields {
+		if res.References[pf.PropNodeID] == ast.InvalidNode {
+			var recHash uint64
+
+			if pf.ReceiverDef != ast.InvalidNode {
+				valID := doc.getAssignedValue(pf.ReceiverDef)
+				if valID != ast.InvalidNode {
+					path := s.getGlobalPath(doc, valID, 0)
+					if path != nil {
+						recHash = ast.HashBytes(path)
+					}
+				}
+			} else {
+				recHash = pf.ReceiverHash
+			}
+
+			if recHash != 0 {
+				key := GlobalKey{ReceiverHash: recHash, PropHash: pf.PropHash}
+
+				actualKey := key
+				currRec := recHash
+
+				for i := 0; i < 10; i++ {
+					if _, exists := s.GlobalIndex[actualKey]; exists {
+						break
+					}
+
+					nextRec := s.getGlobalAlias(currRec)
+					if nextRec == 0 {
+						break
+					}
+
+					currRec = nextRec
+					actualKey = GlobalKey{ReceiverHash: currRec, PropHash: pf.PropHash}
+				}
+
+				doc.OutgoingGlobalRefs = append(doc.OutgoingGlobalRefs, actualKey)
+
+				s.GlobalRefCount[actualKey]++
+			}
 		}
 	}
 
@@ -3123,6 +3190,77 @@ func (s *Server) publishDiagnostics(uri string) {
 					if isTerminal(doc.Tree, stmtID) {
 						terminalFound = true
 					}
+				}
+			}
+		}
+	}
+
+	if s.DiagUnusedExports {
+		for _, defID := range doc.Resolver.GlobalDefs {
+			node := doc.Tree.Nodes[defID]
+			if node.Start == node.End {
+				continue
+			}
+
+			identBytes := doc.Source[node.Start:node.End]
+
+			if s.isKnownGlobal(identBytes) {
+				continue
+			}
+
+			hash := ast.HashBytes(identBytes)
+			key := GlobalKey{ReceiverHash: 0, PropHash: hash}
+
+			if s.GlobalRefCount[key] == 0 {
+				sLine, sCol := doc.Tree.Position(node.Start)
+				eLine, eCol := doc.Tree.Position(node.End)
+
+				s.diagBuf = append(s.diagBuf, Diagnostic{
+					Range: Range{
+						Start: Position{Line: sLine, Character: sCol},
+						End:   Position{Line: eLine, Character: eCol},
+					},
+					Severity: SeverityWarning,
+					Tags:     []DiagnosticTag{Unnecessary},
+					Message:  "Unused global export: '" + string(identBytes) + "'.",
+				})
+			}
+		}
+
+		for _, fd := range doc.Resolver.FieldDefs {
+			var recHash uint64
+
+			if fd.ReceiverDef == ast.InvalidNode {
+				recHash = fd.ReceiverHash
+			} else {
+				valID := doc.getAssignedValue(fd.ReceiverDef)
+				if valID != ast.InvalidNode {
+					path := s.getGlobalPath(doc, valID, 0)
+					if path != nil && !bytes.Equal(path, []byte("self")) {
+						recHash = ast.HashBytes(path)
+					}
+				}
+			}
+
+			if recHash != 0 {
+				key := GlobalKey{ReceiverHash: recHash, PropHash: fd.PropHash}
+
+				if s.GlobalRefCount[key] == 0 {
+					node := doc.Tree.Nodes[fd.NodeID]
+					propBytes := doc.Source[node.Start:node.End]
+
+					sLine, sCol := doc.Tree.Position(node.Start)
+					eLine, eCol := doc.Tree.Position(node.End)
+
+					s.diagBuf = append(s.diagBuf, Diagnostic{
+						Range: Range{
+							Start: Position{Line: sLine, Character: sCol},
+							End:   Position{Line: eLine, Character: eCol},
+						},
+						Severity: SeverityHint,
+						Tags:     []DiagnosticTag{Unnecessary},
+						Message:  "Unused exported field: '" + string(propBytes) + "'.",
+					})
 				}
 			}
 		}
@@ -3616,10 +3754,18 @@ func (s *Server) isIgnored(fullPath, name string) bool {
 }
 
 func (s *Server) clearDocument(uri string) {
-	if doc, ok := s.Documents[uri]; ok && doc.ExportedGlobals != nil {
-		for _, keys := range doc.ExportedGlobals {
-			for _, key := range keys {
-				delete(s.GlobalIndex, key)
+	if doc, ok := s.Documents[uri]; ok {
+		if doc.ExportedGlobals != nil {
+			for _, keys := range doc.ExportedGlobals {
+				for _, key := range keys {
+					delete(s.GlobalIndex, key)
+				}
+			}
+		}
+
+		for _, k := range doc.OutgoingGlobalRefs {
+			if s.GlobalRefCount[k] > 0 {
+				s.GlobalRefCount[k]--
 			}
 		}
 	}

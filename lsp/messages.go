@@ -35,6 +35,7 @@ type InitializationOptions struct {
 	DiagnosticsUndefinedGlobals bool `json:"diagnosticsUndefinedGlobals"`
 	DiagnosticsImplicitGlobals  bool `json:"diagnosticsImplicitGlobals"`
 	DiagnosticsUnusedVariables  bool `json:"diagnosticsUnusedVariables"`
+	DiagnosticsUnusedExports    bool `json:"diagnosticsUnusedExports"`
 	DiagnosticsShadowing        bool `json:"diagnosticsShadowing"`
 	DiagnosticsUnreachableCode  bool `json:"diagnosticsUnreachableCode"`
 	DiagnosticsAmbiguousReturns bool `json:"diagnosticsAmbiguousReturns"`
