@@ -78,53 +78,65 @@
                     "description": "Enable diagnostics for implicit global variable creation (e.g., forgetting the 'local' keyword inside a function).",
                     "order": 5
                 },
-                "lugo.diagnostics.unusedVariables": {
+                "lugo.diagnostics.unusedLocal": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable diagnostics for unused local variables.",
                     "order": 6
                 },
-                "lugo.diagnostics.unusedExports": {
+                "lugo.diagnostics.unusedFunction": {
                     "type": "boolean",
                     "default": true,
-                    "description": "Enable diagnostics for workspace-wide unused global exports and exported fields.",
+                    "description": "Enable diagnostics for unused local functions.",
                     "order": 7
+                },
+                "lugo.diagnostics.unusedParameter": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable diagnostics for unused function parameters (and varargs).",
+                    "order": 8
+                },
+                "lugo.diagnostics.unusedLoopVar": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable diagnostics for unused loop variables.",
+                    "order": 9
                 },
                 "lugo.diagnostics.shadowing": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable diagnostics when a local variable shadows a global or outer local.",
-                    "order": 8
+                    "order": 10
                 },
                 "lugo.diagnostics.unreachableCode": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable diagnostics for unreachable code (e.g. after a return or break).",
-                    "order": 9
+                    "order": 11
                 },
                 "lugo.diagnostics.ambiguousReturns": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable diagnostics for ambiguous returns where an expression on the next line is accidentally returned.",
-                    "order": 10
+                    "order": 12
                 },
                 "lugo.diagnostics.deprecated": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable diagnostics for usage of @deprecated symbols.",
-                    "order": 11
+                    "order": 13
                 },
                 "lugo.inlayHints.parameterNames": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable inline parameter name hints for function and method calls.",
-                    "order": 12
+                    "order": 14
                 },
                 "lugo.features.documentHighlight": {
                     "type": "boolean",
                     "default": true,
                     "description": "Enable document highlights for variables and function/method calls.",
-                    "order": 13
+                    "order": 15
                 }
             }
         }

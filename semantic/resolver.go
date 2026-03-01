@@ -194,20 +194,19 @@ func (r *Resolver) resolveReference(identID ast.NodeID, isDef bool) {
 }
 
 func (r *Resolver) getReceiverContext(recID ast.NodeID) (ast.NodeID, uint64, []byte) {
-	if r.Tree.Nodes[recID].Kind == ast.KindIdent {
-		def := r.References[recID]
-
-		if def != ast.InvalidNode {
-			return def, 0, r.source(recID)
-		}
+	if recID == ast.InvalidNode {
+		return ast.InvalidNode, 0, nil
 	}
 
 	curr := recID
+
+	var rootDef ast.NodeID = ast.InvalidNode
 
 	for curr != ast.InvalidNode {
 		node := r.Tree.Nodes[curr]
 
 		if node.Kind == ast.KindIdent {
+			rootDef = r.References[curr]
 			break
 		} else if node.Kind == ast.KindMemberExpr {
 			curr = node.Left
@@ -218,13 +217,13 @@ func (r *Resolver) getReceiverContext(recID ast.NodeID) (ast.NodeID, uint64, []b
 
 	recBytes := r.source(recID)
 
-	return ast.InvalidNode, ast.HashBytes(recBytes), recBytes
+	return rootDef, ast.HashBytes(recBytes), recBytes
 }
 
-func (r *Resolver) getTableReceiver(id ast.NodeID) []byte {
+func (r *Resolver) getTableReceiver(id ast.NodeID) (ast.NodeID, []byte) {
 	parentID := r.Tree.Nodes[id].Parent
 	if parentID == ast.InvalidNode {
-		return nil
+		return ast.InvalidNode, nil
 	}
 
 	pNode := r.Tree.Nodes[parentID]
@@ -232,7 +231,7 @@ func (r *Resolver) getTableReceiver(id ast.NodeID) []byte {
 	if pNode.Kind == ast.KindExprList {
 		gpID := pNode.Parent
 		if gpID == ast.InvalidNode {
-			return nil
+			return ast.InvalidNode, nil
 		}
 
 		gpNode := r.Tree.Nodes[gpID]
@@ -251,12 +250,21 @@ func (r *Resolver) getTableReceiver(id ast.NodeID) []byte {
 			if idx != -1 {
 				lhsNode := r.Tree.Nodes[gpNode.Left]
 				if uint16(idx) < lhsNode.Count {
-					return r.source(r.Tree.ExtraList[lhsNode.Extra+uint32(idx)])
+					lID := r.Tree.ExtraList[lhsNode.Extra+uint32(idx)]
+
+					if gpNode.Kind == ast.KindLocalAssign {
+						return lID, r.source(lID)
+					} else if r.Tree.Nodes[lID].Kind == ast.KindIdent {
+						return r.References[lID], r.source(lID)
+					} else if r.Tree.Nodes[lID].Kind == ast.KindMemberExpr {
+						defID, _, recBytes := r.getReceiverContext(lID)
+						return defID, recBytes
+					}
 				}
 			}
 		}
 
-		return nil
+		return ast.InvalidNode, nil
 	}
 
 	if pNode.Kind == ast.KindRecordField {
@@ -264,7 +272,7 @@ func (r *Resolver) getTableReceiver(id ast.NodeID) []byte {
 
 		grandParentID := pNode.Parent
 		if grandParentID != ast.InvalidNode && r.Tree.Nodes[grandParentID].Kind == ast.KindTableExpr {
-			parentRec := r.getTableReceiver(grandParentID)
+			parentDef, parentRec := r.getTableReceiver(grandParentID)
 			if len(parentRec) > 0 {
 				res := make([]byte, 0, len(parentRec)+1+int(keyNode.End-keyNode.Start))
 
@@ -272,12 +280,12 @@ func (r *Resolver) getTableReceiver(id ast.NodeID) []byte {
 				res = append(res, '.')
 				res = append(res, r.source(pNode.Left)...)
 
-				return res
+				return parentDef, res
 			}
 		}
 	}
 
-	return nil
+	return ast.InvalidNode, nil
 }
 
 func (r *Resolver) source(id ast.NodeID) []byte {
@@ -339,7 +347,7 @@ func (r *Resolver) visit(id ast.NodeID) {
 
 		r.visit(node.Right)
 		r.scopeStack = r.scopeStack[:startScope]
-	case ast.KindIdent:
+	case ast.KindIdent, ast.KindVararg:
 		r.resolveReference(id, false)
 	case ast.KindAssign:
 		listNode := r.Tree.Nodes[node.Left]
@@ -395,7 +403,7 @@ func (r *Resolver) visit(id ast.NodeID) {
 		r.visit(node.Left)
 		r.visitArgs(node.Extra, node.Count)
 	case ast.KindTableExpr:
-		recBytes := r.getTableReceiver(id)
+		recDef, recBytes := r.getTableReceiver(id)
 
 		var recHash uint64
 
@@ -413,7 +421,7 @@ func (r *Resolver) visit(id ast.NodeID) {
 					propHash := ast.HashBytes(r.source(fieldNode.Left))
 
 					r.FieldDefs = append(r.FieldDefs, FieldDef{
-						ReceiverDef:  ast.InvalidNode,
+						ReceiverDef:  recDef,
 						ReceiverHash: recHash,
 						ReceiverName: recBytes,
 						PropHash:     propHash,

@@ -111,8 +111,10 @@ type Server struct {
 
 	DiagUndefinedGlobals bool
 	DiagImplicitGlobals  bool
-	DiagUnusedVariables  bool
-	DiagUnusedExports    bool
+	DiagUnusedLocal      bool
+	DiagUnusedFunction   bool
+	DiagUnusedParameter  bool
+	DiagUnusedLoopVar    bool
 	DiagShadowing        bool
 	DiagUnreachableCode  bool
 	DiagAmbiguousReturns bool
@@ -252,8 +254,10 @@ func (s *Server) handleMessage(req Request) {
 
 			s.DiagUndefinedGlobals = params.InitializationOptions.DiagnosticsUndefinedGlobals
 			s.DiagImplicitGlobals = params.InitializationOptions.DiagnosticsImplicitGlobals
-			s.DiagUnusedVariables = params.InitializationOptions.DiagnosticsUnusedVariables
-			s.DiagUnusedExports = params.InitializationOptions.DiagnosticsUnusedExports
+			s.DiagUnusedLocal = params.InitializationOptions.DiagnosticsUnusedLocal
+			s.DiagUnusedFunction = params.InitializationOptions.DiagnosticsUnusedFunction
+			s.DiagUnusedParameter = params.InitializationOptions.DiagnosticsUnusedParameter
+			s.DiagUnusedLoopVar = params.InitializationOptions.DiagnosticsUnusedLoopVar
 			s.DiagShadowing = params.InitializationOptions.DiagnosticsShadowing
 			s.DiagUnreachableCode = params.InitializationOptions.DiagnosticsUnreachableCode
 			s.DiagAmbiguousReturns = params.InitializationOptions.DiagnosticsAmbiguousReturns
@@ -2920,6 +2924,7 @@ func (s *Server) publishDiagnostics(uri string) {
 
 	s.diagBuf = s.diagBuf[:0]
 
+	// 1. Parse Errors
 	for _, err := range doc.Errors {
 		startLine, startCol := doc.Tree.Position(err.Start)
 		endLine, endCol := doc.Tree.Position(err.End)
@@ -2934,10 +2939,13 @@ func (s *Server) publishDiagnostics(uri string) {
 				End:   Position{Line: endLine, Character: endCol},
 			},
 			Severity: SeverityError,
+			Code:     "parse-error",
 			Message:  err.Message,
 		})
+	}
 
-		// accidental implicit globals
+	// 2. Undefined Globals
+	if s.DiagUndefinedGlobals {
 		for _, refID := range doc.Resolver.GlobalRefs {
 			node := doc.Tree.Nodes[refID]
 			if node.Start == node.End {
@@ -2963,12 +2971,14 @@ func (s *Server) publishDiagnostics(uri string) {
 						End:   Position{Line: endLine, Character: endCol},
 					},
 					Severity: SeverityWarning,
-					Message:  "Undefined global: " + string(identBytes),
+					Code:     "undefined-global",
+					Message:  fmt.Sprintf("Undefined global '%s'.", string(identBytes)),
 				})
 			}
 		}
 	}
 
+	// 3. Implicit Globals
 	if s.DiagImplicitGlobals {
 		for _, defID := range doc.Resolver.GlobalDefs {
 			node := doc.Tree.Nodes[defID]
@@ -3008,12 +3018,13 @@ func (s *Server) publishDiagnostics(uri string) {
 				},
 				Severity: SeverityWarning,
 				Code:     "implicit-global",
-				Message:  "Implicit global creation: '" + string(identBytes) + "'. Did you forget the 'local' keyword?",
+				Message:  fmt.Sprintf("Implicit global creation '%s'. Did you forget the 'local' keyword?", string(identBytes)),
 			})
 		}
 	}
 
-	if s.DiagShadowing || s.DiagUnusedVariables {
+	// 4. Shadowing & Unused Variables
+	if s.DiagShadowing || s.DiagUnusedLocal || s.DiagUnusedFunction || s.DiagUnusedParameter || s.DiagUnusedLoopVar {
 		for _, defID := range doc.Resolver.LocalDefs {
 			node := doc.Tree.Nodes[defID]
 			nameBytes := doc.Source[node.Start:node.End]
@@ -3030,14 +3041,65 @@ func (s *Server) publishDiagnostics(uri string) {
 				End:   Position{Line: endLine, Character: endCol},
 			}
 
-			if s.DiagUnusedVariables && doc.Resolver.UsageCount[defID] == 0 {
-				s.diagBuf = append(s.diagBuf, Diagnostic{
-					Range:    r,
-					Severity: SeverityWarning,
-					Code:     "unused-local",
-					Tags:     []DiagnosticTag{Unnecessary},
-					Message:  "Unused local variable: '" + string(nameBytes) + "'. If this is intentional, prefix the name with an underscore (e.g., '_" + string(nameBytes) + "').",
-				})
+			if doc.Resolver.UsageCount[defID] == 0 {
+				category := "variable"
+
+				pID := doc.Tree.Nodes[defID].Parent
+
+				if pID != ast.InvalidNode {
+					pNode := doc.Tree.Nodes[pID]
+
+					switch pNode.Kind {
+					case ast.KindFunctionExpr:
+						category = "parameter"
+					case ast.KindForNum:
+						category = "loop variable"
+					case ast.KindLocalFunction:
+						category = "function"
+					case ast.KindNameList:
+						gpID := pNode.Parent
+						if gpID != ast.InvalidNode && doc.Tree.Nodes[gpID].Kind == ast.KindForIn {
+							category = "loop variable"
+						}
+					}
+				}
+
+				nameStr := string(nameBytes)
+
+				var (
+					msg          string
+					code         string = "unused-local"
+					shouldReport bool
+				)
+
+				if nameStr == "..." {
+					category = "parameter"
+					msg = "Unused vararg '...'. Remove it from the parameter list if it is not needed."
+					code = "unused-vararg"
+				} else {
+					msg = fmt.Sprintf("Unused local %s '%s'. Prefix with '_' to ignore.", category, nameStr)
+				}
+
+				switch category {
+				case "variable":
+					shouldReport = s.DiagUnusedLocal
+				case "function":
+					shouldReport = s.DiagUnusedFunction
+				case "parameter":
+					shouldReport = s.DiagUnusedParameter
+				case "loop variable":
+					shouldReport = s.DiagUnusedLoopVar
+				}
+
+				if shouldReport {
+					s.diagBuf = append(s.diagBuf, Diagnostic{
+						Range:    r,
+						Severity: SeverityWarning,
+						Code:     code,
+						Tags:     []DiagnosticTag{Unnecessary},
+						Message:  msg,
+					})
+				}
 			}
 
 			if s.DiagShadowing {
@@ -3045,7 +3107,8 @@ func (s *Server) publishDiagnostics(uri string) {
 					s.diagBuf = append(s.diagBuf, Diagnostic{
 						Range:    r,
 						Severity: SeverityWarning,
-						Message:  "Local variable '" + string(nameBytes) + "' shadows a known global.",
+						Code:     "shadow-global",
+						Message:  fmt.Sprintf("Local variable '%s' shadows a known global.", string(nameBytes)),
 					})
 				} else {
 					hash := ast.HashBytes(nameBytes)
@@ -3073,14 +3136,15 @@ func (s *Server) publishDiagnostics(uri string) {
 										End:   Position{Line: eLine, Character: eCol},
 									},
 								},
-								Message: "Global '" + string(nameBytes) + "' defined here" + fromFile,
+								Message: fmt.Sprintf("Global '%s' defined here%s", string(nameBytes), fromFile),
 							})
 						}
 
 						s.diagBuf = append(s.diagBuf, Diagnostic{
 							Range:              r,
 							Severity:           SeverityWarning,
-							Message:            "Local variable '" + string(nameBytes) + "' shadows a global definition.",
+							Code:               "shadow-global",
+							Message:            fmt.Sprintf("Local variable '%s' shadows a global definition.", string(nameBytes)),
 							RelatedInformation: related,
 						})
 					}
@@ -3089,6 +3153,7 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 	}
 
+	// 5. Shadowing Outer Locals
 	if s.DiagShadowing {
 		for _, pair := range doc.Resolver.ShadowedOuter {
 			node := doc.Tree.Nodes[pair.Shadowing]
@@ -3112,7 +3177,7 @@ func (s *Server) publishDiagnostics(uri string) {
 						End:   Position{Line: eLine, Character: eCol},
 					},
 				},
-				Message: "Outer local '" + string(nameBytes) + "' defined here",
+				Message: fmt.Sprintf("Outer local '%s' defined here", string(nameBytes)),
 			})
 
 			s.diagBuf = append(s.diagBuf, Diagnostic{
@@ -3121,12 +3186,14 @@ func (s *Server) publishDiagnostics(uri string) {
 					End:   Position{Line: endLine, Character: endCol},
 				},
 				Severity:           SeverityWarning,
-				Message:            "Local variable '" + string(nameBytes) + "' shadows a variable from an outer scope.",
+				Code:               "shadow-outer",
+				Message:            fmt.Sprintf("Local variable '%s' shadows a variable from an outer scope.", string(nameBytes)),
 				RelatedInformation: related,
 			})
 		}
 	}
 
+	// 6. Unreachable Code & Ambiguous Returns
 	if s.DiagUnreachableCode || s.DiagAmbiguousReturns {
 		for i := 1; i < len(doc.Tree.Nodes); i++ {
 			node := doc.Tree.Nodes[i]
@@ -3153,13 +3220,14 @@ func (s *Server) publishDiagnostics(uri string) {
 								End:   Position{Line: eLine, Character: eCol},
 							},
 							Severity: SeverityWarning,
-							Message:  "Ambiguous return: this executes as the return value because Lua ignores newlines. Use 'return;' if you meant to leave this as unreachable code.",
+							Code:     "ambiguous-return",
+							Message:  "Ambiguous return: expression on the next line is executed as the return value. Use 'return;' to separate statements.",
 						})
 					}
 				}
 			}
 
-			if s.DiagUnreachableCode && node.Kind == ast.KindBlock || node.Kind == ast.KindFile {
+			if s.DiagUnreachableCode && (node.Kind == ast.KindBlock || node.Kind == ast.KindFile) {
 				var terminalFound bool
 
 				for j := uint16(0); j < node.Count; j++ {
@@ -3180,6 +3248,7 @@ func (s *Server) publishDiagnostics(uri string) {
 								End:   Position{Line: eLine, Character: eCol},
 							},
 							Severity: SeverityWarning,
+							Code:     "unreachable-code",
 							Tags:     []DiagnosticTag{Unnecessary},
 							Message:  "Unreachable code detected.",
 						})
@@ -3195,77 +3264,7 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 	}
 
-	if s.DiagUnusedExports {
-		for _, defID := range doc.Resolver.GlobalDefs {
-			node := doc.Tree.Nodes[defID]
-			if node.Start == node.End {
-				continue
-			}
-
-			identBytes := doc.Source[node.Start:node.End]
-
-			if s.isKnownGlobal(identBytes) {
-				continue
-			}
-
-			hash := ast.HashBytes(identBytes)
-			key := GlobalKey{ReceiverHash: 0, PropHash: hash}
-
-			if s.GlobalRefCount[key] == 0 {
-				sLine, sCol := doc.Tree.Position(node.Start)
-				eLine, eCol := doc.Tree.Position(node.End)
-
-				s.diagBuf = append(s.diagBuf, Diagnostic{
-					Range: Range{
-						Start: Position{Line: sLine, Character: sCol},
-						End:   Position{Line: eLine, Character: eCol},
-					},
-					Severity: SeverityWarning,
-					Tags:     []DiagnosticTag{Unnecessary},
-					Message:  "Unused global export: '" + string(identBytes) + "'.",
-				})
-			}
-		}
-
-		for _, fd := range doc.Resolver.FieldDefs {
-			var recHash uint64
-
-			if fd.ReceiverDef == ast.InvalidNode {
-				recHash = fd.ReceiverHash
-			} else {
-				valID := doc.getAssignedValue(fd.ReceiverDef)
-				if valID != ast.InvalidNode {
-					path := s.getGlobalPath(doc, valID, 0)
-					if path != nil && !bytes.Equal(path, []byte("self")) {
-						recHash = ast.HashBytes(path)
-					}
-				}
-			}
-
-			if recHash != 0 {
-				key := GlobalKey{ReceiverHash: recHash, PropHash: fd.PropHash}
-
-				if s.GlobalRefCount[key] == 0 {
-					node := doc.Tree.Nodes[fd.NodeID]
-					propBytes := doc.Source[node.Start:node.End]
-
-					sLine, sCol := doc.Tree.Position(node.Start)
-					eLine, eCol := doc.Tree.Position(node.End)
-
-					s.diagBuf = append(s.diagBuf, Diagnostic{
-						Range: Range{
-							Start: Position{Line: sLine, Character: sCol},
-							End:   Position{Line: eLine, Character: eCol},
-						},
-						Severity: SeverityHint,
-						Tags:     []DiagnosticTag{Unnecessary},
-						Message:  "Unused exported field: '" + string(propBytes) + "'.",
-					})
-				}
-			}
-		}
-	}
-
+	// 7. Deprecated
 	if s.DiagDeprecated {
 		for i := 1; i < len(doc.Tree.Nodes); i++ {
 			node := doc.Tree.Nodes[i]
@@ -3281,10 +3280,12 @@ func (s *Server) publishDiagnostics(uri string) {
 					startLine, startCol := doc.Tree.Position(node.Start)
 					endLine, endCol := doc.Tree.Position(node.End)
 
-					diagMsg := "Use of deprecated symbol '" + ctx.DisplayName + "'"
+					diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", ctx.DisplayName)
 
 					if msg != "" {
 						diagMsg += ": " + msg
+					} else {
+						diagMsg += "."
 					}
 
 					s.diagBuf = append(s.diagBuf, Diagnostic{
@@ -3293,6 +3294,7 @@ func (s *Server) publishDiagnostics(uri string) {
 							End:   Position{Line: endLine, Character: endCol},
 						},
 						Severity: SeverityHint,
+						Code:     "deprecated",
 						Tags:     []DiagnosticTag{Deprecated},
 						Message:  diagMsg,
 					})
@@ -3353,15 +3355,22 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 			displayName = string(doc.Source[doc.Tree.Nodes[recID].Start:identNode.End])
 			recBytes := doc.Source[doc.Tree.Nodes[recID].Start:doc.Tree.Nodes[recID].End]
 
-			if doc.Tree.Nodes[recID].Kind == ast.KindIdent {
-				recDef = doc.Resolver.References[recID]
+			curr := recID
+
+			for curr != ast.InvalidNode {
+				n := doc.Tree.Nodes[curr]
+				if n.Kind == ast.KindIdent {
+					recDef = doc.Resolver.References[curr]
+
+					break
+				} else if n.Kind == ast.KindMemberExpr {
+					curr = n.Left
+				} else {
+					break
+				}
 			}
 
-			if recDef == ast.InvalidNode {
-				gKey = GlobalKey{ReceiverHash: ast.HashBytes(recBytes), PropHash: ast.HashBytes(identBytes)}
-			} else {
-				gKey = GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes(identBytes)}
-			}
+			gKey = GlobalKey{ReceiverHash: ast.HashBytes(recBytes), PropHash: ast.HashBytes(identBytes)}
 		} else if isRecordKey {
 			isProp = true
 
@@ -3532,12 +3541,13 @@ func (s *Server) getDocumentHighlights(uri string, doc *Document, ctx *SymbolCon
 		}
 	} else if ctx.RecDefID != ast.InvalidNode && ctx.TargetURI == uri {
 		for _, fd := range doc.Resolver.FieldDefs {
-			if fd.ReceiverDef == ctx.RecDefID && fd.PropHash == ctx.GKey.PropHash {
+			if fd.ReceiverDef == ctx.RecDefID && fd.PropHash == ctx.GKey.PropHash && fd.ReceiverHash == ctx.GKey.ReceiverHash {
 				addHighlight(fd.NodeID, WriteHighlight)
 			}
 		}
+
 		for _, pf := range doc.Resolver.PendingFields {
-			if pf.ReceiverDef == ctx.RecDefID && pf.PropHash == ctx.GKey.PropHash {
+			if pf.ReceiverDef == ctx.RecDefID && pf.PropHash == ctx.GKey.PropHash && pf.ReceiverHash == ctx.GKey.ReceiverHash {
 				kind := ReadHighlight
 
 				if isWriteAccess(doc.Tree, pf.PropNodeID) {
