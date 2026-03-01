@@ -2703,8 +2703,26 @@ func (s *Server) updateDocument(uri string, source []byte) {
 
 	// Index global table fields
 	for _, fd := range res.FieldDefs {
+		var (
+			globalRecName []byte
+			globalRecHash uint64
+		)
+
 		if fd.ReceiverDef == ast.InvalidNode {
-			if bytes.Equal(fd.ReceiverName, []byte("self")) {
+			globalRecName = fd.ReceiverName
+			globalRecHash = fd.ReceiverHash
+		} else {
+			valID := doc.getAssignedValue(fd.ReceiverDef)
+			if valID != ast.InvalidNode {
+				globalRecName = s.getGlobalPath(doc, valID, 0)
+				if globalRecName != nil {
+					globalRecHash = ast.HashBytes(globalRecName)
+				}
+			}
+		}
+
+		if globalRecName != nil {
+			if bytes.Equal(globalRecName, []byte("self")) {
 				continue
 			}
 
@@ -2718,12 +2736,12 @@ func (s *Server) updateDocument(uri string, source []byte) {
 				sep = ':'
 			}
 
-			buf := make([]byte, 0, len(fd.ReceiverName)+1+len(propBytes))
-			buf = append(buf, fd.ReceiverName...)
+			buf := make([]byte, 0, len(globalRecName)+1+len(propBytes))
+			buf = append(buf, globalRecName...)
 			buf = append(buf, sep)
 			buf = append(buf, propBytes...)
 
-			s.setGlobalSymbol(GlobalKey{ReceiverHash: fd.ReceiverHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(buf))
+			s.setGlobalSymbol(GlobalKey{ReceiverHash: globalRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(buf))
 		}
 	}
 
@@ -3583,6 +3601,43 @@ func (s *Server) buildCallHierarchyItemFromDef(uri string, doc *Document, defID 
 			"defId": float64(defID),
 		},
 	}
+}
+
+func (s *Server) getGlobalPath(doc *Document, id ast.NodeID, depth int) []byte {
+	if id == ast.InvalidNode || depth > 10 {
+		return nil
+	}
+
+	node := doc.Tree.Nodes[id]
+
+	switch node.Kind {
+	case ast.KindIdent:
+		defID := doc.Resolver.References[id]
+		if defID == ast.InvalidNode {
+			return doc.Source[node.Start:node.End]
+		}
+
+		valID := doc.getAssignedValue(defID)
+		if valID != ast.InvalidNode && valID != id {
+			return s.getGlobalPath(doc, valID, depth+1)
+		}
+
+		return nil
+	case ast.KindMemberExpr:
+		leftPath := s.getGlobalPath(doc, node.Left, depth+1)
+		if leftPath != nil {
+			rightBytes := doc.Source[doc.Tree.Nodes[node.Right].Start:doc.Tree.Nodes[node.Right].End]
+
+			buf := make([]byte, 0, len(leftPath)+1+len(rightBytes))
+			buf = append(buf, leftPath...)
+			buf = append(buf, '.')
+			buf = append(buf, rightBytes...)
+
+			return buf
+		}
+	}
+
+	return nil
 }
 
 func (s *Server) getEnclosingFunctionDef(doc *Document, id ast.NodeID) ast.NodeID {

@@ -137,6 +137,10 @@ func (r *Resolver) defineField(memberNodeID ast.NodeID) {
 	}
 
 	recDef, recHash, recName := r.getReceiverContext(node.Left)
+	if len(recName) == 0 {
+		return
+	}
+
 	propHash := ast.HashBytes(r.source(node.Right))
 
 	for _, fd := range r.FieldDefs {
@@ -195,6 +199,20 @@ func (r *Resolver) getReceiverContext(recID ast.NodeID) (ast.NodeID, uint64, []b
 
 		if def != ast.InvalidNode {
 			return def, 0, r.source(recID)
+		}
+	}
+
+	curr := recID
+
+	for curr != ast.InvalidNode {
+		node := r.Tree.Nodes[curr]
+
+		if node.Kind == ast.KindIdent {
+			break
+		} else if node.Kind == ast.KindMemberExpr {
+			curr = node.Left
+		} else {
+			return ast.InvalidNode, 0, nil
 		}
 	}
 
@@ -353,15 +371,18 @@ func (r *Resolver) visit(id ast.NodeID) {
 
 		if node.Right != ast.InvalidNode && r.Tree.Nodes[node.Right].Kind == ast.KindIdent {
 			recDef, recHash, recName := r.getReceiverContext(node.Left)
-			propHash := ast.HashBytes(r.source(node.Right))
 
-			r.PendingFields = append(r.PendingFields, FieldRef{
-				PropNodeID:   node.Right,
-				ReceiverDef:  recDef,
-				ReceiverHash: recHash,
-				ReceiverName: recName,
-				PropHash:     propHash,
-			})
+			if len(recName) > 0 {
+				propHash := ast.HashBytes(r.source(node.Right))
+
+				r.PendingFields = append(r.PendingFields, FieldRef{
+					PropNodeID:   node.Right,
+					ReceiverDef:  recDef,
+					ReceiverHash: recHash,
+					ReceiverName: recName,
+					PropHash:     propHash,
+				})
+			}
 		}
 
 		if node.Kind == ast.KindMethodCall {
