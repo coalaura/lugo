@@ -1,6 +1,6 @@
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const vscode = require("vscode");
 const { LanguageClient } = require("vscode-languageclient/node");
 
@@ -72,7 +72,8 @@ async function startClient(context) {
 		diagUnreachableCode = config.get("diagnostics.unreachableCode") !== false,
 		diagAmbiguousReturns = config.get("diagnostics.ambiguousReturns") !== false,
 		diagDeprecated = config.get("diagnostics.deprecated") !== false,
-		inlayParamHints = config.get("inlayHints.parameterNames") !== false;
+		inlayParamHints = config.get("inlayHints.parameterNames") !== false,
+		featureDocumentHighlight = config.get("features.documentHighlight") !== false;
 
 	const filesConfig = vscode.workspace.getConfiguration("files"),
 		searchConfig = vscode.workspace.getConfiguration("search");
@@ -128,6 +129,7 @@ async function startClient(context) {
 			diagnosticsAmbiguousReturns: diagAmbiguousReturns,
 			diagnosticsDeprecated: diagDeprecated,
 			inlayHintsParameterNames: inlayParamHints,
+			featuresDocumentHighlight: featureDocumentHighlight,
 		},
 	};
 

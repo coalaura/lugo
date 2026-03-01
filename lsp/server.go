@@ -60,6 +60,7 @@ type SymbolContext struct {
 	GKey        GlobalKey
 	IdentNodeID ast.NodeID
 	TargetDefID ast.NodeID
+	RecDefID    ast.NodeID
 	IsProp      bool
 	IsGlobal    bool
 }
@@ -115,6 +116,7 @@ type Server struct {
 	DiagAmbiguousReturns bool
 	DiagDeprecated       bool
 	InlayParamHints      bool
+	FeatureDocHighlight  bool
 }
 
 func NewServer(version string) *Server {
@@ -253,6 +255,7 @@ func (s *Server) handleMessage(req Request) {
 			s.DiagAmbiguousReturns = params.InitializationOptions.DiagnosticsAmbiguousReturns
 			s.DiagDeprecated = params.InitializationOptions.DiagnosticsDeprecated
 			s.InlayParamHints = params.InitializationOptions.InlayHintsParameterNames
+			s.FeatureDocHighlight = params.InitializationOptions.FeaturesDocumentHighlight
 		}
 
 		result := InitializeResult{
@@ -263,13 +266,14 @@ func (s *Server) handleMessage(req Request) {
 				RenameProvider: map[string]bool{
 					"prepareProvider": true,
 				},
-				ReferencesProvider:      true,
-				DocumentSymbolProvider:  true,
-				WorkspaceSymbolProvider: true,
-				InlayHintProvider:       true,
-				CodeActionProvider:      true,
-				FoldingRangeProvider:    true,
-				CallHierarchyProvider:   true,
+				ReferencesProvider:        true,
+				DocumentSymbolProvider:    true,
+				WorkspaceSymbolProvider:   true,
+				InlayHintProvider:         s.InlayParamHints,
+				CodeActionProvider:        true,
+				FoldingRangeProvider:      true,
+				CallHierarchyProvider:     true,
+				DocumentHighlightProvider: s.FeatureDocHighlight,
 				CodeLensProvider: &CodeLensOptions{
 					ResolveProvider: true,
 				},
@@ -846,6 +850,74 @@ func (s *Server) handleMessage(req Request) {
 			RPC:    "2.0",
 			ID:     req.ID,
 			Result: locations,
+		})
+	case "textDocument/documentHighlight":
+		var params DocumentHighlightParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		if !s.FeatureDocHighlight {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
+
+		ctx := s.resolveSymbolAt(uri, offset)
+		if ctx == nil {
+			curr := doc.Tree.NodeAt(offset)
+
+			for curr != ast.InvalidNode {
+				node := doc.Tree.Nodes[curr]
+
+				if node.Kind == ast.KindCallExpr || node.Kind == ast.KindMethodCall {
+					var funcIdentID ast.NodeID
+
+					if node.Kind == ast.KindMethodCall {
+						funcIdentID = node.Right
+					} else {
+						funcIdentID = node.Left
+						if doc.Tree.Nodes[funcIdentID].Kind == ast.KindMemberExpr {
+							funcIdentID = doc.Tree.Nodes[funcIdentID].Right
+						}
+					}
+
+					if funcIdentID != ast.InvalidNode && doc.Tree.Nodes[funcIdentID].Kind == ast.KindIdent {
+						ctx = s.resolveSymbolNode(uri, doc, funcIdentID)
+					}
+
+					break
+				}
+
+				curr = node.Parent
+			}
+		}
+
+		if ctx == nil {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []DocumentHighlight{}})
+
+			return
+		}
+
+		highlights := s.getDocumentHighlights(uri, doc, ctx)
+
+		WriteMessage(s.Writer, Response{
+			RPC:    "2.0",
+			ID:     req.ID,
+			Result: highlights,
 		})
 	case "textDocument/codeLens":
 		var params CodeLensParams
@@ -1730,9 +1802,10 @@ func (s *Server) handleMessage(req Request) {
 				var identID ast.NodeID
 
 				if node.Kind == ast.KindCallExpr {
-					if doc.Tree.Nodes[node.Left].Kind == ast.KindIdent {
+					switch doc.Tree.Nodes[node.Left].Kind {
+					case ast.KindIdent:
 						identID = node.Left
-					} else if doc.Tree.Nodes[node.Left].Kind == ast.KindMemberExpr {
+					case ast.KindMemberExpr:
 						identID = doc.Tree.Nodes[node.Left].Right
 					}
 				} else {
@@ -3127,6 +3200,7 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 	var (
 		gKey   GlobalKey
 		isProp bool
+		recDef ast.NodeID = ast.InvalidNode
 	)
 
 	if parentID != ast.InvalidNode {
@@ -3141,14 +3215,14 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 			displayName = string(doc.Source[doc.Tree.Nodes[recID].Start:identNode.End])
 			recBytes := doc.Source[doc.Tree.Nodes[recID].Start:doc.Tree.Nodes[recID].End]
 
-			var recDef ast.NodeID = ast.InvalidNode
-
 			if doc.Tree.Nodes[recID].Kind == ast.KindIdent {
 				recDef = doc.Resolver.References[recID]
 			}
 
 			if recDef == ast.InvalidNode {
 				gKey = GlobalKey{ReceiverHash: ast.HashBytes(recBytes), PropHash: ast.HashBytes(identBytes)}
+			} else {
+				gKey = GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes(identBytes)}
 			}
 		} else if isRecordKey {
 			isProp = true
@@ -3165,21 +3239,22 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 		gKey = GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes(identBytes)}
 	}
 
-	isGlobal := defID == ast.InvalidNode || (isProp && gKey.ReceiverHash != 0)
+	isGlobal := defID == ast.InvalidNode && recDef == ast.InvalidNode && (!isProp || gKey.ReceiverHash != 0)
 
 	ctx := &SymbolContext{
+		TargetDoc:   doc,
+		TargetURI:   uri,
 		IdentNodeID: nodeID,
 		IdentName:   identName,
 		DisplayName: displayName,
 		IsProp:      isProp,
 		GKey:        gKey,
 		IsGlobal:    isGlobal,
+		RecDefID:    recDef,
 	}
 
 	if defID != ast.InvalidNode {
-		ctx.TargetDoc = doc
 		ctx.TargetDefID = defID
-		ctx.TargetURI = uri
 
 		if !ctx.IsGlobal && ctx.TargetDoc != nil && ctx.TargetDoc.ExportedGlobals != nil {
 			if keys, exported := ctx.TargetDoc.ExportedGlobals[defID]; exported && len(keys) > 0 {
@@ -3285,6 +3360,125 @@ func (s *Server) getReferences(ctx *SymbolContext, includeDeclaration bool) []Lo
 	}
 
 	return locations
+}
+
+func (s *Server) getDocumentHighlights(uri string, doc *Document, ctx *SymbolContext) []DocumentHighlight {
+	var highlights []DocumentHighlight
+
+	addHighlight := func(nodeID ast.NodeID, kind DocumentHighlightKind) {
+		node := doc.Tree.Nodes[nodeID]
+
+		sLine, sCol := doc.Tree.Position(node.Start)
+		eLine, eCol := doc.Tree.Position(node.End)
+
+		highlights = append(highlights, DocumentHighlight{
+			Range: Range{
+				Start: Position{Line: sLine, Character: sCol},
+				End:   Position{Line: eLine, Character: eCol},
+			},
+			Kind: kind,
+		})
+	}
+
+	if ctx.TargetDefID != ast.InvalidNode && ctx.TargetURI == uri {
+		for i, def := range doc.Resolver.References {
+			if def == ctx.TargetDefID {
+				kind := ReadHighlight
+
+				if ast.NodeID(i) == ctx.TargetDefID || isWriteAccess(doc.Tree, ast.NodeID(i)) {
+					kind = WriteHighlight
+				}
+
+				addHighlight(ast.NodeID(i), kind)
+			}
+		}
+	} else if ctx.RecDefID != ast.InvalidNode && ctx.TargetURI == uri {
+		for _, fd := range doc.Resolver.FieldDefs {
+			if fd.ReceiverDef == ctx.RecDefID && fd.PropHash == ctx.GKey.PropHash {
+				addHighlight(fd.NodeID, WriteHighlight)
+			}
+		}
+		for _, pf := range doc.Resolver.PendingFields {
+			if pf.ReceiverDef == ctx.RecDefID && pf.PropHash == ctx.GKey.PropHash {
+				kind := ReadHighlight
+
+				if isWriteAccess(doc.Tree, pf.PropNodeID) {
+					kind = WriteHighlight
+				}
+
+				addHighlight(pf.PropNodeID, kind)
+			}
+		}
+	}
+
+	if ctx.IsGlobal {
+		for _, id := range doc.Resolver.GlobalDefs {
+			if ast.HashBytes(doc.Source[doc.Tree.Nodes[id].Start:doc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
+				if ctx.GKey.ReceiverHash == 0 {
+					addHighlight(id, WriteHighlight)
+				}
+			}
+		}
+		for _, id := range doc.Resolver.GlobalRefs {
+			if ast.HashBytes(doc.Source[doc.Tree.Nodes[id].Start:doc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
+				if ctx.GKey.ReceiverHash == 0 && doc.Resolver.References[id] == ast.InvalidNode {
+					kind := ReadHighlight
+
+					if isWriteAccess(doc.Tree, id) {
+						kind = WriteHighlight
+					}
+
+					addHighlight(id, kind)
+				}
+			}
+		}
+		for _, fd := range doc.Resolver.FieldDefs {
+			if fd.ReceiverHash == ctx.GKey.ReceiverHash && fd.PropHash == ctx.GKey.PropHash {
+				addHighlight(fd.NodeID, WriteHighlight)
+			}
+		}
+		for _, pf := range doc.Resolver.PendingFields {
+			if pf.ReceiverHash == ctx.GKey.ReceiverHash && pf.PropHash == ctx.GKey.PropHash {
+				if doc.Resolver.References[pf.PropNodeID] == ast.InvalidNode {
+					kind := ReadHighlight
+
+					if isWriteAccess(doc.Tree, pf.PropNodeID) {
+						kind = WriteHighlight
+					}
+
+					addHighlight(pf.PropNodeID, kind)
+				}
+			}
+		}
+	}
+
+	if len(highlights) == 0 {
+		addHighlight(ctx.IdentNodeID, WriteHighlight)
+	}
+
+	slices.SortFunc(highlights, func(a, b DocumentHighlight) int {
+		if a.Range.Start.Line < b.Range.Start.Line {
+			return -1
+		}
+
+		if a.Range.Start.Line > b.Range.Start.Line {
+			return 1
+		}
+
+		if a.Range.Start.Character < b.Range.Start.Character {
+			return -1
+		}
+
+		if a.Range.Start.Character > b.Range.Start.Character {
+			return 1
+		}
+
+		return 0
+	})
+
+	return slices.CompactFunc(highlights, func(a, b DocumentHighlight) bool {
+		return a.Range.Start == b.Range.Start && a.Range.End == b.Range.End
+	})
 }
 
 func (s *Server) getGlobalAlias(hash uint64) uint64 {
@@ -3742,6 +3936,53 @@ func (s *Server) compileIgnorePatterns() {
 			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{MatchFallback: g})
 		}
 	}
+}
+
+func isWriteAccess(tree *ast.Tree, nodeID ast.NodeID) bool {
+	pID := tree.Nodes[nodeID].Parent
+	if pID == ast.InvalidNode {
+		return false
+	}
+
+	pNode := tree.Nodes[pID]
+
+	switch pNode.Kind {
+	case ast.KindNameList:
+		gpID := pNode.Parent
+		if gpID != ast.InvalidNode {
+			gpNode := tree.Nodes[gpID]
+
+			return gpNode.Kind == ast.KindLocalAssign || gpNode.Kind == ast.KindForIn
+		}
+	case ast.KindExprList:
+		gpID := pNode.Parent
+		if gpID != ast.InvalidNode {
+			gpNode := tree.Nodes[gpID]
+
+			return gpNode.Kind == ast.KindAssign && gpNode.Left == pID
+		}
+	case ast.KindForNum, ast.KindLocalFunction, ast.KindFunctionStmt, ast.KindRecordField:
+		return pNode.Left == nodeID
+	case ast.KindMethodName:
+		return pNode.Right == nodeID
+	case ast.KindMemberExpr:
+		if pNode.Right == nodeID {
+			gpID := pNode.Parent
+			if gpID != ast.InvalidNode {
+				gpNode := tree.Nodes[gpID]
+				if gpNode.Kind == ast.KindExprList {
+					ggpID := gpNode.Parent
+					if ggpID != ast.InvalidNode {
+						ggpNode := tree.Nodes[ggpID]
+
+						return ggpNode.Kind == ast.KindAssign && ggpNode.Left == gpID
+					}
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 func isTerminal(tree *ast.Tree, id ast.NodeID) bool {

@@ -375,7 +375,29 @@ func (p *Parser) parseLocal() ast.NodeID {
 	p.tree.ExtraList = append(p.tree.ExtraList, p.listStack[stackStart:]...)
 	p.listStack = p.listStack[:stackStart]
 
-	lhsList := p.tree.AddNode(ast.Node{Kind: ast.KindNameList, Extra: extraStart, Count: uint16(count)})
+	var (
+		lhsStart uint32
+		lhsEnd   uint32
+	)
+
+	if count > 0 {
+		firstID := p.tree.ExtraList[extraStart]
+		lastID := p.tree.ExtraList[extraStart+uint32(count-1)]
+
+		lhsStart = p.tree.Nodes[firstID].Start
+		lhsEnd = p.tree.Nodes[lastID].End
+	} else {
+		lhsStart = p.curr.Start
+		lhsEnd = p.curr.Start
+	}
+
+	lhsList := p.tree.AddNode(ast.Node{
+		Kind:  ast.KindNameList,
+		Start: lhsStart,
+		End:   lhsEnd,
+		Extra: extraStart,
+		Count: uint16(count),
+	})
 
 	var rhsList ast.NodeID = ast.InvalidNode
 

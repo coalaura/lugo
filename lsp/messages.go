@@ -40,6 +40,7 @@ type InitializationOptions struct {
 	DiagnosticsAmbiguousReturns bool `json:"diagnosticsAmbiguousReturns"`
 	DiagnosticsDeprecated       bool `json:"diagnosticsDeprecated"`
 	InlayHintsParameterNames    bool `json:"inlayHintsParameterNames"`
+	FeaturesDocumentHighlight   bool `json:"featuresDocumentHighlight"`
 }
 
 type InitializeResult struct {
@@ -59,6 +60,7 @@ type ServerCapabilities struct {
 	FoldingRangeProvider       bool                   `json:"foldingRangeProvider"`
 	LinkedEditingRangeProvider bool                   `json:"linkedEditingRangeProvider"`
 	CallHierarchyProvider      bool                   `json:"callHierarchyProvider"`
+	DocumentHighlightProvider  bool                   `json:"documentHighlightProvider,omitempty"`
 	CodeLensProvider           *CodeLensOptions       `json:"codeLensProvider,omitempty"`
 	SignatureHelpProvider      *SignatureHelpOptions  `json:"signatureHelpProvider,omitempty"`
 	CompletionProvider         *CompletionOptions     `json:"completionProvider,omitempty"`
@@ -450,4 +452,22 @@ type LinkedEditingRangeParams struct {
 type LinkedEditingRanges struct {
 	Ranges      []Range `json:"ranges"`
 	WordPattern string  `json:"wordPattern,omitempty"`
+}
+
+type DocumentHighlightParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type DocumentHighlightKind int
+
+const (
+	TextHighlight  DocumentHighlightKind = 1
+	ReadHighlight  DocumentHighlightKind = 2
+	WriteHighlight DocumentHighlightKind = 3
+)
+
+type DocumentHighlight struct {
+	Range Range                 `json:"range"`
+	Kind  DocumentHighlightKind `json:"kind,omitempty"`
 }

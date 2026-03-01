@@ -113,6 +113,12 @@
                     "default": true,
                     "description": "Enable inline parameter name hints for function and method calls.",
                     "order": 11
+                },
+                "lugo.features.documentHighlight": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable document highlights for variables and function/method calls.",
+                    "order": 12
                 }
             }
         }
