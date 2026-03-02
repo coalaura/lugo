@@ -4,10 +4,38 @@ const path = require("node:path");
 const vscode = require("vscode");
 const { LanguageClient } = require("vscode-languageclient/node");
 
-let client;
+let client, restarting, indexing, debounce;
+
+async function restartClient(context) {
+	if (restarting) {
+		scheduleClientRestart(context);
+
+		return;
+	}
+
+	restarting = true;
+
+	try {
+		if (client) {
+			await client.stop();
+		}
+
+		await startClient(context);
+	} catch {}
+
+	restarting = false;
+}
+
+function scheduleClientRestart(context) {
+	clearTimeout(debounce);
+
+	debounce = setTimeout(() => {
+		restartClient(context);
+	}, 1000);
+}
 
 async function activate(context) {
-	await startClient(context);
+	await restartClient(context);
 
 	const stdProvider = {
 		provideTextDocumentContent: uri => {
@@ -28,13 +56,9 @@ async function activate(context) {
 	context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider("std", stdProvider));
 
 	context.subscriptions.push(
-		vscode.workspace.onDidChangeConfiguration(async e => {
+		vscode.workspace.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration("lugo")) {
-				if (client) {
-					await client.stop();
-				}
-
-				await startClient(context);
+				scheduleClientRestart(context);
 			}
 		})
 	);
@@ -164,9 +188,11 @@ async function startClient(context) {
 }
 
 function triggerReindex() {
-	if (!client) {
+	if (!client || indexing) {
 		return;
 	}
+
+	indexing = true;
 
 	vscode.window.withProgress(
 		{
@@ -176,11 +202,15 @@ function triggerReindex() {
 		},
 		async () => {
 			await client.sendRequest("lugo/reindex");
+
+			indexing = false;
 		}
 	);
 }
 
 function deactivate() {
+	clearTimeout(debounce);
+
 	if (!client) {
 		return;
 	}
