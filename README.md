@@ -36,7 +36,7 @@ Lugo implements a comprehensive suite of modern Language Server Protocol feature
 * **Call Hierarchy:** Visually explore a tree of incoming and outgoing function calls.
 * **Document & Workspace Symbols:** Instant workspace-wide search (`Ctrl+T`) for fully qualified names (e.g., `OP.Math.Round`), and full VS Code "Outline" tree generation.
 * **Signature Help & Inlay Hints:** Real-time active-parameter tooltips and inline parameter name hints with smart implicit `self` offset calculation.
-* **Code Actions (Quick Fixes):** Fast automated fixes for common diagnostics, including prefixing unused variables with `_`, adding `local` to implicit globals, and instantly fixing typos with highly optimized Levenshtein distance suggestions.
+* **Code Actions (Quick Fixes):** Fast automated fixes for common diagnostics, including prefixing unused variables with `_`, adding `local` to implicit globals, and instantly fixing typos with highly optimized Levenshtein distance suggestions. Includes **bulk Safe Fixes** (via command palette) to automatically clean up unused variables, parameters, and assignments across the current file or your entire workspace securely without breaking side-effects.
 * **Folding Ranges:** Accurately fold functions, tables, control flow blocks, and multi-line strings/comments.
 * **Virtual Standard Library:** Click on any standard library function to open a syntax-highlighted, read-only virtual tab streaming directly from the Go server's embedded filesystem (`std:///`).
 * **Fast-Path Smart Ignores:** Automatically inherits VS Code's native `files.exclude` and `search.exclude` settings. Lugo pre-compiles these into high-speed prefix/suffix byte matchers, instantly skipping ignored directories without the overhead of regex.
