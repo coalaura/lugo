@@ -20,6 +20,7 @@ type Document struct {
 
 	TypeCache []TypeSet
 	Inferring []bool
+	IsMeta    bool
 }
 
 func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {

@@ -88,6 +88,12 @@ type IgnorePattern struct {
 	SuffixPath    string
 }
 
+type SafeFix struct {
+	Coverage []ast.NodeID
+	Edits    []TextEdit
+	Title    string
+}
+
 type Server struct {
 	Version           string
 	Reader            *bufio.Reader
@@ -295,6 +301,9 @@ func (s *Server) handleMessage(req Request) {
 					},
 					Full: true,
 				},
+				ExecuteCommandProvider: &ExecuteCommandOptions{
+					Commands: []string{"lugo.applySafeFixes"},
+				},
 			},
 		}
 
@@ -462,6 +471,61 @@ func (s *Server) handleMessage(req Request) {
 		delete(s.OpenFiles, uri)
 
 		s.Log.Debugf("Closed document: %s\n", uri)
+	case "workspace/executeCommand":
+		var params ExecuteCommandParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		if params.Command == "lugo.applySafeFixes" {
+			var targetURI string
+
+			if len(params.Arguments) > 0 {
+				if uriStr, ok := params.Arguments[0].(string); ok && uriStr != "" {
+					targetURI = s.normalizeURI(uriStr)
+				}
+			}
+
+			changes := make(map[string][]TextEdit)
+
+			if targetURI != "" {
+				if doc, ok := s.Documents[targetURI]; ok {
+					fixes := s.getSafeFixesForDocument(doc)
+
+					for _, fix := range fixes {
+						changes[targetURI] = append(changes[targetURI], fix.Edits...)
+					}
+				}
+			} else {
+				for uri, doc := range s.Documents {
+					if !s.isWorkspaceURI(uri) {
+						continue
+					}
+
+					fixes := s.getSafeFixesForDocument(doc)
+
+					for _, fix := range fixes {
+						changes[uri] = append(changes[uri], fix.Edits...)
+					}
+				}
+			}
+
+			if len(changes) > 0 {
+				WriteMessage(s.Writer, OutgoingRequest{
+					RPC:    "2.0",
+					ID:     99999, // Fire and forget request ID
+					Method: "workspace/applyEdit",
+					Params: ApplyWorkspaceEditParams{
+						Label: "Apply safe fixes",
+						Edit:  WorkspaceEdit{Changes: changes},
+					},
+				})
+			}
+
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+		}
 	case "textDocument/didChange":
 		var params DidChangeTextDocumentParams
 
@@ -2245,12 +2309,18 @@ func (s *Server) handleMessage(req Request) {
 			return
 		}
 
-		var actions []CodeAction
+		var (
+			actions   []CodeAction
+			hasUnused bool
+		)
 
 		uri := s.normalizeURI(params.TextDocument.URI)
+		doc, docOk := s.Documents[uri]
 
 		for _, diag := range params.Context.Diagnostics {
 			switch diag.Code {
+			case "unused-local", "unused-parameter", "unused-loop-var", "unused-vararg":
+				hasUnused = true
 			case "undefined-global":
 				if suggestion, ok := diag.Data.(string); ok && suggestion != "" {
 					actions = append(actions, CodeAction{
@@ -2270,26 +2340,6 @@ func (s *Server) handleMessage(req Request) {
 						},
 					})
 				}
-			case "unused-local":
-				actions = append(actions, CodeAction{
-					Title:       "Prefix unused variable with '_'",
-					Kind:        "quickfix",
-					Diagnostics: []Diagnostic{diag},
-					IsPreferred: true,
-					Edit: &WorkspaceEdit{
-						Changes: map[string][]TextEdit{
-							uri: {
-								{
-									Range: Range{
-										Start: diag.Range.Start,
-										End:   diag.Range.Start,
-									},
-									NewText: "_",
-								},
-							},
-						},
-					},
-				})
 			case "implicit-global":
 				actions = append(actions, CodeAction{
 					Title:       "Prefix variable with 'local'",
@@ -2307,6 +2357,65 @@ func (s *Server) handleMessage(req Request) {
 									NewText: "local ",
 								},
 							},
+						},
+					},
+				})
+			}
+		}
+
+		if hasUnused && docOk {
+			allFixes := s.getSafeFixesForDocument(doc)
+
+			var allEdits []TextEdit
+
+			for _, diag := range params.Context.Diagnostics {
+				if diag.Code != "unused-local" && diag.Code != "unused-parameter" && diag.Code != "unused-loop-var" && diag.Code != "unused-vararg" {
+					continue
+				}
+
+				defIDFloat, ok := diag.Data.(float64)
+				if !ok {
+					continue
+				}
+
+				defID := ast.NodeID(defIDFloat)
+
+				for _, fix := range allFixes {
+					var covers bool
+
+					if slices.Contains(fix.Coverage, defID) {
+						covers = true
+					}
+
+					if covers {
+						actions = append(actions, CodeAction{
+							Title:       fix.Title,
+							Kind:        "quickfix",
+							Diagnostics: []Diagnostic{diag},
+							IsPreferred: true,
+							Edit: &WorkspaceEdit{
+								Changes: map[string][]TextEdit{
+									uri: fix.Edits,
+								},
+							},
+						})
+
+						break
+					}
+				}
+			}
+
+			for _, fix := range allFixes {
+				allEdits = append(allEdits, fix.Edits...)
+			}
+
+			if len(allEdits) > 0 {
+				actions = append(actions, CodeAction{
+					Title: "Fix all unused variables in file",
+					Kind:  "source.fixAll",
+					Edit: &WorkspaceEdit{
+						Changes: map[string][]TextEdit{
+							uri: allEdits,
 						},
 					},
 				})
@@ -2562,6 +2671,420 @@ func (s *Server) handleMessage(req Request) {
 	}
 }
 
+func (s *Server) getSafeFixesForDocument(doc *Document) []SafeFix {
+	var fixes []SafeFix
+
+	if doc.IsMeta {
+		return fixes
+	}
+
+	unusedDefs := make(map[ast.NodeID]bool)
+
+	for _, defID := range doc.Resolver.LocalDefs {
+		if doc.Resolver.UsageCount[defID] == 0 {
+			name := doc.Source[doc.Tree.Nodes[defID].Start:doc.Tree.Nodes[defID].End]
+			if len(name) > 0 && name[0] != '_' {
+				unusedDefs[defID] = true
+			}
+		}
+	}
+
+	for i := 1; i < len(doc.Tree.Nodes); i++ {
+		nodeID := ast.NodeID(i)
+		node := doc.Tree.Nodes[nodeID]
+
+		switch node.Kind {
+		case ast.KindLocalAssign:
+			s.processListForFixes(doc, node.Left, node.Right, unusedDefs, &fixes, true)
+		case ast.KindForIn:
+			s.processListForFixes(doc, node.Left, ast.InvalidNode, unusedDefs, &fixes, false)
+		case ast.KindFunctionExpr, ast.KindLocalFunction, ast.KindFunctionStmt:
+			var funcExprID ast.NodeID
+
+			if node.Kind == ast.KindFunctionExpr {
+				funcExprID = nodeID
+			} else {
+				funcExprID = node.Right
+			}
+
+			if funcExprID != ast.InvalidNode {
+				s.processParamsForFixes(doc, funcExprID, unusedDefs, &fixes)
+			}
+		case ast.KindForNum:
+			if unusedDefs[node.Left] {
+				fixes = append(fixes, s.createRenameFix(doc, node.Left))
+
+				delete(unusedDefs, node.Left)
+			}
+		}
+	}
+
+	return fixes
+}
+
+func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.NodeID, unused map[ast.NodeID]bool, fixes *[]SafeFix, canRemoveStatement bool) {
+	if nameListID == ast.InvalidNode {
+		return
+	}
+
+	nameList := doc.Tree.Nodes[nameListID]
+
+	var unusedCount int
+
+	for i := uint16(0); i < nameList.Count; i++ {
+		if unused[doc.Tree.ExtraList[nameList.Extra+uint32(i)]] {
+			unusedCount++
+		}
+	}
+
+	if unusedCount == 0 {
+		return
+	}
+
+	suffixStart := int(nameList.Count)
+
+	for i := int(nameList.Count) - 1; i >= 0; i-- {
+		if unused[doc.Tree.ExtraList[nameList.Extra+uint32(i)]] {
+			suffixStart = i
+		} else {
+			break
+		}
+	}
+
+	for i := 0; i < suffixStart; i++ {
+		id := doc.Tree.ExtraList[nameList.Extra+uint32(i)]
+		if unused[id] {
+			*fixes = append(*fixes, s.createRenameFix(doc, id))
+
+			delete(unused, id)
+		}
+	}
+
+	if suffixStart < int(nameList.Count) {
+		var coverage []ast.NodeID
+
+		for i := suffixStart; i < int(nameList.Count); i++ {
+			id := doc.Tree.ExtraList[nameList.Extra+uint32(i)]
+
+			coverage = append(coverage, id)
+			delete(unused, id)
+		}
+
+		if suffixStart == 0 && canRemoveStatement {
+			canRemove := true
+
+			if exprListID != ast.InvalidNode {
+				exprList := doc.Tree.Nodes[exprListID]
+
+				for i := uint16(0); i < exprList.Count; i++ {
+					if !s.isSideEffectFree(doc, doc.Tree.ExtraList[exprList.Extra+uint32(i)]) {
+						canRemove = false
+
+						break
+					}
+				}
+			}
+
+			if canRemove {
+				stmtID := nameList.Parent
+
+				*fixes = append(*fixes, SafeFix{
+					Coverage: coverage,
+					Edits: []TextEdit{{
+						Range:   getNodeRange(doc.Tree, stmtID),
+						NewText: "",
+					}},
+					Title: "Remove unused assignment",
+				})
+
+				return
+			}
+		}
+
+		canPartialRemove := true
+
+		var rhsEdits []TextEdit
+
+		if exprListID != ast.InvalidNode {
+			exprList := doc.Tree.Nodes[exprListID]
+
+			if int(exprList.Count) > suffixStart {
+				for i := suffixStart; i < int(exprList.Count); i++ {
+					if !s.isSideEffectFree(doc, doc.Tree.ExtraList[exprList.Extra+uint32(i)]) {
+						canPartialRemove = false
+
+						break
+					}
+				}
+
+				if canPartialRemove {
+					firstRhsDrop := doc.Tree.ExtraList[exprList.Extra+uint32(suffixStart)]
+					lastRhsDrop := doc.Tree.ExtraList[exprList.Extra+uint32(exprList.Count-1)]
+
+					var limit uint32
+
+					if suffixStart > 0 {
+						limit = doc.Tree.Nodes[doc.Tree.ExtraList[exprList.Extra+uint32(suffixStart-1)]].End
+					} else {
+						limit = doc.Tree.Nodes[exprListID].Start
+					}
+
+					startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRhsDrop].Start, limit)
+
+					rhsEdits = append(rhsEdits, TextEdit{
+						Range:   getRange(doc.Tree, startOff, doc.Tree.Nodes[lastRhsDrop].End),
+						NewText: "",
+					})
+				}
+			}
+		}
+
+		if canPartialRemove && suffixStart > 0 {
+			firstLhsDrop := doc.Tree.ExtraList[nameList.Extra+uint32(suffixStart)]
+			lastLhsDrop := doc.Tree.ExtraList[nameList.Extra+uint32(nameList.Count-1)]
+			prevLhsNode := doc.Tree.ExtraList[nameList.Extra+uint32(suffixStart-1)]
+
+			startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstLhsDrop].Start, doc.Tree.Nodes[prevLhsNode].End)
+
+			edits := []TextEdit{{
+				Range:   getRange(doc.Tree, startOff, doc.Tree.Nodes[lastLhsDrop].End),
+				NewText: "",
+			}}
+
+			edits = append(edits, rhsEdits...)
+
+			title := "Remove unused variable"
+
+			if len(coverage) > 1 {
+				title = "Remove unused variables"
+			}
+
+			*fixes = append(*fixes, SafeFix{
+				Coverage: coverage,
+				Edits:    edits,
+				Title:    title,
+			})
+
+			return
+		}
+
+		for _, id := range coverage {
+			*fixes = append(*fixes, s.createRenameFix(doc, id))
+		}
+	}
+}
+
+func (s *Server) processParamsForFixes(doc *Document, funcExprID ast.NodeID, unused map[ast.NodeID]bool, fixes *[]SafeFix) {
+	funcNode := doc.Tree.Nodes[funcExprID]
+	if funcNode.Count == 0 {
+		return
+	}
+
+	suffixStart := int(funcNode.Count)
+
+	for i := int(funcNode.Count) - 1; i >= 0; i-- {
+		id := doc.Tree.ExtraList[funcNode.Extra+uint32(i)]
+
+		if unused[id] {
+			suffixStart = i
+		} else {
+			break
+		}
+	}
+
+	for i := 0; i < suffixStart; i++ {
+		id := doc.Tree.ExtraList[funcNode.Extra+uint32(i)]
+		if unused[id] {
+			*fixes = append(*fixes, s.createRenameFix(doc, id))
+
+			delete(unused, id)
+		}
+	}
+
+	if suffixStart < int(funcNode.Count) {
+		var coverage []ast.NodeID
+
+		for i := suffixStart; i < int(funcNode.Count); i++ {
+			id := doc.Tree.ExtraList[funcNode.Extra+uint32(i)]
+
+			coverage = append(coverage, id)
+			delete(unused, id)
+		}
+
+		firstDrop := doc.Tree.ExtraList[funcNode.Extra+uint32(suffixStart)]
+		lastDrop := doc.Tree.ExtraList[funcNode.Extra+uint32(funcNode.Count-1)]
+
+		var startOff uint32
+
+		if suffixStart == 0 {
+			startOff = doc.Tree.Nodes[firstDrop].Start
+
+			for i := startOff - 1; i < uint32(len(doc.Source)); i-- {
+				if doc.Source[i] == '(' {
+					startOff = i + 1
+
+					break
+				}
+			}
+		} else {
+			prevNode := doc.Tree.ExtraList[funcNode.Extra+uint32(suffixStart-1)]
+			startOff = s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstDrop].Start, doc.Tree.Nodes[prevNode].End)
+		}
+
+		endOff := doc.Tree.Nodes[lastDrop].End
+
+		title := "Remove unused parameter"
+
+		if len(coverage) > 1 {
+			title = "Remove unused parameters"
+		}
+
+		*fixes = append(*fixes, SafeFix{
+			Coverage: coverage,
+			Edits: []TextEdit{{
+				Range:   getRange(doc.Tree, startOff, endOff),
+				NewText: "",
+			}},
+			Title: title,
+		})
+	}
+}
+
+func (s *Server) createRenameFix(doc *Document, id ast.NodeID) SafeFix {
+	node := doc.Tree.Nodes[id]
+	name := string(doc.Source[node.Start:node.End])
+
+	return SafeFix{
+		Coverage: []ast.NodeID{id},
+		Edits: []TextEdit{{
+			Range:   getNodeRange(doc.Tree, id),
+			NewText: "_" + name,
+		}},
+		Title: "Prefix with '_'",
+	}
+}
+
+func (s *Server) isSideEffectFree(doc *Document, id ast.NodeID) bool {
+	if id == ast.InvalidNode {
+		return true
+	}
+
+	node := doc.Tree.Nodes[id]
+
+	switch node.Kind {
+	case ast.KindNumber, ast.KindString, ast.KindTrue, ast.KindFalse, ast.KindNil, ast.KindIdent, ast.KindVararg, ast.KindFunctionExpr:
+		return true
+	case ast.KindUnaryExpr:
+		return s.isSideEffectFree(doc, node.Right)
+	case ast.KindBinaryExpr:
+		return s.isSideEffectFree(doc, node.Left) && s.isSideEffectFree(doc, node.Right)
+	case ast.KindParenExpr:
+		return s.isSideEffectFree(doc, node.Left)
+	case ast.KindMemberExpr:
+		return s.isSideEffectFree(doc, node.Left)
+	case ast.KindIndexExpr:
+		return s.isSideEffectFree(doc, node.Left) && s.isSideEffectFree(doc, node.Right)
+	case ast.KindExprList:
+		for i := uint16(0); i < node.Count; i++ {
+			if !s.isSideEffectFree(doc, doc.Tree.ExtraList[node.Extra+uint32(i)]) {
+				return false
+			}
+		}
+
+		return true
+	case ast.KindTableExpr:
+		for i := uint16(0); i < node.Count; i++ {
+			fID := doc.Tree.ExtraList[node.Extra+uint32(i)]
+			fNode := doc.Tree.Nodes[fID]
+
+			if fNode.Kind == ast.KindRecordField || fNode.Kind == ast.KindIndexField {
+				if !s.isSideEffectFree(doc, fNode.Left) || !s.isSideEffectFree(doc, fNode.Right) {
+					return false
+				}
+			} else {
+				if !s.isSideEffectFree(doc, fID) {
+					return false
+				}
+			}
+		}
+
+		return true
+	case ast.KindCallExpr, ast.KindMethodCall:
+		var name string
+
+		if node.Kind == ast.KindMethodCall {
+			nameNode := doc.Tree.Nodes[node.Right]
+			name = string(doc.Source[nameNode.Start:nameNode.End])
+		} else {
+			leftNode := doc.Tree.Nodes[node.Left]
+
+			switch leftNode.Kind {
+			case ast.KindIdent:
+				name = string(doc.Source[leftNode.Start:leftNode.End])
+			case ast.KindMemberExpr:
+				rightNode := doc.Tree.Nodes[leftNode.Right]
+				name = string(doc.Source[rightNode.Start:rightNode.End])
+			}
+		}
+
+		if name != "" {
+			lowerName := strings.ToLower(name)
+
+			if strings.HasPrefix(lowerName, "get") ||
+				strings.HasPrefix(lowerName, "is") ||
+				strings.HasPrefix(lowerName, "has") ||
+				strings.HasPrefix(lowerName, "can") ||
+				strings.HasPrefix(lowerName, "unpack") ||
+				strings.HasPrefix(lowerName, "math.") ||
+				strings.HasPrefix(lowerName, "type") ||
+				strings.HasPrefix(lowerName, "tostring") ||
+				strings.HasPrefix(lowerName, "tonumber") ||
+				strings.HasPrefix(lowerName, "pairs") ||
+				strings.HasPrefix(lowerName, "ipairs") {
+
+				// Check args
+				for i := uint16(0); i < node.Count; i++ {
+					if !s.isSideEffectFree(doc, doc.Tree.ExtraList[node.Extra+uint32(i)]) {
+						return false
+					}
+				}
+
+				return true
+			}
+		}
+
+		return false
+	}
+
+	return false
+}
+
+func (s *Server) findCommaBefore(source []byte, start, limit uint32) uint32 {
+	if start <= limit || start == 0 {
+		return limit
+	}
+
+	commaPos := start
+
+	for i := start - 1; i >= limit && i < uint32(len(source)); i-- {
+		if source[i] == ',' {
+			commaPos = i
+
+			break
+		}
+	}
+
+	for i := commaPos - 1; i >= limit && i < uint32(len(source)); i-- {
+		if source[i] == ' ' || source[i] == '\t' {
+			commaPos = i
+		} else {
+			break
+		}
+	}
+
+	return commaPos
+}
+
 func (s *Server) indexWorkspace(rootPathOrURI string, indexed, unchanged, failed *int) {
 	var path string
 
@@ -2729,6 +3252,16 @@ func (s *Server) updateDocument(uri string, source []byte) {
 	} else {
 		doc.TypeCache = make([]TypeSet, len(tree.Nodes))
 		doc.Inferring = make([]bool, len(tree.Nodes))
+	}
+
+	doc.IsMeta = false
+
+	for _, c := range tree.Comments {
+		if bytes.Contains(tree.Source[c.Start:c.End], []byte("@meta")) {
+			doc.IsMeta = true
+
+			break
+		}
 	}
 
 	if len(p.Errors) > 0 {
@@ -2967,7 +3500,7 @@ func (s *Server) publishDiagnostics(uri string) {
 	}
 
 	// 3. Implicit Globals
-	if s.DiagImplicitGlobals {
+	if s.DiagImplicitGlobals && !doc.IsMeta {
 		for _, defID := range doc.Resolver.GlobalDefs {
 			node := doc.Tree.Nodes[defID]
 
@@ -3007,6 +3540,15 @@ func (s *Server) publishDiagnostics(uri string) {
 
 	// 4. Shadowing & Unused Variables
 	if s.DiagShadowing || s.DiagUnusedLocal || s.DiagUnusedFunction || s.DiagUnusedParameter || s.DiagUnusedLoopVar {
+		fixes := s.getSafeFixesForDocument(doc)
+		fixMap := make(map[ast.NodeID]string)
+
+		for _, f := range fixes {
+			for _, id := range f.Coverage {
+				fixMap[id] = f.Title
+			}
+		}
+
 		for _, defID := range doc.Resolver.LocalDefs {
 			node := doc.Tree.Nodes[defID]
 			nameBytes := doc.Source[node.Start:node.End]
@@ -3018,7 +3560,8 @@ func (s *Server) publishDiagnostics(uri string) {
 			r := getNodeRange(doc.Tree, defID)
 
 			if doc.Resolver.UsageCount[defID] == 0 {
-				category := "variable"
+				category := "local"
+				code := "unused-local"
 
 				pID := doc.Tree.Nodes[defID].Parent
 
@@ -3028,21 +3571,24 @@ func (s *Server) publishDiagnostics(uri string) {
 					switch pNode.Kind {
 					case ast.KindFunctionExpr:
 						category = "parameter"
+						code = "unused-parameter"
 					case ast.KindForNum:
 						category = "loop variable"
+						code = "unused-loop-var"
 					case ast.KindLocalFunction:
 						category = "function"
+						code = "unused-function"
 					case ast.KindNameList:
 						gpID := pNode.Parent
 						if gpID != ast.InvalidNode && doc.Tree.Nodes[gpID].Kind == ast.KindForIn {
 							category = "loop variable"
+							code = "unused-loop-var"
 						}
 					}
 				}
 
 				var (
 					msg          string
-					code         string = "unused-local"
 					shouldReport bool
 				)
 
@@ -3051,11 +3597,21 @@ func (s *Server) publishDiagnostics(uri string) {
 					msg = "Unused vararg '...'. Remove it from the parameter list if it is not needed."
 					code = "unused-vararg"
 				} else {
-					msg = fmt.Sprintf("Unused local %s '%s'. Prefix with '_' to ignore.", category, string(nameBytes))
+					msg = fmt.Sprintf("Unused %s '%s'.", category, string(nameBytes))
+
+					if fixTitle, ok := fixMap[defID]; ok {
+						if fixTitle == "Prefix with '_'" {
+							msg += " Prefix with '_' to ignore."
+						} else {
+							msg += " It can be safely removed."
+						}
+					} else {
+						msg += " Prefix with '_' to ignore."
+					}
 				}
 
 				switch category {
-				case "variable":
+				case "local":
 					shouldReport = s.DiagUnusedLocal
 				case "function":
 					shouldReport = s.DiagUnusedFunction
@@ -3065,6 +3621,10 @@ func (s *Server) publishDiagnostics(uri string) {
 					shouldReport = s.DiagUnusedLoopVar
 				}
 
+				if doc.IsMeta {
+					shouldReport = false
+				}
+
 				if shouldReport {
 					s.diagBuf = append(s.diagBuf, Diagnostic{
 						Range:    r,
@@ -3072,6 +3632,7 @@ func (s *Server) publishDiagnostics(uri string) {
 						Code:     code,
 						Tags:     []DiagnosticTag{Unnecessary},
 						Message:  msg,
+						Data:     float64(defID),
 					})
 				}
 			}

@@ -46,6 +46,21 @@ async function activate(context) {
 	);
 
 	context.subscriptions.push(
+		vscode.commands.registerCommand("lugo.applySafeFixesWorkspace", () => {
+			vscode.commands.executeCommand("lugo.applySafeFixes");
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand("lugo.applySafeFixesFile", () => {
+			const editor = vscode.window.activeTextEditor;
+			if (editor) {
+				vscode.commands.executeCommand("lugo.applySafeFixes", editor.document.uri.toString());
+			}
+		})
+	);
+
+	context.subscriptions.push(
 		vscode.commands.registerCommand("lugo.showReferences", (uriStr, position, locations) => {
 			const uri = vscode.Uri.parse(uriStr),
 				pos = new vscode.Position(position.line, position.character);

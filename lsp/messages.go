@@ -69,6 +69,11 @@ type ServerCapabilities struct {
 	SignatureHelpProvider      *SignatureHelpOptions  `json:"signatureHelpProvider,omitempty"`
 	CompletionProvider         *CompletionOptions     `json:"completionProvider,omitempty"`
 	SemanticTokensProvider     *SemanticTokensOptions `json:"semanticTokensProvider,omitempty"`
+	ExecuteCommandProvider     *ExecuteCommandOptions `json:"executeCommandProvider,omitempty"`
+}
+
+type ExecuteCommandOptions struct {
+	Commands []string `json:"commands"`
 }
 
 type TextDocumentItem struct {
@@ -121,6 +126,13 @@ type Location struct {
 type TextDocumentPositionParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
 	Position     Position               `json:"position"`
+}
+
+type OutgoingRequest struct {
+	RPC    string `json:"jsonrpc"`
+	ID     int    `json:"id"`
+	Method string `json:"method"`
+	Params any    `json:"params,omitempty"`
 }
 
 type OutgoingNotification struct {
@@ -432,6 +444,16 @@ type FoldingRange struct {
 	EndLine        uint32 `json:"endLine"`
 	EndCharacter   uint32 `json:"endCharacter,omitempty"`
 	Kind           string `json:"kind,omitempty"`
+}
+
+type ExecuteCommandParams struct {
+	Command   string `json:"command"`
+	Arguments []any  `json:"arguments,omitempty"`
+}
+
+type ApplyWorkspaceEditParams struct {
+	Label string        `json:"label,omitempty"`
+	Edit  WorkspaceEdit `json:"edit"`
 }
 
 type ResponseError struct {

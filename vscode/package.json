@@ -6,9 +6,9 @@
     "icon": "logo.png",
     "version": "0.5.0",
     "galleryBanner": {
-		"color": "#161928",
-		"theme": "dark"
-	},
+        "color": "#161928",
+        "theme": "dark"
+    },
     "repository": {
         "type": "git",
         "url": "https://github.com/coalaura/lugo.git"
@@ -33,6 +33,14 @@
             {
                 "command": "lugo.reindex",
                 "title": "Lugo: Re-index Workspace"
+            },
+            {
+                "command": "lugo.applySafeFixesWorkspace",
+                "title": "Lugo: Apply Safe Fixes (Workspace)"
+            },
+            {
+                "command": "lugo.applySafeFixesFile",
+                "title": "Lugo: Apply Safe Fixes (Current File)"
             }
         ],
         "configuration": {
@@ -139,11 +147,11 @@
                     "order": 15
                 },
                 "lugo.features.hoverEvaluation": {
-					"type": "boolean",
-					"default": true,
-					"description": "Evaluate and display the result of constant expressions on hover (e.g. 1 + 2 -> 3).",
-					"order": 16
-				}
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Evaluate and display the result of constant expressions on hover (e.g. 1 + 2 -> 3).",
+                    "order": 16
+                }
             }
         }
     },
