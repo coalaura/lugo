@@ -45,6 +45,7 @@ type InitializationOptions struct {
 	InlayHintsParameterNames    bool `json:"inlayHintsParameterNames"`
 	FeaturesDocumentHighlight   bool `json:"featuresDocumentHighlight"`
 	FeaturesHoverEvaluation     bool `json:"featuresHoverEvaluation"`
+	FeaturesCodeLens            bool `json:"featuresCodeLens"`
 }
 
 type InitializeResult struct {

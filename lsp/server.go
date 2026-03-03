@@ -135,6 +135,7 @@ type Server struct {
 	InlayParamHints      bool
 	FeatureDocHighlight  bool
 	FeatureHoverEval     bool
+	FeatureCodeLens      bool
 }
 
 func NewServer(version string) *Server {
@@ -267,6 +268,15 @@ func (s *Server) handleMessage(req Request) {
 			s.InlayParamHints = params.InitializationOptions.InlayHintsParameterNames
 			s.FeatureDocHighlight = params.InitializationOptions.FeaturesDocumentHighlight
 			s.FeatureHoverEval = params.InitializationOptions.FeaturesHoverEvaluation
+			s.FeatureCodeLens = params.InitializationOptions.FeaturesCodeLens
+		}
+
+		var codeLensOptions *CodeLensOptions
+
+		if s.FeatureCodeLens {
+			codeLensOptions = &CodeLensOptions{
+				ResolveProvider: true,
+			}
 		}
 
 		result := InitializeResult{
@@ -285,9 +295,7 @@ func (s *Server) handleMessage(req Request) {
 				FoldingRangeProvider:      true,
 				CallHierarchyProvider:     true,
 				DocumentHighlightProvider: s.FeatureDocHighlight,
-				CodeLensProvider: &CodeLensOptions{
-					ResolveProvider: true,
-				},
+				CodeLensProvider:          codeLensOptions,
 				SignatureHelpProvider: &SignatureHelpOptions{
 					TriggerCharacters: []string{"(", ","},
 				},
@@ -1049,6 +1057,12 @@ func (s *Server) handleMessage(req Request) {
 			Result: highlights,
 		})
 	case "textDocument/codeLens":
+		if !s.FeatureCodeLens {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
 		var params CodeLensParams
 
 		err := json.Unmarshal(req.Params, &params)

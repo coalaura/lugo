@@ -151,6 +151,12 @@
                     "default": true,
                     "description": "Evaluate and display the result of constant expressions on hover (e.g. 1 + 2 -> 3).",
                     "order": 16
+                },
+                "lugo.features.codeLens": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable CodeLens annotations (e.g., reference counts) above function definitions.",
+                    "order": 17
                 }
             }
         }
