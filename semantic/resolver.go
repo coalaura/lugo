@@ -27,6 +27,12 @@ type ShadowPair struct {
 	Shadowed  ast.NodeID
 }
 
+type FieldKey struct {
+	RecDef   ast.NodeID
+	RecHash  uint64
+	PropHash uint64
+}
+
 // Resolver walks the AST and links variable references to their local definitions.
 type Resolver struct {
 	Tree *ast.Tree
@@ -35,6 +41,7 @@ type Resolver struct {
 	GlobalRefs []ast.NodeID
 	GlobalDefs []ast.NodeID
 	FieldDefs  []FieldDef
+	fieldMap   map[FieldKey]ast.NodeID
 
 	PendingFields []FieldRef
 
@@ -54,6 +61,7 @@ func New(tree *ast.Tree) *Resolver {
 		ShadowedOuter: make([]ShadowPair, 0, 64),
 		PendingFields: make([]FieldRef, 0, 128),
 		FieldDefs:     make([]FieldDef, 0, 512),
+		fieldMap:      make(map[FieldKey]ast.NodeID, 512),
 		GlobalDefs:    make([]ast.NodeID, 0, 256),
 		GlobalRefs:    make([]ast.NodeID, 0, 512),
 		scopeStack:    make([]ast.NodeID, 0, 256),
@@ -82,6 +90,9 @@ func (r *Resolver) Reset() {
 	r.GlobalDefs = r.GlobalDefs[:0]
 	r.GlobalRefs = r.GlobalRefs[:0]
 	r.FieldDefs = r.FieldDefs[:0]
+
+	clear(r.fieldMap)
+
 	r.PendingFields = r.PendingFields[:0]
 	r.scopeStack = r.scopeStack[:0]
 	r.LocalDefs = r.LocalDefs[:0]
@@ -92,12 +103,14 @@ func (r *Resolver) Resolve(root ast.NodeID) {
 	r.visit(root)
 
 	for _, pref := range r.PendingFields {
-		for _, fd := range r.FieldDefs {
-			if fd.PropHash == pref.PropHash && fd.ReceiverDef == pref.ReceiverDef && fd.ReceiverHash == pref.ReceiverHash {
-				r.References[pref.PropNodeID] = fd.NodeID
+		fk := FieldKey{
+			RecDef:   pref.ReceiverDef,
+			RecHash:  pref.ReceiverHash,
+			PropHash: pref.PropHash,
+		}
 
-				break
-			}
+		if defID, ok := r.fieldMap[fk]; ok {
+			r.References[pref.PropNodeID] = defID
 		}
 	}
 }
@@ -143,12 +156,16 @@ func (r *Resolver) defineField(memberNodeID ast.NodeID) {
 
 	propHash := ast.HashBytes(r.source(node.Right))
 
-	for _, fd := range r.FieldDefs {
-		if fd.PropHash == propHash && fd.ReceiverDef == recDef && fd.ReceiverHash == recHash {
-			r.References[node.Right] = fd.NodeID
+	fk := FieldKey{
+		RecDef:   recDef,
+		RecHash:  recHash,
+		PropHash: propHash,
+	}
 
-			return
-		}
+	if existingID, ok := r.fieldMap[fk]; ok {
+		r.References[node.Right] = existingID
+
+		return
 	}
 
 	r.FieldDefs = append(r.FieldDefs, FieldDef{
@@ -159,6 +176,7 @@ func (r *Resolver) defineField(memberNodeID ast.NodeID) {
 		NodeID:       node.Right,
 	})
 
+	r.fieldMap[fk] = node.Right
 	r.References[node.Right] = node.Right
 }
 
