@@ -3168,10 +3168,6 @@ func (s *Server) indexWorkspace(rootPathOrURI string, indexed, unchanged, failed
 			} else if strings.HasSuffix(name, ".lua") {
 				uri := s.pathToURI(fullPath)
 
-				if runtime.GOOS == "windows" {
-					uri = strings.ToLower(uri)
-				}
-
 				b, fsErr := os.ReadFile(fullPath)
 				if fsErr == nil {
 					if existing, ok := s.Documents[uri]; ok && bytes.Equal(existing.Source, b) {
@@ -3213,13 +3209,7 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		doc = existing
 		doc.Source = source
 
-		if doc.ExportedGlobals != nil {
-			for _, keys := range doc.ExportedGlobals {
-				for _, key := range keys {
-					delete(s.GlobalIndex, key)
-				}
-			}
-		}
+		s.removeDocumentGlobals(uri, doc)
 
 		clear(doc.ExportedGlobals)
 
@@ -4103,8 +4093,21 @@ func (s *Server) getGlobalSymbol(recHash, propHash uint64) (GlobalSymbol, bool) 
 }
 
 func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, depth int, name string) {
+	if doc, ok := s.Documents[uri]; ok {
+		if doc.ExportedGlobals == nil {
+			doc.ExportedGlobals = make(map[ast.NodeID][]GlobalKey)
+		}
+
+		doc.ExportedGlobals[nodeID] = append(doc.ExportedGlobals[nodeID], key)
+	}
+
 	if existing, exists := s.GlobalIndex[key]; exists {
 		if depth > existing.Depth {
+			return
+		}
+
+		// Prefer standard library definitions if depths are tied
+		if depth == existing.Depth && strings.HasPrefix(existing.URI, "std://") && !strings.HasPrefix(uri, "std://") {
 			return
 		}
 	}
@@ -4115,13 +4118,53 @@ func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, d
 		Depth:  depth,
 		Name:   name,
 	}
+}
 
-	if doc, ok := s.Documents[uri]; ok {
-		if doc.ExportedGlobals == nil {
-			doc.ExportedGlobals = make(map[ast.NodeID][]GlobalKey)
+func (s *Server) removeDocumentGlobals(uri string, doc *Document) {
+	if doc.ExportedGlobals == nil {
+		return
+	}
+
+	for _, keys := range doc.ExportedGlobals {
+		for _, key := range keys {
+			if sym, ok := s.GlobalIndex[key]; ok && sym.URI == uri {
+				delete(s.GlobalIndex, key)
+
+				var (
+					bestSym GlobalSymbol
+					found   bool
+				)
+
+				for otherURI, otherDoc := range s.Documents {
+					if otherURI == uri {
+						continue
+					}
+
+					for nodeID, otherKeys := range otherDoc.ExportedGlobals {
+						for _, k := range otherKeys {
+							if k == key {
+								d := getASTDepth(otherDoc.Tree, nodeID)
+
+								if !found || d < bestSym.Depth || (d == bestSym.Depth && strings.HasPrefix(otherURI, "std://")) {
+									bestSym = GlobalSymbol{
+										URI:    otherURI,
+										NodeID: nodeID,
+										Depth:  d,
+										Name:   sym.Name,
+									}
+
+									found = true
+								}
+							}
+						}
+					}
+				}
+
+				if found {
+					s.GlobalIndex[key] = bestSym
+				}
+			}
 		}
-
-		doc.ExportedGlobals[nodeID] = append(doc.ExportedGlobals[nodeID], key)
 	}
 }
 
@@ -4184,12 +4227,8 @@ func (s *Server) isIgnored(fullPath, name string) bool {
 }
 
 func (s *Server) clearDocument(uri string) {
-	if doc, ok := s.Documents[uri]; ok && doc.ExportedGlobals != nil {
-		for _, keys := range doc.ExportedGlobals {
-			for _, key := range keys {
-				delete(s.GlobalIndex, key)
-			}
-		}
+	if doc, ok := s.Documents[uri]; ok {
+		s.removeDocumentGlobals(uri, doc)
 	}
 
 	delete(s.Documents, uri)
@@ -4241,13 +4280,7 @@ func (s *Server) normalizeURI(uri string) string {
 		return uri
 	}
 
-	norm := s.pathToURI(s.uriToPath(uri))
-
-	if runtime.GOOS == "windows" {
-		return strings.ToLower(norm)
-	}
-
-	return norm
+	return s.pathToURI(s.uriToPath(uri))
 }
 
 func (s *Server) isIgnoredURI(uri string) bool {
