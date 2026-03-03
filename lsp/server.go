@@ -2333,7 +2333,7 @@ func (s *Server) handleMessage(req Request) {
 
 		for _, diag := range params.Context.Diagnostics {
 			switch diag.Code {
-			case "unused-local", "unused-parameter", "unused-loop-var", "unused-vararg":
+			case "unused-local", "unused-parameter", "unused-loop-var", "unused-vararg", "unused-function", "unreachable-code", "ambiguous-return":
 				hasUnused = true
 			case "undefined-global":
 				if suggestion, ok := diag.Data.(string); ok && suggestion != "" {
@@ -2383,7 +2383,7 @@ func (s *Server) handleMessage(req Request) {
 			var allEdits []TextEdit
 
 			for _, diag := range params.Context.Diagnostics {
-				if diag.Code != "unused-local" && diag.Code != "unused-parameter" && diag.Code != "unused-loop-var" && diag.Code != "unused-vararg" {
+				if diag.Code != "unused-local" && diag.Code != "unused-parameter" && diag.Code != "unused-loop-var" && diag.Code != "unused-vararg" && diag.Code != "unused-function" && diag.Code != "unreachable-code" && diag.Code != "ambiguous-return" {
 					continue
 				}
 
@@ -2425,7 +2425,7 @@ func (s *Server) handleMessage(req Request) {
 
 			if len(allEdits) > 0 {
 				actions = append(actions, CodeAction{
-					Title: "Fix all unused variables in file",
+					Title: "Apply all safe fixes in file",
 					Kind:  "source.fixAll",
 					Edit: &WorkspaceEdit{
 						Changes: map[string][]TextEdit{
@@ -2712,7 +2712,26 @@ func (s *Server) getSafeFixesForDocument(doc *Document) []SafeFix {
 			s.processListForFixes(doc, node.Left, node.Right, unusedDefs, &fixes, true)
 		case ast.KindForIn:
 			s.processListForFixes(doc, node.Left, ast.InvalidNode, unusedDefs, &fixes, false)
-		case ast.KindFunctionExpr, ast.KindLocalFunction, ast.KindFunctionStmt:
+		case ast.KindLocalFunction:
+			if unusedDefs[node.Left] {
+				fixes = append(fixes, SafeFix{
+					Coverage: []ast.NodeID{node.Left},
+					Edits: []TextEdit{{
+						Range:   getNodeRange(doc.Tree, nodeID),
+						NewText: "",
+					}},
+					Title: "Remove unused local function",
+				})
+
+				delete(unusedDefs, node.Left)
+
+				continue
+			}
+
+			if node.Right != ast.InvalidNode {
+				s.processParamsForFixes(doc, node.Right, unusedDefs, &fixes)
+			}
+		case ast.KindFunctionExpr, ast.KindFunctionStmt:
 			var funcExprID ast.NodeID
 
 			if node.Kind == ast.KindFunctionExpr {
@@ -2729,6 +2748,53 @@ func (s *Server) getSafeFixesForDocument(doc *Document) []SafeFix {
 				fixes = append(fixes, s.createRenameFix(doc, node.Left))
 
 				delete(unusedDefs, node.Left)
+			}
+		case ast.KindReturn:
+			if node.Left != ast.InvalidNode {
+				exprList := doc.Tree.Nodes[node.Left]
+				if exprList.Count > 0 {
+					firstExprID := doc.Tree.ExtraList[exprList.Extra]
+					firstExprNode := doc.Tree.Nodes[firstExprID]
+
+					retLine, _ := doc.Tree.Position(node.Start)
+					exprLine, _ := doc.Tree.Position(firstExprNode.Start)
+
+					if exprLine > retLine {
+						fixes = append(fixes, SafeFix{
+							Coverage: []ast.NodeID{nodeID},
+							Edits: []TextEdit{{
+								Range:   getRange(doc.Tree, node.Start, node.Start+6),
+								NewText: "return;",
+							}},
+							Title: "Add ';' to fix ambiguous return",
+						})
+					}
+				}
+			}
+		case ast.KindBlock, ast.KindFile:
+			var terminalFound bool
+
+			for j := uint16(0); j < node.Count; j++ {
+				stmtID := doc.Tree.ExtraList[node.Extra+uint32(j)]
+
+				if terminalFound {
+					lastStmtID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
+
+					fixes = append(fixes, SafeFix{
+						Coverage: []ast.NodeID{stmtID},
+						Edits: []TextEdit{{
+							Range:   getRange(doc.Tree, doc.Tree.Nodes[stmtID].Start, doc.Tree.Nodes[lastStmtID].End),
+							NewText: "",
+						}},
+						Title: "Remove unreachable code",
+					})
+
+					break
+				}
+
+				if isTerminal(doc.Tree, stmtID) {
+					terminalFound = true
+				}
 			}
 		}
 	}
@@ -3732,6 +3798,7 @@ func (s *Server) publishDiagnostics(uri string) {
 							Severity: SeverityWarning,
 							Code:     "ambiguous-return",
 							Message:  "Ambiguous return: expression on the next line is executed as the return value. Use 'return;' to separate statements.",
+							Data:     float64(i),
 						})
 					}
 				}
@@ -3752,6 +3819,7 @@ func (s *Server) publishDiagnostics(uri string) {
 							Code:     "unreachable-code",
 							Tags:     []DiagnosticTag{Unnecessary},
 							Message:  "Unreachable code detected.",
+							Data:     float64(stmtID),
 						})
 
 						break
