@@ -1310,9 +1310,16 @@ func (s *Server) handleMessage(req Request) {
 				if (recDef != ast.InvalidNode && fd.ReceiverDef == recDef) || (recDef == ast.InvalidNode && fd.ReceiverHash == recHash) {
 					node := doc.Tree.Nodes[fd.NodeID]
 
+					kind := FieldCompletion
+
+					valID := doc.getAssignedValue(fd.NodeID)
+					if valID != ast.InvalidNode && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+						kind = FunctionCompletion
+					}
+
 					isDep, _ := doc.HasDeprecatedTag(fd.NodeID)
 
-					addCompletion(string(doc.Source[node.Start:node.End]), FieldCompletion, "field", isDep)
+					addCompletion(string(doc.Source[node.Start:node.End]), kind, "field", isDep)
 				}
 			}
 
@@ -1331,9 +1338,16 @@ func (s *Server) handleMessage(req Request) {
 					if symDoc, ok := s.Documents[sym.URI]; ok {
 						node := symDoc.Tree.Nodes[sym.NodeID]
 
+						kind := FieldCompletion
+
+						valID := symDoc.getAssignedValue(sym.NodeID)
+						if valID != ast.InvalidNode && symDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+							kind = FunctionCompletion
+						}
+
 						isDep, _ := symDoc.HasDeprecatedTag(sym.NodeID)
 
-						addCompletion(string(symDoc.Source[node.Start:node.End]), FieldCompletion, "field", isDep)
+						addCompletion(string(symDoc.Source[node.Start:node.End]), kind, "field", isDep)
 					}
 				}
 			}
@@ -1341,7 +1355,14 @@ func (s *Server) handleMessage(req Request) {
 			doc.GetLocalsAt(offset, func(name []byte, defID ast.NodeID) bool {
 				isDep, _ := doc.HasDeprecatedTag(defID)
 
-				addCompletion(string(name), VariableCompletion, "local", isDep)
+				kind := VariableCompletion
+
+				valID := doc.getAssignedValue(defID)
+				if valID != ast.InvalidNode && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+					kind = FunctionCompletion
+				}
+
+				addCompletion(string(name), kind, "local", isDep)
 
 				return true
 			})
