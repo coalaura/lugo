@@ -4242,7 +4242,26 @@ func (s *Server) removeDocumentGlobals(uri string, doc *Document) {
 							if k == key {
 								d := getASTDepth(otherDoc.Tree, nodeID)
 
-								if !found || d < bestSym.Depth || (d == bestSym.Depth && strings.HasPrefix(otherURI, "std://")) {
+								isStd := strings.HasPrefix(otherURI, "std://")
+								bestIsStd := strings.HasPrefix(bestSym.URI, "std://")
+
+								var take bool
+
+								if !found {
+									take = true
+								} else if d < bestSym.Depth {
+									take = true
+								} else if d == bestSym.Depth {
+									if isStd && !bestIsStd {
+										take = true
+									} else if isStd == bestIsStd {
+										if otherURI > bestSym.URI || (otherURI == bestSym.URI && nodeID > bestSym.NodeID) {
+											take = true
+										}
+									}
+								}
+
+								if take {
 									bestSym = GlobalSymbol{
 										URI:    otherURI,
 										NodeID: nodeID,
