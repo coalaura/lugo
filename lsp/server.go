@@ -1273,12 +1273,6 @@ func (s *Server) handleMessage(req Request) {
 			for i >= 0 {
 				c := doc.Source[i]
 
-				if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-					i--
-
-					continue
-				}
-
 				isIdentChar := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.'
 
 				if !isIdentChar {
