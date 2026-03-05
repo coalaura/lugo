@@ -220,9 +220,17 @@ func (p *Parser) parseBlock(stopTokens ...token.Kind) ast.NodeID {
 
 	extraStart, count := p.flushListStack(stackStart)
 
+	var end uint32
+
+	if count > 0 {
+		end = p.tree.Nodes[p.tree.ExtraList[extraStart+uint32(count-1)]].End
+	} else {
+		end = start
+	}
+
 	return p.tree.AddNode(ast.Node{
 		Kind:  ast.KindBlock,
-		Start: start, End: p.curr.End,
+		Start: start, End: end,
 		Extra: extraStart, Count: uint16(count),
 	})
 }
@@ -329,6 +337,7 @@ func (p *Parser) parseLocal() ast.NodeID {
 	for {
 		if p.curr.Kind != token.Ident {
 			p.error("expected identifier")
+
 			break
 		}
 
@@ -403,7 +412,7 @@ func (p *Parser) parseLocal() ast.NodeID {
 
 	return p.tree.AddNode(ast.Node{
 		Kind:  ast.KindLocalAssign,
-		Start: start, End: p.curr.End,
+		Start: start, End: p.prev.End,
 		Left: lhsList, Right: rhsList,
 	})
 }
@@ -499,7 +508,7 @@ func (p *Parser) parseReturn() ast.NodeID {
 
 	return p.tree.AddNode(ast.Node{
 		Kind:  ast.KindReturn,
-		Start: start, End: p.curr.End,
+		Start: start, End: p.prev.End,
 		Left: exprList,
 	})
 }
@@ -549,7 +558,7 @@ func (p *Parser) parseRepeat() ast.NodeID {
 
 	condition := p.parseExpression(Lowest)
 
-	return p.tree.AddNode(ast.Node{Kind: ast.KindRepeat, Start: start, End: p.curr.End, Left: block, Right: condition})
+	return p.tree.AddNode(ast.Node{Kind: ast.KindRepeat, Start: start, End: p.prev.End, Left: block, Right: condition})
 }
 
 func (p *Parser) parseFor() ast.NodeID {
@@ -647,7 +656,7 @@ func (p *Parser) parseFor() ast.NodeID {
 
 	nameList := p.tree.AddNode(ast.Node{
 		Kind: ast.KindNameList, Extra: extraStartNames, Count: uint16(count),
-		Start: p.tree.Nodes[firstIdent].Start, End: p.curr.End,
+		Start: p.tree.Nodes[firstIdent].Start, End: p.prev.End,
 	})
 
 	if p.curr.Kind == token.In {
@@ -787,7 +796,7 @@ func (p *Parser) parseGoto() ast.NodeID {
 		p.error("expected label name after 'goto'")
 	}
 
-	return p.tree.AddNode(ast.Node{Kind: ast.KindGoto, Start: start, End: p.curr.End, Left: label})
+	return p.tree.AddNode(ast.Node{Kind: ast.KindGoto, Start: start, End: p.prev.End, Left: label})
 }
 
 func (p *Parser) parseLabel() ast.NodeID {
@@ -811,7 +820,7 @@ func (p *Parser) parseLabel() ast.NodeID {
 		p.error("expected '::'")
 	}
 
-	return p.tree.AddNode(ast.Node{Kind: ast.KindLabel, Start: start, End: p.curr.End, Left: name})
+	return p.tree.AddNode(ast.Node{Kind: ast.KindLabel, Start: start, End: p.prev.End, Left: name})
 }
 
 func (p *Parser) parseExprList() ast.NodeID {
@@ -844,7 +853,7 @@ func (p *Parser) parseExprList() ast.NodeID {
 
 	return p.tree.AddNode(ast.Node{
 		Kind:  ast.KindExprList,
-		Start: start, End: p.curr.End,
+		Start: start, End: p.prev.End,
 		Extra: extraStart, Count: uint16(count),
 	})
 }
