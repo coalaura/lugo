@@ -171,7 +171,18 @@ func (doc *Document) InferType(id ast.NodeID) TypeSet {
 
 		switch token.Kind(op) {
 		case token.Plus, token.Minus, token.Asterisk, token.Slash, token.FloorSlash, token.Modulo, token.Caret, token.BitAnd, token.BitOr, token.BitXor, token.ShiftLeft, token.ShiftRight:
-			t.Basics = TypeNumber
+			tLeft := doc.InferType(node.Left)
+			tRight := doc.InferType(node.Right)
+
+			if tLeft.CustomName != "" {
+				t.CustomName = tLeft.CustomName
+				t.Basics = tLeft.Basics
+			} else if tRight.CustomName != "" {
+				t.CustomName = tRight.CustomName
+				t.Basics = tRight.Basics
+			} else {
+				t.Basics = TypeNumber
+			}
 		case token.Concat:
 			t.Basics = TypeString
 		case token.Eq, token.NotEq, token.Less, token.LessEq, token.Greater, token.GreaterEq:
@@ -203,10 +214,7 @@ func (doc *Document) InferType(id ast.NodeID) TypeSet {
 	case ast.KindParenExpr:
 		t = doc.InferType(node.Left)
 	case ast.KindIdent:
-		defID := doc.Resolver.References[id]
-		if defID != ast.InvalidNode {
-			t = doc.inferIdent(defID)
-		}
+		t = doc.inferIdent(id)
 	case ast.KindMemberExpr:
 		t = doc.inferMemberExpr(node)
 	case ast.KindCallExpr, ast.KindMethodCall:
@@ -220,9 +228,25 @@ func (doc *Document) InferType(id ast.NodeID) TypeSet {
 	return t
 }
 
-func (doc *Document) inferIdent(defID ast.NodeID) TypeSet {
-	// 1. Check LuaDoc first
-	luadoc := parseLuaDoc(doc.getCommentsAbove(defID))
+func (doc *Document) inferIdent(id ast.NodeID) TypeSet {
+	var (
+		targetDoc *Document  = doc
+		targetDef ast.NodeID = doc.Resolver.References[id]
+	)
+
+	if doc.Server != nil {
+		ctx := doc.Server.resolveSymbolNode(doc.URI, doc, id)
+		if ctx != nil && ctx.TargetDoc != nil && ctx.TargetDefID != ast.InvalidNode {
+			targetDoc = ctx.TargetDoc
+			targetDef = ctx.TargetDefID
+		}
+	}
+
+	if targetDef == ast.InvalidNode {
+		return TypeSet{}
+	}
+
+	luadoc := parseLuaDoc(targetDoc.getCommentsAbove(targetDef))
 	if luadoc.Type != nil {
 		return ParseTypeString(luadoc.Type.Type)
 	}
@@ -231,29 +255,27 @@ func (doc *Document) inferIdent(defID ast.NodeID) TypeSet {
 		return TypeSet{CustomName: luadoc.Class.Name}
 	}
 
-	// 2. Check assignment value
-	valID := doc.getAssignedValue(defID)
+	valID := targetDoc.getAssignedValue(targetDef)
 	if valID != ast.InvalidNode {
-		return doc.InferType(valID)
+		return targetDoc.InferType(valID)
 	}
 
-	// 3. Fallback: Could be a parameter or loop variable
-	if doc.Tree.Nodes[defID].Kind != ast.KindIdent {
+	if targetDoc.Tree.Nodes[targetDef].Kind != ast.KindIdent {
 		return TypeSet{}
 	}
 
-	pID := doc.Tree.Nodes[defID].Parent
+	pID := targetDoc.Tree.Nodes[targetDef].Parent
 	if pID == ast.InvalidNode {
 		return TypeSet{}
 	}
 
-	pNode := doc.Tree.Nodes[pID]
+	pNode := targetDoc.Tree.Nodes[pID]
 
 	switch pNode.Kind {
 	case ast.KindFunctionExpr:
-		return doc.inferFunctionParameter(defID, pID)
+		return targetDoc.inferFunctionParameter(targetDef, pID)
 	case ast.KindNameList:
-		return doc.inferLoopVariable(defID, pID, pNode)
+		return targetDoc.inferLoopVariable(targetDef, pID, pNode)
 	}
 
 	return TypeSet{}
@@ -412,19 +434,24 @@ func (doc *Document) inferCallExpr(node ast.Node) TypeSet {
 		return TypeSet{}
 	}
 
-	defID := doc.Resolver.References[funcIdentID]
-	if defID == ast.InvalidNode {
-		return TypeSet{}
-	}
+	if doc.Server != nil {
+		ctx := doc.Server.resolveSymbolNode(doc.URI, doc, funcIdentID)
+		if ctx != nil && ctx.TargetDoc != nil && ctx.TargetDefID != ast.InvalidNode {
+			luadoc := parseLuaDoc(ctx.TargetDoc.getCommentsAbove(ctx.TargetDefID))
 
-	luadoc := parseLuaDoc(doc.getCommentsAbove(defID))
-	if len(luadoc.Returns) > 0 {
-		return ParseTypeString(luadoc.Returns[0].Type)
-	}
+			if len(luadoc.Returns) > 0 {
+				return ParseTypeString(luadoc.Returns[0].Type)
+			}
 
-	valID := doc.getAssignedValue(defID)
-	if valID != ast.InvalidNode && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
-		return doc.inferFunctionReturnType(valID)
+			if luadoc.Class != nil {
+				return TypeSet{CustomName: luadoc.Class.Name}
+			}
+
+			valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
+			if valID != ast.InvalidNode && ctx.TargetDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+				return ctx.TargetDoc.inferFunctionReturnType(valID)
+			}
+		}
 	}
 
 	return TypeSet{}

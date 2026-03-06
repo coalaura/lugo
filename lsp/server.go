@@ -3314,6 +3314,8 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		tree = ast.NewTree(source)
 
 		doc = &Document{
+			Server:          s,
+			URI:             uri,
 			Source:          source,
 			Tree:            tree,
 			Resolver:        semantic.New(tree),

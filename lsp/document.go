@@ -12,6 +12,8 @@ import (
 )
 
 type Document struct {
+	Server          *Server
+	URI             string
 	Source          []byte
 	Tree            *ast.Tree
 	Resolver        *semantic.Resolver
