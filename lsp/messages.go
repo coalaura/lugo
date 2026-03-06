@@ -32,20 +32,21 @@ type InitializationOptions struct {
 	KnownGlobals []string `json:"knownGlobals,omitempty"`
 	IgnoreGlobs  []string `json:"ignoreGlobs,omitempty"`
 
-	DiagnosticsUndefinedGlobals bool `json:"diagnosticsUndefinedGlobals"`
-	DiagnosticsImplicitGlobals  bool `json:"diagnosticsImplicitGlobals"`
-	DiagnosticsUnusedLocal      bool `json:"diagnosticsUnusedLocal"`
-	DiagnosticsUnusedFunction   bool `json:"diagnosticsUnusedFunction"`
-	DiagnosticsUnusedParameter  bool `json:"diagnosticsUnusedParameter"`
-	DiagnosticsUnusedLoopVar    bool `json:"diagnosticsUnusedLoopVar"`
-	DiagnosticsShadowing        bool `json:"diagnosticsShadowing"`
-	DiagnosticsUnreachableCode  bool `json:"diagnosticsUnreachableCode"`
-	DiagnosticsAmbiguousReturns bool `json:"diagnosticsAmbiguousReturns"`
-	DiagnosticsDeprecated       bool `json:"diagnosticsDeprecated"`
-	InlayHintsParameterNames    bool `json:"inlayHintsParameterNames"`
-	FeaturesDocumentHighlight   bool `json:"featuresDocumentHighlight"`
-	FeaturesHoverEvaluation     bool `json:"featuresHoverEvaluation"`
-	FeaturesCodeLens            bool `json:"featuresCodeLens"`
+	DiagnosticsUndefinedGlobals               bool `json:"diagnosticsUndefinedGlobals"`
+	DiagnosticsImplicitGlobals                bool `json:"diagnosticsImplicitGlobals"`
+	DiagnosticsUnusedLocal                    bool `json:"diagnosticsUnusedLocal"`
+	DiagnosticsUnusedFunction                 bool `json:"diagnosticsUnusedFunction"`
+	DiagnosticsUnusedParameter                bool `json:"diagnosticsUnusedParameter"`
+	DiagnosticsUnusedLoopVar                  bool `json:"diagnosticsUnusedLoopVar"`
+	DiagnosticsShadowing                      bool `json:"diagnosticsShadowing"`
+	DiagnosticsUnreachableCode                bool `json:"diagnosticsUnreachableCode"`
+	DiagnosticsAmbiguousReturns               bool `json:"diagnosticsAmbiguousReturns"`
+	DiagnosticsDeprecated                     bool `json:"diagnosticsDeprecated"`
+	InlayHintsParameterNames                  bool `json:"inlayHintsParameterNames"`
+	InlayHintsSuppressWhenArgumentMatchesName bool `json:"inlayHintsSuppressWhenArgumentMatchesName"`
+	FeaturesDocumentHighlight                 bool `json:"featuresDocumentHighlight"`
+	FeaturesHoverEvaluation                   bool `json:"featuresHoverEvaluation"`
+	FeaturesCodeLens                          bool `json:"featuresCodeLens"`
 }
 
 type InitializeResult struct {

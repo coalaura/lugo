@@ -133,6 +133,7 @@ type Server struct {
 	DiagAmbiguousReturns bool
 	DiagDeprecated       bool
 	InlayParamHints      bool
+	InlaySuppressMatch   bool
 	FeatureDocHighlight  bool
 	FeatureHoverEval     bool
 	FeatureCodeLens      bool
@@ -266,6 +267,7 @@ func (s *Server) handleMessage(req Request) {
 			s.DiagAmbiguousReturns = params.InitializationOptions.DiagnosticsAmbiguousReturns
 			s.DiagDeprecated = params.InitializationOptions.DiagnosticsDeprecated
 			s.InlayParamHints = params.InitializationOptions.InlayHintsParameterNames
+			s.InlaySuppressMatch = params.InitializationOptions.InlayHintsSuppressWhenArgumentMatchesName
 			s.FeatureDocHighlight = params.InitializationOptions.FeaturesDocumentHighlight
 			s.FeatureHoverEval = params.InitializationOptions.FeaturesHoverEvaluation
 			s.FeatureCodeLens = params.InitializationOptions.FeaturesCodeLens
@@ -2304,7 +2306,7 @@ func (s *Server) handleMessage(req Request) {
 					continue
 				}
 
-				if argNode.Kind == ast.KindIdent {
+				if s.InlaySuppressMatch && argNode.Kind == ast.KindIdent {
 					argName := doc.Source[argNode.Start:argNode.End]
 					if bytes.Equal(pName, argName) {
 						continue

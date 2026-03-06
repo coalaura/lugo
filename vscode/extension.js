@@ -115,6 +115,7 @@ async function startClient(context) {
 		diagAmbiguousReturns = config.get("diagnostics.ambiguousReturns") !== false,
 		diagDeprecated = config.get("diagnostics.deprecated") !== false,
 		inlayParamHints = config.get("inlayHints.parameterNames") !== false,
+		inlaySuppressMatch = config.get("inlayHints.suppressWhenArgumentMatchesName") !== false,
 		featureDocumentHighlight = config.get("features.documentHighlight") !== false,
 		featureHoverEvaluation = config.get("features.hoverEvaluation") !== false,
 		featureCodeLens = config.get("features.codeLens") !== false;
@@ -176,6 +177,7 @@ async function startClient(context) {
 			diagnosticsAmbiguousReturns: diagAmbiguousReturns,
 			diagnosticsDeprecated: diagDeprecated,
 			inlayHintsParameterNames: inlayParamHints,
+			inlayHintsSuppressWhenArgumentMatchesName: inlaySuppressMatch,
 			featuresDocumentHighlight: featureDocumentHighlight,
 			featuresHoverEvaluation: featureHoverEvaluation,
 			featuresCodeLens: featureCodeLens,
