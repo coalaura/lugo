@@ -262,22 +262,25 @@ func (s *Server) handleMessage(req Request) {
 				}
 			}
 
-			s.DiagUndefinedGlobals = params.InitializationOptions.DiagnosticsUndefinedGlobals
-			s.DiagImplicitGlobals = params.InitializationOptions.DiagnosticsImplicitGlobals
-			s.DiagUnusedLocal = params.InitializationOptions.DiagnosticsUnusedLocal
-			s.DiagUnusedFunction = params.InitializationOptions.DiagnosticsUnusedFunction
-			s.DiagUnusedParameter = params.InitializationOptions.DiagnosticsUnusedParameter
-			s.DiagUnusedLoopVar = params.InitializationOptions.DiagnosticsUnusedLoopVar
-			s.DiagShadowing = params.InitializationOptions.DiagnosticsShadowing
-			s.DiagUnreachableCode = params.InitializationOptions.DiagnosticsUnreachableCode
-			s.DiagAmbiguousReturns = params.InitializationOptions.DiagnosticsAmbiguousReturns
-			s.DiagDeprecated = params.InitializationOptions.DiagnosticsDeprecated
-			s.MaxParseErrors = params.InitializationOptions.DiagnosticsMaxParseErrors
-			s.InlayParamHints = params.InitializationOptions.InlayHintsParameterNames
-			s.InlaySuppressMatch = params.InitializationOptions.InlayHintsSuppressWhenArgumentMatchesName
-			s.FeatureDocHighlight = params.InitializationOptions.FeaturesDocumentHighlight
-			s.FeatureHoverEval = params.InitializationOptions.FeaturesHoverEvaluation
-			s.FeatureCodeLens = params.InitializationOptions.FeaturesCodeLens
+			s.DiagUndefinedGlobals = params.InitializationOptions.DiagUndefinedGlobals
+			s.DiagImplicitGlobals = params.InitializationOptions.DiagImplicitGlobals
+			s.DiagUnusedLocal = params.InitializationOptions.DiagUnusedLocal
+			s.DiagUnusedFunction = params.InitializationOptions.DiagUnusedFunction
+			s.DiagUnusedParameter = params.InitializationOptions.DiagUnusedParameter
+			s.DiagUnusedLoopVar = params.InitializationOptions.DiagUnusedLoopVar
+			s.DiagShadowing = params.InitializationOptions.DiagShadowing
+			s.DiagUnreachableCode = params.InitializationOptions.DiagUnreachableCode
+			s.DiagAmbiguousReturns = params.InitializationOptions.DiagAmbiguousReturns
+			s.DiagDeprecated = params.InitializationOptions.DiagDeprecated
+
+			s.MaxParseErrors = params.InitializationOptions.ParserMaxErrors
+
+			s.InlayParamHints = params.InitializationOptions.InlayParamHints
+			s.InlaySuppressMatch = params.InitializationOptions.InlaySuppressMatch
+
+			s.FeatureDocHighlight = params.InitializationOptions.FeatureDocHighlight
+			s.FeatureHoverEval = params.InitializationOptions.FeatureHoverEval
+			s.FeatureCodeLens = params.InitializationOptions.FeatureCodeLens
 		}
 
 		var codeLensOptions *CodeLensOptions

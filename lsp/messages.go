@@ -29,25 +29,28 @@ type InitializeParams struct {
 
 type InitializationOptions struct {
 	LibraryPaths []string `json:"libraryPaths,omitempty"`
-	KnownGlobals []string `json:"knownGlobals,omitempty"`
 	IgnoreGlobs  []string `json:"ignoreGlobs,omitempty"`
+	KnownGlobals []string `json:"knownGlobals,omitempty"`
 
-	DiagnosticsUndefinedGlobals               bool `json:"diagnosticsUndefinedGlobals"`
-	DiagnosticsImplicitGlobals                bool `json:"diagnosticsImplicitGlobals"`
-	DiagnosticsUnusedLocal                    bool `json:"diagnosticsUnusedLocal"`
-	DiagnosticsUnusedFunction                 bool `json:"diagnosticsUnusedFunction"`
-	DiagnosticsUnusedParameter                bool `json:"diagnosticsUnusedParameter"`
-	DiagnosticsUnusedLoopVar                  bool `json:"diagnosticsUnusedLoopVar"`
-	DiagnosticsShadowing                      bool `json:"diagnosticsShadowing"`
-	DiagnosticsUnreachableCode                bool `json:"diagnosticsUnreachableCode"`
-	DiagnosticsAmbiguousReturns               bool `json:"diagnosticsAmbiguousReturns"`
-	DiagnosticsMaxParseErrors                 int  `json:"diagnosticsMaxParseErrors"`
-	DiagnosticsDeprecated                     bool `json:"diagnosticsDeprecated"`
-	InlayHintsParameterNames                  bool `json:"inlayHintsParameterNames"`
-	InlayHintsSuppressWhenArgumentMatchesName bool `json:"inlayHintsSuppressWhenArgumentMatchesName"`
-	FeaturesDocumentHighlight                 bool `json:"featuresDocumentHighlight"`
-	FeaturesHoverEvaluation                   bool `json:"featuresHoverEvaluation"`
-	FeaturesCodeLens                          bool `json:"featuresCodeLens"`
+	ParserMaxErrors int `json:"parserMaxErrors"`
+
+	DiagUndefinedGlobals bool `json:"diagUndefinedGlobals"`
+	DiagImplicitGlobals  bool `json:"diagImplicitGlobals"`
+	DiagUnusedLocal      bool `json:"diagUnusedLocal"`
+	DiagUnusedFunction   bool `json:"diagUnusedFunction"`
+	DiagUnusedParameter  bool `json:"diagUnusedParameter"`
+	DiagUnusedLoopVar    bool `json:"diagUnusedLoopVar"`
+	DiagShadowing        bool `json:"diagShadowing"`
+	DiagUnreachableCode  bool `json:"diagUnreachableCode"`
+	DiagAmbiguousReturns bool `json:"diagAmbiguousReturns"`
+	DiagDeprecated       bool `json:"diagDeprecated"`
+
+	InlayParamHints    bool `json:"inlayParamHints"`
+	InlaySuppressMatch bool `json:"inlaySuppressMatch"`
+
+	FeatureDocHighlight bool `json:"featureDocHighlight"`
+	FeatureHoverEval    bool `json:"featureHoverEval"`
+	FeatureCodeLens     bool `json:"featureCodeLens"`
 }
 
 type InitializeResult struct {

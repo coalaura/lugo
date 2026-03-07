@@ -43,135 +43,169 @@
                 "title": "Lugo: Apply Safe Fixes (Current File)"
             }
         ],
-        "configuration": {
-            "type": "object",
-            "title": "Lugo LSP",
-            "properties": {
-                "lugo.workspace.libraryPaths": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
+        "configuration": [
+            {
+                "type": "object",
+                "title": "Lugo: Workspace & Environment",
+                "properties": {
+                    "lugo.workspace.libraryPaths": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "default": [],
+                        "scope": "resource",
+                        "markdownDescription": "List of absolute paths to external Lua libraries to index.",
+                        "order": 1
                     },
-                    "default": [],
-                    "description": "List of absolute paths to external Lua libraries to index.",
-                    "order": 1
-                },
-                "lugo.workspace.ignoreGlobs": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
+                    "lugo.workspace.ignoreGlobs": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "default": [],
+                        "scope": "resource",
+                        "markdownDescription": "List of globs/files to ignore during indexing. Inherits VS Code's `files.exclude` automatically.",
+                        "order": 2
                     },
-                    "default": [],
-                    "description": "List of globs/files to ignore during indexing. Inherits VS Code's files.exclude automatically.",
-                    "order": 2
-                },
-                "lugo.environment.knownGlobals": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
+                    "lugo.environment.knownGlobals": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "default": [],
+                        "scope": "resource",
+                        "markdownDescription": "List of global variables to ignore when reporting undefined globals. Supports globs like `love.*`.",
+                        "order": 3
+                    }
+                }
+            },
+            {
+                "type": "object",
+                "title": "Lugo: Parser & Diagnostics",
+                "properties": {
+                    "lugo.parser.maxErrors": {
+                        "type": "integer",
+                        "default": 50,
+                        "minimum": 0,
+                        "scope": "resource",
+                        "markdownDescription": "Maximum number of syntax errors to report per file. Set to `0` for unlimited. Reduces cascade noise on heavily broken files.",
+                        "order": 4
                     },
-                    "default": [],
-                    "description": "List of global variables to ignore when reporting undefined globals.",
-                    "order": 3
-                },
-                "lugo.diagnostics.undefinedGlobals": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable diagnostics for undefined global variables.",
-                    "order": 4
-                },
-                "lugo.diagnostics.implicitGlobals": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable diagnostics for implicit global variable creation (e.g., forgetting the 'local' keyword inside a function).",
-                    "order": 5
-                },
-                "lugo.diagnostics.unusedLocal": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable diagnostics for unused local variables.",
-                    "order": 6
-                },
-                "lugo.diagnostics.unusedFunction": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable diagnostics for unused local functions.",
-                    "order": 7
-                },
-                "lugo.diagnostics.unusedParameter": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable diagnostics for unused function parameters (and varargs).",
-                    "order": 8
-                },
-                "lugo.diagnostics.unusedLoopVar": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable diagnostics for unused loop variables.",
-                    "order": 9
-                },
-                "lugo.diagnostics.shadowing": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable diagnostics when a local variable shadows a global or outer local.",
-                    "order": 10
-                },
-                "lugo.diagnostics.unreachableCode": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable diagnostics for unreachable code (e.g. after a return or break).",
-                    "order": 11
-                },
-                "lugo.diagnostics.ambiguousReturns": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable diagnostics for ambiguous returns where an expression on the next line is accidentally returned.",
-                    "order": 12
-                },
-                "lugo.diagnostics.maxParseErrors": {
-                    "type": "integer",
-                    "default": 50,
-                    "description": "Maximum number of syntax errors to report per file. Set to 0 for unlimited. Reduces cascade noise.",
-                    "order": 13
-                },
-                "lugo.diagnostics.deprecated": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable diagnostics for usage of @deprecated symbols.",
-                    "order": 14
-                },
-                "lugo.inlayHints.parameterNames": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable inline parameter name hints for function and method calls.",
-                    "order": 15
-                },
-                "lugo.inlayHints.suppressWhenArgumentMatchesName": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Suppress parameter name hints when the argument name exactly matches the parameter name (e.g., avoiding 'pSource: pSource').",
-                    "order": 16
-                },
-                "lugo.features.documentHighlight": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable document highlights for variables and function/method calls.",
-                    "order": 17
-                },
-                "lugo.features.hoverEvaluation": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Evaluate and display the result of constant expressions on hover (e.g. 1 + 2 -> 3).",
-                    "order": 18
-                },
-                "lugo.features.codeLens": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable CodeLens annotations (e.g., reference counts) above function definitions.",
-                    "order": 19
+                    "lugo.diagnostics.undefinedGlobals": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for undefined global variables. Ignores variables listed in `#lugo.environment.knownGlobals#`.",
+                        "order": 5
+                    },
+                    "lugo.diagnostics.implicitGlobals": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for implicit global variable creation (e.g., forgetting the `local` keyword inside a function).",
+                        "order": 6
+                    },
+                    "lugo.diagnostics.shadowing": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics when a local variable shadows a global or outer local.",
+                        "order": 7
+                    },
+                    "lugo.diagnostics.unreachableCode": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for unreachable code (e.g., statements strictly following a `return` or `break`).",
+                        "order": 8
+                    },
+                    "lugo.diagnostics.ambiguousReturns": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for ambiguous returns where an expression on the next line is accidentally evaluated as the return value.",
+                        "order": 9
+                    },
+                    "lugo.diagnostics.deprecated": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for usage of symbols marked with `@deprecated`.",
+                        "order": 10
+                    },
+                    "lugo.diagnostics.unused.local": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for unused local variables.",
+                        "order": 11
+                    },
+                    "lugo.diagnostics.unused.function": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for unused local functions.",
+                        "order": 12
+                    },
+                    "lugo.diagnostics.unused.parameter": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for unused function parameters (and varargs).",
+                        "order": 13
+                    },
+                    "lugo.diagnostics.unused.loopVar": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for unused loop variables.",
+                        "order": 14
+                    }
+                }
+            },
+            {
+                "type": "object",
+                "title": "Lugo: Editor Features",
+                "properties": {
+                    "lugo.inlayHints.parameterNames": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable inline parameter name hints for function and method calls.",
+                        "order": 15
+                    },
+                    "lugo.inlayHints.suppressWhenArgumentMatchesName": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Suppress parameter name hints when the argument name exactly matches the parameter name (e.g., avoiding `pSource: pSource`).",
+                        "order": 16
+                    },
+                    "lugo.features.documentHighlight": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable document highlights for variables and function/method calls.",
+                        "order": 17
+                    },
+                    "lugo.features.hoverEvaluation": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Evaluate and display the result of constant expressions on hover (e.g., `1 + 2` suggests `3`).",
+                        "order": 18
+                    },
+                    "lugo.features.codeLens": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable CodeLens annotations (e.g., reference counts) above function definitions.",
+                        "order": 19
+                    }
                 }
             }
-        }
+        ]
     },
     "dependencies": {
         "vscode-languageclient": "^9.0.1"

@@ -100,26 +100,7 @@ async function activate(context) {
 }
 
 async function startClient(context) {
-	const config = vscode.workspace.getConfiguration("lugo"),
-		libraryPaths = config.get("workspace.libraryPaths") || [],
-		knownGlobals = config.get("environment.knownGlobals") || [];
-
-	const diagUndefinedGlobals = config.get("diagnostics.undefinedGlobals") !== false,
-		diagImplicitGlobals = config.get("diagnostics.implicitGlobals") !== false,
-		diagUnusedLocal = config.get("diagnostics.unusedLocal") !== false,
-		diagUnusedFunction = config.get("diagnostics.unusedFunction") !== false,
-		diagUnusedParameter = config.get("diagnostics.unusedParameter") !== false,
-		diagUnusedLoopVar = config.get("diagnostics.unusedLoopVar") !== false,
-		diagShadowing = config.get("diagnostics.shadowing") !== false,
-		diagUnreachableCode = config.get("diagnostics.unreachableCode") !== false,
-		diagAmbiguousReturns = config.get("diagnostics.ambiguousReturns") !== false,
-		diagMaxParseErrors = config.get("diagnostics.maxParseErrors") ?? 50,
-		diagDeprecated = config.get("diagnostics.deprecated") !== false,
-		inlayParamHints = config.get("inlayHints.parameterNames") !== false,
-		inlaySuppressMatch = config.get("inlayHints.suppressWhenArgumentMatchesName") !== false,
-		featureDocumentHighlight = config.get("features.documentHighlight") !== false,
-		featureHoverEvaluation = config.get("features.hoverEvaluation") !== false,
-		featureCodeLens = config.get("features.codeLens") !== false;
+	const config = vscode.workspace.getConfiguration("lugo");
 
 	const filesConfig = vscode.workspace.getConfiguration("files"),
 		searchConfig = vscode.workspace.getConfiguration("search");
@@ -166,26 +147,29 @@ async function startClient(context) {
 			fileEvents: vscode.workspace.createFileSystemWatcher("**/*.lua"),
 		},
 		initializationOptions: {
-			libraryPaths: libraryPaths,
-			knownGlobals: knownGlobals,
+			libraryPaths: config.get("workspace.libraryPaths") || [],
 			ignoreGlobs: ignoreGlobs,
+			knownGlobals: config.get("environment.knownGlobals") || [],
 
-			diagnosticsUndefinedGlobals: diagUndefinedGlobals,
-			diagnosticsImplicitGlobals: diagImplicitGlobals,
-			diagnosticsUnusedLocal: diagUnusedLocal,
-			diagnosticsUnusedFunction: diagUnusedFunction,
-			diagnosticsUnusedParameter: diagUnusedParameter,
-			diagnosticsUnusedLoopVar: diagUnusedLoopVar,
-			diagnosticsShadowing: diagShadowing,
-			diagnosticsUnreachableCode: diagUnreachableCode,
-			diagnosticsAmbiguousReturns: diagAmbiguousReturns,
-			diagnosticsMaxParseErrors: diagMaxParseErrors,
-			diagnosticsDeprecated: diagDeprecated,
-			inlayHintsParameterNames: inlayParamHints,
-			inlayHintsSuppressWhenArgumentMatchesName: inlaySuppressMatch,
-			featuresDocumentHighlight: featureDocumentHighlight,
-			featuresHoverEvaluation: featureHoverEvaluation,
-			featuresCodeLens: featureCodeLens,
+			parserMaxErrors: config.get("parser.maxErrors") ?? 50,
+
+			diagUndefinedGlobals: config.get("diagnostics.undefinedGlobals") !== false,
+			diagImplicitGlobals: config.get("diagnostics.implicitGlobals") !== false,
+			diagUnusedLocal: config.get("diagnostics.unused.local") !== false,
+			diagUnusedFunction: config.get("diagnostics.unused.function") !== false,
+			diagUnusedParameter: config.get("diagnostics.unused.parameter") !== false,
+			diagUnusedLoopVar: config.get("diagnostics.unused.loopVar") !== false,
+			diagShadowing: config.get("diagnostics.shadowing") !== false,
+			diagUnreachableCode: config.get("diagnostics.unreachableCode") !== false,
+			diagAmbiguousReturns: config.get("diagnostics.ambiguousReturns") !== false,
+			diagDeprecated: config.get("diagnostics.deprecated") !== false,
+
+			inlayParamHints: config.get("inlayHints.parameterNames") !== false,
+			inlaySuppressMatch: config.get("inlayHints.suppressWhenArgumentMatchesName") !== false,
+
+			featureDocHighlight: config.get("features.documentHighlight") !== false,
+			featureHoverEval: config.get("features.hoverEvaluation") !== false,
+			featureCodeLens: config.get("features.codeLens") !== false,
 		},
 	};
 
