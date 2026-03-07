@@ -500,3 +500,12 @@ type DocumentHighlight struct {
 	Range Range                 `json:"range"`
 	Kind  DocumentHighlightKind `json:"kind,omitempty"`
 }
+
+type DidChangeWatchedFilesParams struct {
+	Changes []FileEvent `json:"changes"`
+}
+
+type FileEvent struct {
+	URI  string `json:"uri"`
+	Type int    `json:"type"`
+}

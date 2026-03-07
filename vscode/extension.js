@@ -161,6 +161,9 @@ async function startClient(context) {
 			{ scheme: "file", language: "lua" },
 			{ scheme: "std", language: "lua" },
 		],
+		synchronize: {
+			fileEvents: vscode.workspace.createFileSystemWatcher("**/*.lua"),
+		},
 		initializationOptions: {
 			libraryPaths: libraryPaths,
 			knownGlobals: knownGlobals,

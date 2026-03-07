@@ -480,7 +480,46 @@ func (s *Server) handleMessage(req Request) {
 
 		delete(s.OpenFiles, uri)
 
+		path := s.uriToPath(uri)
+		if path != "" {
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				s.clearDocument(uri)
+			}
+		}
+
 		s.Log.Debugf("Closed document: %s\n", uri)
+	case "workspace/didChangeWatchedFiles":
+		var params DidChangeWatchedFilesParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		for _, change := range params.Changes {
+			uri := s.normalizeURI(change.URI)
+
+			if s.isIgnoredURI(uri) {
+				continue
+			}
+
+			switch change.Type {
+			case 1, 2: // Created, Changed
+				if !s.OpenFiles[uri] {
+					path := s.uriToPath(uri)
+
+					if b, err := os.ReadFile(path); err == nil {
+						s.updateDocument(uri, b)
+
+						if s.isWorkspaceURI(uri) {
+							s.publishDiagnostics(uri)
+						}
+					}
+				}
+			case 3: // Deleted
+				s.clearDocument(uri)
+			}
+		}
 	case "workspace/executeCommand":
 		var params ExecuteCommandParams
 
