@@ -83,6 +83,24 @@ type Token struct {
 	Start, End uint32 // Byte offsets in the source []byte
 }
 
+// TokenSet uses bitmasks for zero-allocation, O(1) token lookups.
+// Supports up to 128 token kinds (currently Lua only needs ~60).
+type TokenSet [2]uint64
+
+func NewTokenSet(kinds ...Kind) TokenSet {
+	var s TokenSet
+
+	for _, k := range kinds {
+		s[k/64] |= 1 << (k % 64)
+	}
+
+	return s
+}
+
+func (s TokenSet) Contains(k Kind) bool {
+	return (s[k/64] & (1 << (k % 64))) != 0
+}
+
 // Text extracts the token's string value from the source without allocating,
 // unless explicitly cast to a string by the caller.
 func (t Token) Text(source []byte) []byte {

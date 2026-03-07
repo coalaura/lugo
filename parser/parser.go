@@ -1,8 +1,6 @@
 package parser
 
 import (
-	"slices"
-
 	"github.com/coalaura/lugo/ast"
 	"github.com/coalaura/lugo/lexer"
 	"github.com/coalaura/lugo/token"
@@ -23,6 +21,14 @@ const (
 	Unary          // not # - ~
 	Power          // ^
 	CallIndex      // () [] .
+)
+
+var (
+	stopBlockIf     = token.NewTokenSet(token.ElseIf, token.Else, token.End)
+	stopBlockEnd    = token.NewTokenSet(token.End)
+	stopBlockUntil  = token.NewTokenSet(token.Until)
+	stopBlockEOF    = token.NewTokenSet(token.EOF)
+	stopBlockElseIf = token.NewTokenSet() // Handled dynamically if needed
 )
 
 var precedences = [256]int{}
@@ -111,7 +117,7 @@ func (p *Parser) GetTree() *ast.Tree {
 }
 
 func (p *Parser) Parse() ast.NodeID {
-	block := p.parseBlock(token.EOF)
+	block := p.parseBlock(stopBlockEOF)
 
 	p.tree.Root = p.tree.AddNode(ast.Node{
 		Kind:  ast.KindFile,
@@ -135,8 +141,8 @@ func (p *Parser) nextToken() {
 	}
 }
 
-func (p *Parser) isAt(kinds ...token.Kind) bool {
-	return slices.Contains(kinds, p.curr.Kind)
+func (p *Parser) isAt(set token.TokenSet) bool {
+	return set.Contains(p.curr.Kind)
 }
 
 func (p *Parser) error(msg string) {
@@ -201,12 +207,12 @@ func (p *Parser) sync() {
 	}
 }
 
-func (p *Parser) parseBlock(stopTokens ...token.Kind) ast.NodeID {
+func (p *Parser) parseBlock(stopTokens token.TokenSet) ast.NodeID {
 	start := p.curr.Start
 
 	stackStart := len(p.listStack)
 
-	for p.curr.Kind != token.EOF && !p.isAt(stopTokens...) {
+	for p.curr.Kind != token.EOF && !p.isAt(stopTokens) {
 		if p.curr.Kind == token.Semicolon {
 			p.nextToken()
 
@@ -219,7 +225,7 @@ func (p *Parser) parseBlock(stopTokens ...token.Kind) ast.NodeID {
 			p.listStack = append(p.listStack, stmt)
 
 			if p.tree.Nodes[stmt].Kind == ast.KindReturn {
-				if p.curr.Kind != token.EOF && !p.isAt(stopTokens...) {
+				if p.curr.Kind != token.EOF && !p.isAt(stopTokens) {
 					p.error("syntax error: statements are not allowed after a 'return'")
 				}
 			}
@@ -440,7 +446,7 @@ func (p *Parser) parseIf() ast.NodeID {
 		p.error("expected 'then'")
 	}
 
-	thenBlock := p.parseBlock(token.ElseIf, token.Else, token.End)
+	thenBlock := p.parseBlock(stopBlockIf)
 	stackStart := len(p.listStack)
 
 	for p.curr.Kind == token.ElseIf {
@@ -456,7 +462,7 @@ func (p *Parser) parseIf() ast.NodeID {
 			p.error("expected 'then'")
 		}
 
-		blk := p.parseBlock(token.ElseIf, token.Else, token.End)
+		blk := p.parseBlock(stopBlockIf)
 
 		elseifNode := p.tree.AddNode(ast.Node{
 			Kind: ast.KindElseIf, Start: elseifStart, End: p.curr.End,
@@ -473,7 +479,7 @@ func (p *Parser) parseIf() ast.NodeID {
 
 		p.nextToken()
 
-		blk := p.parseBlock(token.End)
+		blk := p.parseBlock(stopBlockEnd)
 
 		elseBlock = p.tree.AddNode(ast.Node{
 			Kind: ast.KindElse, Start: elseStart, End: p.curr.End,
@@ -537,7 +543,7 @@ func (p *Parser) parseWhile() ast.NodeID {
 	}
 
 	p.loopDepth++
-	block := p.parseBlock(token.End)
+	block := p.parseBlock(stopBlockEnd)
 	p.loopDepth--
 
 	end := p.curr.End
@@ -557,7 +563,7 @@ func (p *Parser) parseRepeat() ast.NodeID {
 	p.nextToken()
 
 	p.loopDepth++
-	block := p.parseBlock(token.Until)
+	block := p.parseBlock(stopBlockUntil)
 	p.loopDepth--
 
 	if p.curr.Kind == token.Until {
@@ -620,7 +626,7 @@ func (p *Parser) parseFor() ast.NodeID {
 		}
 
 		p.loopDepth++
-		block := p.parseBlock(token.End)
+		block := p.parseBlock(stopBlockEnd)
 		p.loopDepth--
 
 		end := p.curr.End
@@ -684,7 +690,7 @@ func (p *Parser) parseFor() ast.NodeID {
 	}
 
 	p.loopDepth++
-	block := p.parseBlock(token.End)
+	block := p.parseBlock(stopBlockEnd)
 	p.loopDepth--
 
 	end := p.curr.End
@@ -766,7 +772,7 @@ func (p *Parser) parseDo() ast.NodeID {
 
 	p.nextToken()
 
-	block := p.parseBlock(token.End)
+	block := p.parseBlock(stopBlockEnd)
 
 	end := p.curr.End
 
@@ -1254,7 +1260,7 @@ func (p *Parser) parseFunctionBody(start uint32) ast.NodeID {
 		p.error("expected ')'")
 	}
 
-	block := p.parseBlock(token.End)
+	block := p.parseBlock(stopBlockEnd)
 
 	end := p.curr.End
 

@@ -81,6 +81,7 @@ type Node struct {
 	Extra      uint32   // Index into Tree.ExtraList
 	Count      uint16   // Number of items in ExtraList
 	Kind       NodeKind // 1 byte
+	Flags      uint8
 }
 
 // Tree holds the source code and all AST data in flat arrays.
@@ -98,22 +99,24 @@ type Tree struct {
 }
 
 func NewTree(source []byte) *Tree {
-	capLines := len(source) / 30
+	sourceLen := len(source)
 
-	if capLines < 128 {
-		capLines = 128
-	}
+	// Heuristics derived from typical Lua codebases
+	capLines := sourceLen/30 + 128
+	capNodes := sourceLen/10 + 1024
+	capExtra := capNodes / 2
+	capComments := sourceLen/50 + 128
 
 	lines := make([]uint32, 1, capLines)
-	lines[0] = 0
 
+	lines[0] = 0
 	lines = computeLineOffsets(source, lines)
 
 	t := &Tree{
 		Source:      source,
-		Nodes:       make([]Node, 1, 1024), // reserve index 0
-		ExtraList:   make([]NodeID, 0, 1024),
-		Comments:    make([]token.Token, 0, 128),
+		Nodes:       make([]Node, 1, capNodes), // reserve index 0
+		ExtraList:   make([]NodeID, 0, capExtra),
+		Comments:    make([]token.Token, 0, capComments),
 		LineOffsets: lines,
 	}
 
@@ -250,11 +253,17 @@ func (t *Tree) AddNode(n Node) NodeID {
 
 func (t *Tree) Reset(source []byte) {
 	t.Source = source
-	t.Nodes = t.Nodes[:1] // Keep InvalidNode at index 0
-	t.ExtraList = t.ExtraList[:0]
-	t.Comments = t.Comments[:0]
 
-	t.LineOffsets = t.LineOffsets[:1] // Keep 0 at index 0
+	if cap(t.Nodes) < len(source)/10 {
+		t.Nodes = make([]Node, 1, len(source)/10+1024)
+		t.ExtraList = make([]NodeID, 0, len(source)/20+512)
+	} else {
+		t.Nodes = t.Nodes[:1]
+		t.ExtraList = t.ExtraList[:0]
+	}
+
+	t.Comments = t.Comments[:0]
+	t.LineOffsets = t.LineOffsets[:1]
 
 	t.LineOffsets = computeLineOffsets(source, t.LineOffsets)
 }

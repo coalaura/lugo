@@ -99,6 +99,11 @@ type DepInfo struct {
 	Msg   string
 }
 
+type RefKey struct {
+	URI string
+	ID  ast.NodeID
+}
+
 type Server struct {
 	Version           string
 	Reader            *bufio.Reader
@@ -387,23 +392,24 @@ func (s *Server) handleMessage(req Request) {
 		}
 
 		var (
+			total     int
 			indexed   int
 			unchanged int
 			failed    int
 		)
 
-		s.indexEmbeddedStdlib(&indexed, &unchanged)
+		s.indexEmbeddedStdlib(&total, &indexed, &unchanged)
 
 		for _, libPath := range s.LibraryPaths {
 			s.Log.Printf("Indexing external library: %s\n", libPath)
 
-			s.indexWorkspace(libPath, &indexed, &unchanged, &failed)
+			s.indexWorkspace(libPath, &total, &indexed, &unchanged, &failed)
 		}
 
 		if s.RootURI != "" {
 			s.Log.Printf("Indexing workspace: %s\n", s.RootURI)
 
-			s.indexWorkspace(s.RootURI, &indexed, &unchanged, &failed)
+			s.indexWorkspace(s.RootURI, &total, &indexed, &unchanged, &failed)
 		}
 
 		for uri := range s.Documents {
@@ -414,6 +420,8 @@ func (s *Server) handleMessage(req Request) {
 
 		for uri, doc := range s.Documents {
 			if s.OpenFiles[uri] && !s.activeURIs[uri] {
+				total += len(doc.Source)
+
 				s.updateDocument(uri, doc.Source)
 			}
 		}
@@ -442,7 +450,7 @@ func (s *Server) handleMessage(req Request) {
 
 		s.Log.Printf("Published diagnostics for %d workspace files in %s\n", diagCount, took2)
 
-		s.Log.Printf("Total time taken: %s\n", took1+took2)
+		s.Log.Printf("Total time taken for %d bytes: %s\n", total, took1+took2)
 
 		/*
 			if traceFile != nil {
@@ -2035,18 +2043,16 @@ func (s *Server) handleMessage(req Request) {
 		}
 
 		changes := make(map[string][]TextEdit)
-		seen := make(map[string]map[ast.NodeID]bool)
+		seen := make(map[RefKey]bool)
 
 		addEdit := func(dDoc *Document, dUri string, nodeID ast.NodeID) {
-			if seen[dUri] == nil {
-				seen[dUri] = make(map[ast.NodeID]bool)
-			}
+			rk := RefKey{URI: dUri, ID: nodeID}
 
-			if seen[dUri][nodeID] {
+			if seen[rk] {
 				return
 			}
 
-			seen[dUri][nodeID] = true
+			seen[rk] = true
 
 			changes[dUri] = append(changes[dUri], TextEdit{
 				Range:   getNodeRange(dDoc.Tree, nodeID),
@@ -2724,10 +2730,23 @@ func (s *Server) handleMessage(req Request) {
 
 		s.semDataBuf = s.semDataBuf[:0]
 
-		var prevLine, prevCol uint32
+		var (
+			prevLine uint32
+			prevCol  uint32
+			lineIdx  uint32
+		)
+
+		lineOffsets := doc.Tree.LineOffsets
+		numLines := uint32(len(lineOffsets))
 
 		for _, t := range s.semTokensBuf {
-			line, col := doc.Tree.Position(t.Start)
+			for lineIdx+1 < numLines && lineOffsets[lineIdx+1] <= t.Start {
+				lineIdx++
+			}
+
+			line := lineIdx
+			col := t.Start - lineOffsets[lineIdx]
+
 			length := t.End - t.Start
 
 			deltaLine := line - prevLine
@@ -2760,7 +2779,7 @@ func (s *Server) getSafeFixesForDocument(doc *Document) []SafeFix {
 		return fixes
 	}
 
-	unusedDefs := make(map[ast.NodeID]bool)
+	unusedDefs := make([]bool, len(doc.Tree.Nodes))
 
 	for _, defID := range doc.Resolver.LocalDefs {
 		if doc.Resolver.UsageCount[defID] == 0 {
@@ -2791,7 +2810,7 @@ func (s *Server) getSafeFixesForDocument(doc *Document) []SafeFix {
 					Title: "Remove unused local function",
 				})
 
-				delete(unusedDefs, node.Left)
+				unusedDefs[node.Left] = false
 
 				continue
 			}
@@ -2815,7 +2834,7 @@ func (s *Server) getSafeFixesForDocument(doc *Document) []SafeFix {
 			if unusedDefs[node.Left] {
 				fixes = append(fixes, s.createRenameFix(doc, node.Left))
 
-				delete(unusedDefs, node.Left)
+				unusedDefs[node.Left] = false
 			}
 		case ast.KindReturn:
 			if node.Left != ast.InvalidNode {
@@ -2870,7 +2889,7 @@ func (s *Server) getSafeFixesForDocument(doc *Document) []SafeFix {
 	return fixes
 }
 
-func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.NodeID, unused map[ast.NodeID]bool, fixes *[]SafeFix, canRemoveStatement bool) {
+func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.NodeID, unused []bool, fixes *[]SafeFix, canRemoveStatement bool) {
 	if nameListID == ast.InvalidNode {
 		return
 	}
@@ -2904,7 +2923,7 @@ func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.N
 		if unused[id] {
 			*fixes = append(*fixes, s.createRenameFix(doc, id))
 
-			delete(unused, id)
+			unused[id] = false
 		}
 	}
 
@@ -2915,7 +2934,8 @@ func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.N
 			id := doc.Tree.ExtraList[nameList.Extra+uint32(i)]
 
 			coverage = append(coverage, id)
-			delete(unused, id)
+
+			unused[id] = false
 		}
 
 		if suffixStart == 0 && canRemoveStatement {
@@ -3022,7 +3042,7 @@ func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.N
 	}
 }
 
-func (s *Server) processParamsForFixes(doc *Document, funcExprID ast.NodeID, unused map[ast.NodeID]bool, fixes *[]SafeFix) {
+func (s *Server) processParamsForFixes(doc *Document, funcExprID ast.NodeID, unused []bool, fixes *[]SafeFix) {
 	funcNode := doc.Tree.Nodes[funcExprID]
 	if funcNode.Count == 0 {
 		return
@@ -3045,7 +3065,7 @@ func (s *Server) processParamsForFixes(doc *Document, funcExprID ast.NodeID, unu
 		if unused[id] {
 			*fixes = append(*fixes, s.createRenameFix(doc, id))
 
-			delete(unused, id)
+			unused[id] = false
 		}
 	}
 
@@ -3056,7 +3076,8 @@ func (s *Server) processParamsForFixes(doc *Document, funcExprID ast.NodeID, unu
 			id := doc.Tree.ExtraList[funcNode.Extra+uint32(i)]
 
 			coverage = append(coverage, id)
-			delete(unused, id)
+
+			unused[id] = false
 		}
 
 		firstDrop := doc.Tree.ExtraList[funcNode.Extra+uint32(suffixStart)]
@@ -3233,7 +3254,7 @@ func (s *Server) findCommaBefore(source []byte, start, limit uint32) uint32 {
 	return commaPos
 }
 
-func (s *Server) indexWorkspace(rootPathOrURI string, indexed, unchanged, failed *int) {
+func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged, failed *int) {
 	var path string
 
 	if strings.HasPrefix(rootPathOrURI, "file://") {
@@ -3325,6 +3346,8 @@ func (s *Server) indexWorkspace(rootPathOrURI string, indexed, unchanged, failed
 
 						continue
 					}
+
+					*total += len(b)
 
 					s.updateDocument(uri, b)
 
@@ -3699,7 +3722,8 @@ func (s *Server) publishDiagnostics(uri string) {
 	// 4. Shadowing & Unused Variables
 	if s.DiagShadowing || s.DiagUnusedLocal || s.DiagUnusedFunction || s.DiagUnusedParameter || s.DiagUnusedLoopVar {
 		fixes := s.getSafeFixesForDocument(doc)
-		fixMap := make(map[ast.NodeID]string)
+
+		fixMap := make([]string, len(doc.Tree.Nodes))
 
 		for _, f := range fixes {
 			for _, id := range f.Coverage {
@@ -3757,7 +3781,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				} else {
 					msg = fmt.Sprintf("Unused %s '%s'.", category, ast.String(nameBytes))
 
-					if fixTitle, ok := fixMap[defID]; ok {
+					if fixTitle := fixMap[defID]; fixTitle != "" {
 						if fixTitle == "Prefix with '_'" {
 							msg += " Prefix with '_' to ignore."
 						} else {
@@ -4147,22 +4171,20 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 func (s *Server) getReferences(ctx *SymbolContext, includeDeclaration bool) []Location {
 	var locations []Location
 
-	seen := make(map[string]map[ast.NodeID]bool)
+	seen := make(map[RefKey]bool)
 
 	addRef := func(dDoc *Document, dUri string, nodeID ast.NodeID) {
 		if !includeDeclaration && dUri == ctx.TargetURI && nodeID == ctx.TargetDefID {
 			return
 		}
 
-		if seen[dUri] == nil {
-			seen[dUri] = make(map[ast.NodeID]bool)
-		}
+		rk := RefKey{URI: dUri, ID: nodeID}
 
-		if seen[dUri][nodeID] {
+		if seen[rk] {
 			return
 		}
 
-		seen[dUri][nodeID] = true
+		seen[rk] = true
 
 		node := dDoc.Tree.Nodes[nodeID]
 
@@ -4423,7 +4445,7 @@ func (s *Server) removeDocumentGlobals(uri string, doc *Document) {
 	}
 }
 
-func (s *Server) indexEmbeddedStdlib(indexed, unchanged *int) {
+func (s *Server) indexEmbeddedStdlib(total, indexed, unchanged *int) {
 	entries, err := stdlibFS.ReadDir("stdlib")
 	if err != nil {
 		return
@@ -4442,6 +4464,8 @@ func (s *Server) indexEmbeddedStdlib(indexed, unchanged *int) {
 
 					continue
 				}
+
+				*total += len(b)
 
 				s.updateDocument(uri, b)
 
@@ -5066,11 +5090,7 @@ func levenshteinFast(s, t string, maxDist int) int {
 		return lt
 	}
 
-	if lt-ls > maxDist {
-		return maxDist + 1
-	}
-
-	if lt > 63 {
+	if lt-ls > maxDist || lt > 63 {
 		return maxDist + 1
 	}
 
@@ -5079,14 +5099,16 @@ func levenshteinFast(s, t string, maxDist int) int {
 		v1 [64]int
 	)
 
+	p0, p1 := &v0, &v1
+
 	for i := 0; i <= ls; i++ {
-		v0[i] = i
+		p0[i] = i
 	}
 
 	for i := range lt {
-		v1[0] = i + 1
+		p1[0] = i + 1
 
-		minDistForRow := v1[0]
+		minDistForRow := p1[0]
 
 		for j := range ls {
 			cost := 1
@@ -5095,13 +5117,13 @@ func levenshteinFast(s, t string, maxDist int) int {
 				cost = 0
 			}
 
-			a := v1[j] + 1
-			b := v0[j+1] + 1
-			c := v0[j] + cost
+			a := p1[j] + 1
+			b := p0[j+1] + 1
+			c := p0[j] + cost
 
 			m := min(c, min(b, a))
 
-			v1[j+1] = m
+			p1[j+1] = m
 
 			if m < minDistForRow {
 				minDistForRow = m
@@ -5112,8 +5134,8 @@ func levenshteinFast(s, t string, maxDist int) int {
 			return maxDist + 1
 		}
 
-		v0 = v1
+		p0, p1 = p1, p0
 	}
 
-	return v1[ls]
+	return p0[ls]
 }

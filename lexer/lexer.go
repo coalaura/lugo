@@ -6,10 +6,18 @@ import (
 	"github.com/coalaura/lugo/token"
 )
 
-var isIdentChar [256]bool
+const (
+	propIdent = 1 << iota
+	propDigit
+	propHex
+	propLetter
+)
+
+var charProps [256]uint8
 
 type Lexer struct {
 	source []byte
+	length uint32
 	cursor uint32
 	read   uint32
 	ch     byte
@@ -17,13 +25,24 @@ type Lexer struct {
 
 func init() {
 	for i := range 256 {
-		isIdentChar[i] = (i >= 'a' && i <= 'z') || (i >= 'A' && i <= 'Z') || (i >= '0' && i <= '9') || i == '_'
+		if (i >= 'a' && i <= 'z') || (i >= 'A' && i <= 'Z') || i == '_' {
+			charProps[i] |= propLetter | propIdent | propHex
+		}
+
+		if i >= '0' && i <= '9' {
+			charProps[i] |= propDigit | propIdent | propHex
+		}
+
+		if (i >= 'g' && i <= 'z') || (i >= 'G' && i <= 'Z') || i == '_' {
+			charProps[i] &^= propHex
+		}
 	}
 }
 
 func New(source []byte) *Lexer {
 	l := &Lexer{
 		source: source,
+		length: uint32(len(source)),
 	}
 
 	l.advance()
@@ -33,6 +52,7 @@ func New(source []byte) *Lexer {
 
 func (l *Lexer) Reset(source []byte) {
 	l.source = source
+	l.length = uint32(len(source))
 	l.cursor = 0
 	l.read = 0
 	l.ch = 0
@@ -198,11 +218,11 @@ func (l *Lexer) Next() token.Token {
 		return token.Token{Kind: token.LBrack, Start: start, End: l.cursor}
 	}
 
-	if isLetter(ch) {
+	if charProps[ch]&propLetter != 0 {
 		return l.readIdent(start)
 	}
 
-	if isDigit(ch) {
+	if charProps[ch]&propDigit != 0 {
 		return l.readNumber(start)
 	}
 
@@ -243,7 +263,7 @@ func (l *Lexer) readIdent(start uint32) token.Token {
 	read := l.cursor
 
 	for read < uint32(len(src)) {
-		if isIdentChar[src[read]] {
+		if charProps[src[read]]&propIdent != 0 {
 			read++
 		} else {
 			break
@@ -324,9 +344,9 @@ func (l *Lexer) readNumber(start uint32) token.Token {
 	}
 
 	for l.ch != 0 {
-		if isHex && (isDigit(l.ch) || isHexLetter(l.ch) || l.ch == '.') {
+		if isHex && ((charProps[l.ch]&propHex != 0) || l.ch == '.') {
 			l.advance()
-		} else if !isHex && (isDigit(l.ch) || l.ch == '.') {
+		} else if !isHex && ((charProps[l.ch]&propDigit != 0) || l.ch == '.') {
 			l.advance()
 		} else if isHex && (l.ch == 'p' || l.ch == 'P') {
 			l.advance()
@@ -462,16 +482,4 @@ func (l *Lexer) readComment(start uint32) token.Token {
 	}
 
 	return token.Token{Kind: token.Comment, Start: start, End: l.cursor}
-}
-
-func isLetter(ch byte) bool {
-	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_'
-}
-
-func isDigit(ch byte) bool {
-	return ch >= '0' && ch <= '9'
-}
-
-func isHexLetter(ch byte) bool {
-	return (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
 }
