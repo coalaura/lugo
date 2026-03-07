@@ -219,7 +219,7 @@ func (doc *Document) evalNode(id ast.NodeID, depth int) (evalResult, bool) {
 
 	switch node.Kind {
 	case ast.KindNumber:
-		raw := string(doc.Source[node.Start:node.End])
+		raw := ast.String(doc.Source[node.Start:node.End])
 
 		f, err := strconv.ParseFloat(raw, 64)
 		if err != nil {
@@ -233,7 +233,7 @@ func (doc *Document) evalNode(id ast.NodeID, depth int) (evalResult, bool) {
 
 		return evalResult{kind: ast.KindNumber, num: f}, true
 	case ast.KindString:
-		raw := string(doc.Source[node.Start:node.End])
+		raw := ast.String(doc.Source[node.Start:node.End])
 		if len(raw) >= 2 && (raw[0] == '\'' || raw[0] == '"') {
 			unq, err := strconv.Unquote(raw)
 			if err == nil {

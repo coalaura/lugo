@@ -21,9 +21,10 @@ type Document struct {
 	ExportedGlobals    map[GlobalKey]ast.NodeID
 	ExportedGlobalDefs map[ast.NodeID]GlobalKey
 
-	TypeCache []TypeSet
-	Inferring []bool
-	IsMeta    bool
+	TypeCache  []TypeSet
+	Inferring  []bool
+	IsMeta     bool
+	commentBuf []byte
 }
 
 func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {
@@ -132,7 +133,7 @@ func (doc *Document) getFunctionParams(funcExprID ast.NodeID, luadoc LuaDoc) str
 		pID := doc.Tree.ExtraList[node.Extra+uint32(i)]
 		pNode := doc.Tree.Nodes[pID]
 
-		name := string(doc.Source[pNode.Start:pNode.End])
+		name := ast.String(doc.Source[pNode.Start:pNode.End])
 
 		if typ, ok := paramTypes[name]; ok && typ != "" {
 			params = append(params, name+": "+typ)
@@ -223,7 +224,9 @@ func (doc *Document) getCommentsAbove(id ast.NodeID) []byte {
 		return nil
 	}
 
-	var b []byte
+	doc.commentBuf = doc.commentBuf[:0] // Pooling is great
+
+	b := doc.commentBuf
 
 	for i := len(validComments) - 1; i >= 0; i-- {
 		c := validComments[i]
@@ -235,6 +238,8 @@ func (doc *Document) getCommentsAbove(id ast.NodeID) []byte {
 			b = append(b, '\n')
 		}
 	}
+
+	doc.commentBuf = b
 
 	return bytes.TrimSpace(b)
 }
@@ -254,16 +259,21 @@ func (doc *Document) GetLocalsAt(offset uint32, yield func(name []byte, defID as
 
 		switch node.Kind {
 		case ast.KindBlock, ast.KindFile:
-			var lastStmtIdx int = -1
+			// Binary search for the active statement
+			low, high := 0, int(node.Count)
 
-			for i := uint16(0); i < node.Count; i++ {
-				stmtID := doc.Tree.ExtraList[node.Extra+uint32(i)]
+			for low < high {
+				mid := int(uint(low+high) >> 1)
+				stmtID := doc.Tree.ExtraList[node.Extra+uint32(mid)]
+
 				if doc.Tree.Nodes[stmtID].Start >= offset {
-					break
+					high = mid
+				} else {
+					low = mid + 1
 				}
-
-				lastStmtIdx = int(i)
 			}
+
+			lastStmtIdx := low - 1
 
 			for i := lastStmtIdx; i >= 0; i-- {
 				stmtID := doc.Tree.ExtraList[node.Extra+uint32(i)]

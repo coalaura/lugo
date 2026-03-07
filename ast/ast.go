@@ -2,6 +2,7 @@ package ast
 
 import (
 	"bytes"
+	"unsafe"
 
 	"github.com/coalaura/lugo/token"
 )
@@ -97,7 +98,13 @@ type Tree struct {
 }
 
 func NewTree(source []byte) *Tree {
-	lines := make([]uint32, 1, 128)
+	capLines := len(source) / 30
+
+	if capLines < 128 {
+		capLines = 128
+	}
+
+	lines := make([]uint32, 1, capLines)
 	lines[0] = 0
 
 	lines = computeLineOffsets(source, lines)
@@ -152,7 +159,7 @@ func (t *Tree) Offset(line, col uint32) uint32 {
 	return offset
 }
 
-// NodeAt finds the narrowest AST node containing the given byte offset in O(depth) time.
+// NodeAt finds the narrowest AST node containing the given byte offset in O(log depth) time.
 func (t *Tree) NodeAt(offset uint32) NodeID {
 	curr := t.Root
 	if curr == InvalidNode || offset < t.Nodes[curr].Start || offset > t.Nodes[curr].End {
@@ -176,8 +183,34 @@ func (t *Tree) NodeAt(offset uint32) NodeID {
 		check(node.Left)
 		check(node.Right)
 
-		for i := uint16(0); i < node.Count; i++ {
-			check(t.ExtraList[node.Extra+uint32(i)])
+		if next == InvalidNode && node.Count > 0 {
+			if node.Kind == KindBlock || node.Kind == KindFile {
+				// Binary search, yay!
+				low, high := 0, int(node.Count)
+
+				for low < high {
+					mid := int(uint(low+high) >> 1)
+
+					childID := t.ExtraList[node.Extra+uint32(mid)]
+
+					c := t.Nodes[childID]
+
+					if offset < c.Start {
+						high = mid
+					} else if offset > c.End {
+						low = mid + 1
+					} else {
+						next = childID
+
+						break
+					}
+				}
+			} else {
+				// Linear scan for unordered or small extra lists
+				for i := uint16(0); i < node.Count; i++ {
+					check(t.ExtraList[node.Extra+uint32(i)])
+				}
+			}
 		}
 
 		if next != InvalidNode {
@@ -276,4 +309,15 @@ func HashBytesConcat(a, sep, b []byte) uint64 {
 	}
 
 	return hash
+}
+
+// String safely converts a byte slice to a string with zero allocations.
+// WARNING: Do not use this for strings that will be permanently cached
+// (e.g. GlobalSymbol.Name) as it keeps the underlying byte slice in memory.
+func String(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+
+	return unsafe.String(unsafe.SliceData(b), len(b))
 }

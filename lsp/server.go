@@ -353,7 +353,7 @@ func (s *Server) handleMessage(req Request) {
 
 		b, err := stdlibFS.ReadFile("stdlib/" + filename)
 		if err == nil {
-			content = string(b)
+			content = ast.String(b)
 		}
 
 		WriteMessage(s.Writer, Response{
@@ -691,7 +691,7 @@ func (s *Server) handleMessage(req Request) {
 
 					switch vNode.Kind {
 					case ast.KindNumber, ast.KindString, ast.KindTrue, ast.KindFalse, ast.KindNil:
-						valStr = " = " + string(ctx.TargetDoc.Source[vNode.Start:vNode.End])
+						valStr = " = " + ast.String(ctx.TargetDoc.Source[vNode.Start:vNode.End])
 					}
 				}
 
@@ -1342,7 +1342,7 @@ func (s *Server) handleMessage(req Request) {
 			}
 		}
 
-		s.Log.Printf("Completion requested at offset %d. isMember=%v, recName=%s\n", offset, isMember, string(recName))
+		s.Log.Printf("Completion requested at offset %d. isMember=%v, recName=%s\n", offset, isMember, ast.String(recName))
 
 		if isMember && len(recName) > 0 {
 			recHash := ast.HashBytes(recName)
@@ -1372,7 +1372,7 @@ func (s *Server) handleMessage(req Request) {
 
 					isDep, _ := doc.HasDeprecatedTag(fd.NodeID)
 
-					addCompletion(string(doc.Source[node.Start:node.End]), kind, "field", isDep)
+					addCompletion(ast.String(doc.Source[node.Start:node.End]), kind, "field", isDep)
 				}
 			}
 
@@ -1400,7 +1400,7 @@ func (s *Server) handleMessage(req Request) {
 
 						isDep, _ := symDoc.HasDeprecatedTag(sym.NodeID)
 
-						addCompletion(string(symDoc.Source[node.Start:node.End]), kind, "field", isDep)
+						addCompletion(ast.String(symDoc.Source[node.Start:node.End]), kind, "field", isDep)
 					}
 				}
 			}
@@ -1415,7 +1415,7 @@ func (s *Server) handleMessage(req Request) {
 					kind = FunctionCompletion
 				}
 
-				addCompletion(string(name), kind, "local", isDep)
+				addCompletion(ast.String(name), kind, "local", isDep)
 
 				return true
 			})
@@ -1436,7 +1436,7 @@ func (s *Server) handleMessage(req Request) {
 
 							isDep, _ := symDoc.HasDeprecatedTag(sym.NodeID)
 
-							addCompletion(string(symDoc.Source[node.Start:node.End]), kind, "global", isDep)
+							addCompletion(ast.String(symDoc.Source[node.Start:node.End]), kind, "global", isDep)
 						}
 					}
 				}
@@ -1487,7 +1487,7 @@ func (s *Server) handleMessage(req Request) {
 					keyNode := doc.Tree.Nodes[fieldNode.Left]
 					valNode := doc.Tree.Nodes[fieldNode.Right]
 
-					name := string(doc.Source[keyNode.Start:keyNode.End])
+					name := ast.String(doc.Source[keyNode.Start:keyNode.End])
 
 					kind := SymbolKindField
 
@@ -1535,7 +1535,7 @@ func (s *Server) handleMessage(req Request) {
 				}
 			case ast.KindLocalFunction, ast.KindFunctionStmt:
 				nameNode := doc.Tree.Nodes[node.Left]
-				name := string(doc.Source[nameNode.Start:nameNode.End])
+				name := ast.String(doc.Source[nameNode.Start:nameNode.End])
 
 				kind := SymbolKindFunction
 
@@ -1570,7 +1570,7 @@ func (s *Server) handleMessage(req Request) {
 							rNode = doc.Tree.Nodes[rID]
 						}
 
-						name := string(doc.Source[lNode.Start:lNode.End])
+						name := ast.String(doc.Source[lNode.Start:lNode.End])
 
 						if rNode.Kind == ast.KindFunctionExpr {
 							syms = append(syms, DocumentSymbol{
@@ -2191,7 +2191,7 @@ func (s *Server) handleMessage(req Request) {
 		for i := uint16(0); i < funcNode.Count; i++ {
 			pID := ctx.TargetDoc.Tree.ExtraList[funcNode.Extra+uint32(i)]
 			pNode := ctx.TargetDoc.Tree.Nodes[pID]
-			pName := string(ctx.TargetDoc.Source[pNode.Start:pNode.End])
+			pName := ast.String(ctx.TargetDoc.Source[pNode.Start:pNode.End])
 
 			label := pName
 
@@ -2367,7 +2367,7 @@ func (s *Server) handleMessage(req Request) {
 				sLine, sCol := doc.Tree.Position(argNode.Start)
 				hints = append(hints, InlayHint{
 					Position:     Position{Line: sLine, Character: sCol},
-					Label:        string(pName) + ":",
+					Label:        ast.String(pName) + ":",
 					Kind:         ParameterHint,
 					PaddingRight: true,
 				})
@@ -3100,7 +3100,7 @@ func (s *Server) processParamsForFixes(doc *Document, funcExprID ast.NodeID, unu
 
 func (s *Server) createRenameFix(doc *Document, id ast.NodeID) SafeFix {
 	node := doc.Tree.Nodes[id]
-	name := string(doc.Source[node.Start:node.End])
+	name := ast.String(doc.Source[node.Start:node.End])
 
 	return SafeFix{
 		Coverage: []ast.NodeID{id},
@@ -3629,7 +3629,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			key := GlobalKey{ReceiverHash: 0, PropHash: hash}
 
 			if _, exists := s.GlobalIndex[key]; !exists {
-				identStr := string(identBytes)
+				identStr := ast.String(identBytes)
 
 				suggestion, ok := suggestCache[identStr]
 				if !ok {
@@ -3691,7 +3691,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				Range:    getNodeRange(doc.Tree, defID),
 				Severity: SeverityWarning,
 				Code:     "implicit-global",
-				Message:  fmt.Sprintf("Implicit global creation '%s'. Did you forget the 'local' keyword?", string(identBytes)),
+				Message:  fmt.Sprintf("Implicit global creation '%s'. Did you forget the 'local' keyword?", ast.String(identBytes)),
 			})
 		}
 	}
@@ -3755,7 +3755,7 @@ func (s *Server) publishDiagnostics(uri string) {
 					msg = "Unused vararg '...'. Remove it from the parameter list if it is not needed."
 					code = "unused-vararg"
 				} else {
-					msg = fmt.Sprintf("Unused %s '%s'.", category, string(nameBytes))
+					msg = fmt.Sprintf("Unused %s '%s'.", category, ast.String(nameBytes))
 
 					if fixTitle, ok := fixMap[defID]; ok {
 						if fixTitle == "Prefix with '_'" {
@@ -3801,7 +3801,7 @@ func (s *Server) publishDiagnostics(uri string) {
 						Range:    r,
 						Severity: SeverityWarning,
 						Code:     "shadow-global",
-						Message:  fmt.Sprintf("Local variable '%s' shadows a known global.", string(nameBytes)),
+						Message:  fmt.Sprintf("Local variable '%s' shadows a known global.", ast.String(nameBytes)),
 					})
 				} else {
 					hash := ast.HashBytes(nameBytes)
@@ -3821,7 +3821,7 @@ func (s *Server) publishDiagnostics(uri string) {
 									URI:   sym.URI,
 									Range: getNodeRange(symDoc.Tree, sym.NodeID),
 								},
-								Message: fmt.Sprintf("Global '%s' defined here%s", string(nameBytes), fromFile),
+								Message: fmt.Sprintf("Global '%s' defined here%s", ast.String(nameBytes), fromFile),
 							})
 						}
 
@@ -3829,7 +3829,7 @@ func (s *Server) publishDiagnostics(uri string) {
 							Range:              r,
 							Severity:           SeverityWarning,
 							Code:               "shadow-global",
-							Message:            fmt.Sprintf("Local variable '%s' shadows a global definition.", string(nameBytes)),
+							Message:            fmt.Sprintf("Local variable '%s' shadows a global definition.", ast.String(nameBytes)),
 							RelatedInformation: related,
 						})
 					}
@@ -3851,14 +3851,14 @@ func (s *Server) publishDiagnostics(uri string) {
 					URI:   uri,
 					Range: getNodeRange(doc.Tree, pair.Shadowed),
 				},
-				Message: fmt.Sprintf("Outer local '%s' defined here", string(nameBytes)),
+				Message: fmt.Sprintf("Outer local '%s' defined here", ast.String(nameBytes)),
 			})
 
 			s.diagBuf = append(s.diagBuf, Diagnostic{
 				Range:              getNodeRange(doc.Tree, pair.Shadowing),
 				Severity:           SeverityWarning,
 				Code:               "shadow-outer",
-				Message:            fmt.Sprintf("Local variable '%s' shadows a variable from an outer scope.", string(nameBytes)),
+				Message:            fmt.Sprintf("Local variable '%s' shadows a variable from an outer scope.", ast.String(nameBytes)),
 				RelatedInformation: related,
 			})
 		}
@@ -3947,7 +3947,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				info := checkDep(doc, defID)
 				if info.IsDep {
 					identBytes := doc.Source[doc.Tree.Nodes[i].Start:doc.Tree.Nodes[i].End]
-					diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", string(identBytes))
+					diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", ast.String(identBytes))
 
 					if info.Msg != "" {
 						diagMsg += ": " + info.Msg
@@ -3975,7 +3975,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				if symDoc, docOk := s.Documents[sym.URI]; docOk {
 					info := checkDep(symDoc, sym.NodeID)
 					if info.IsDep {
-						diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", string(identBytes))
+						diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", ast.String(identBytes))
 
 						if info.Msg != "" {
 							diagMsg += ": " + info.Msg
@@ -4003,7 +4003,7 @@ func (s *Server) publishDiagnostics(uri string) {
 						info := checkDep(symDoc, sym.NodeID)
 						if info.IsDep {
 							identBytes := doc.Source[doc.Tree.Nodes[pf.PropNodeID].Start:doc.Tree.Nodes[pf.PropNodeID].End]
-							diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", string(identBytes))
+							diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", ast.String(identBytes))
 
 							if info.Msg != "" {
 								diagMsg += ": " + info.Msg
@@ -4053,7 +4053,7 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 
 	identNode := doc.Tree.Nodes[nodeID]
 	identBytes := doc.Source[identNode.Start:identNode.End]
-	identName := string(identBytes)
+	identName := ast.String(identBytes)
 	displayName := identName
 
 	defID := doc.Resolver.References[nodeID]
@@ -4074,7 +4074,7 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 		if isProp {
 			recID := pNode.Left
 
-			displayName = string(doc.Source[doc.Tree.Nodes[recID].Start:identNode.End])
+			displayName = ast.String(doc.Source[doc.Tree.Nodes[recID].Start:identNode.End])
 			recBytes := doc.Source[doc.Tree.Nodes[recID].Start:doc.Tree.Nodes[recID].End]
 
 			curr := recID
@@ -4575,7 +4575,7 @@ func (s *Server) isWorkspaceURI(uri string) bool {
 }
 
 func (s *Server) isKnownGlobal(name []byte) bool {
-	if s.KnownGlobals[string(name)] {
+	if s.KnownGlobals[ast.String(name)] {
 		return true
 	}
 
@@ -4583,7 +4583,7 @@ func (s *Server) isKnownGlobal(name []byte) bool {
 		return false
 	}
 
-	strName := string(name)
+	strName := ast.String(name)
 
 	for _, glob := range s.KnownGlobalGlobs {
 		if matched, _ := filepath.Match(glob, strName); matched {
@@ -4599,7 +4599,7 @@ func (s *Server) buildCallHierarchyItemFromDef(uri string, doc *Document, defID 
 	isFunc := valID != ast.InvalidNode && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr
 
 	node := doc.Tree.Nodes[defID]
-	name := string(doc.Source[node.Start:node.End])
+	name := ast.String(doc.Source[node.Start:node.End])
 	kind := SymbolKindVariable
 
 	if isFunc {
