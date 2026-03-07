@@ -101,7 +101,7 @@ func TestParser_ValidSyntax(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			src := []byte(tt.input)
 			tree := ast.NewTree(src)
-			p := parser.New(src, tree)
+			p := parser.New(src, tree, 0)
 
 			rootID := p.Parse()
 
@@ -161,7 +161,7 @@ func TestParser_ErrorRecovery(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			src := []byte(tt.input)
 			tree := ast.NewTree(src)
-			p := parser.New(src, tree)
+			p := parser.New(src, tree, 0)
 
 			p.Parse()
 

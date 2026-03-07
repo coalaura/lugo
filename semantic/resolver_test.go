@@ -29,7 +29,7 @@ func TestResolver_LocalScope(t *testing.T) {
 	`)
 
 	tree := ast.NewTree(input)
-	p := parser.New(input, tree)
+	p := parser.New(input, tree, 0)
 	root := p.Parse()
 
 	res := semantic.New(tree)
@@ -62,7 +62,7 @@ func TestResolver_Shadowing(t *testing.T) {
 	`)
 
 	tree := ast.NewTree(input)
-	p := parser.New(input, tree)
+	p := parser.New(input, tree, 0)
 	root := p.Parse()
 
 	res := semantic.New(tree)
@@ -100,7 +100,7 @@ func TestResolver_Globals(t *testing.T) {
 	`)
 
 	tree := ast.NewTree(input)
-	p := parser.New(input, tree)
+	p := parser.New(input, tree, 0)
 	root := p.Parse()
 
 	res := semantic.New(tree)

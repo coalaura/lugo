@@ -41,6 +41,7 @@ type InitializationOptions struct {
 	DiagnosticsShadowing                      bool `json:"diagnosticsShadowing"`
 	DiagnosticsUnreachableCode                bool `json:"diagnosticsUnreachableCode"`
 	DiagnosticsAmbiguousReturns               bool `json:"diagnosticsAmbiguousReturns"`
+	DiagnosticsMaxParseErrors                 int  `json:"diagnosticsMaxParseErrors"`
 	DiagnosticsDeprecated                     bool `json:"diagnosticsDeprecated"`
 	InlayHintsParameterNames                  bool `json:"inlayHintsParameterNames"`
 	InlayHintsSuppressWhenArgumentMatchesName bool `json:"inlayHintsSuppressWhenArgumentMatchesName"`

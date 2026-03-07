@@ -94,6 +94,11 @@ type SafeFix struct {
 	Title    string
 }
 
+type DepInfo struct {
+	IsDep bool
+	Msg   string
+}
+
 type Server struct {
 	Version           string
 	Reader            *bufio.Reader
@@ -132,6 +137,7 @@ type Server struct {
 	DiagUnreachableCode  bool
 	DiagAmbiguousReturns bool
 	DiagDeprecated       bool
+	MaxParseErrors       int
 	InlayParamHints      bool
 	InlaySuppressMatch   bool
 	FeatureDocHighlight  bool
@@ -149,7 +155,7 @@ func NewServer(version string) *Server {
 		OpenFiles:    make(map[string]bool),
 		semTokensBuf: make([]SemanticToken, 0, 4096),
 		semDataBuf:   make([]uint32, 0, 4096*5),
-		sharedParser: parser.New(nil, ast.NewTree(nil)),
+		sharedParser: parser.New(nil, ast.NewTree(nil), 50),
 		diagBuf:      make([]Diagnostic, 0, 1024),
 		IsIndexing:   true,
 	}
@@ -266,6 +272,7 @@ func (s *Server) handleMessage(req Request) {
 			s.DiagUnreachableCode = params.InitializationOptions.DiagnosticsUnreachableCode
 			s.DiagAmbiguousReturns = params.InitializationOptions.DiagnosticsAmbiguousReturns
 			s.DiagDeprecated = params.InitializationOptions.DiagnosticsDeprecated
+			s.MaxParseErrors = params.InitializationOptions.DiagnosticsMaxParseErrors
 			s.InlayParamHints = params.InitializationOptions.InlayHintsParameterNames
 			s.InlaySuppressMatch = params.InitializationOptions.InlayHintsSuppressWhenArgumentMatchesName
 			s.FeatureDocHighlight = params.InitializationOptions.FeaturesDocumentHighlight
@@ -368,7 +375,7 @@ func (s *Server) handleMessage(req Request) {
 
 		s.IsIndexing = true
 
-		start := time.Now()
+		start1 := time.Now()
 
 		if s.activeURIs == nil {
 			s.activeURIs = make(map[string]bool, len(s.Documents))
@@ -412,11 +419,11 @@ func (s *Server) handleMessage(req Request) {
 
 		s.IsIndexing = false
 
-		took := time.Since(start)
+		took1 := time.Since(start1)
 
-		s.Log.Printf("Re-indexed workspace in %s (indexed=%d, unchanged=%d, failed=%d)\n", took, indexed, unchanged, failed)
+		s.Log.Printf("Re-indexed workspace in %s (indexed=%d, unchanged=%d, failed=%d)\n", took1, indexed, unchanged, failed)
 
-		start = time.Now()
+		start2 := time.Now()
 
 		var diagCount int
 
@@ -428,9 +435,11 @@ func (s *Server) handleMessage(req Request) {
 			}
 		}
 
-		took = time.Since(start)
+		took2 := time.Since(start2)
 
-		s.Log.Printf("Published diagnostics for %d workspace files in %s\n", diagCount, took)
+		s.Log.Printf("Published diagnostics for %d workspace files in %s\n", diagCount, took2)
+
+		s.Log.Printf("Total time taken: %s\n", took1+took2)
 
 		/*
 			if traceFile != nil {
@@ -3355,12 +3364,13 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		tree = ast.NewTree(source)
 
 		doc = &Document{
-			Server:          s,
-			URI:             uri,
-			Source:          source,
-			Tree:            tree,
-			Resolver:        semantic.New(tree),
-			ExportedGlobals: make(map[ast.NodeID][]GlobalKey),
+			Server:             s,
+			URI:                uri,
+			Source:             source,
+			Tree:               tree,
+			Resolver:           semantic.New(tree),
+			ExportedGlobals:    make(map[GlobalKey]ast.NodeID),
+			ExportedGlobalDefs: make(map[ast.NodeID]GlobalKey),
 		}
 
 		s.Documents[uri] = doc
@@ -3409,10 +3419,18 @@ func (s *Server) updateDocument(uri string, source []byte) {
 	res.Reset()
 	res.Resolve(rootID)
 
+	fieldDefsByLocal := make(map[ast.NodeID][]int, len(res.FieldDefs))
+
+	for i, fd := range res.FieldDefs {
+		if fd.ReceiverDef != ast.InvalidNode {
+			fieldDefsByLocal[fd.ReceiverDef] = append(fieldDefsByLocal[fd.ReceiverDef], i)
+		}
+	}
+
 	for _, defID := range res.GlobalDefs {
 		node := tree.Nodes[defID]
 		identBytes := tree.Source[node.Start:node.End]
-		hash := ast.HashBytes(tree.Source[node.Start:node.End])
+		hash := ast.HashBytes(identBytes)
 
 		depth := getASTDepth(tree, defID)
 
@@ -3443,7 +3461,9 @@ func (s *Server) updateDocument(uri string, source []byte) {
 					localName := doc.Source[doc.Tree.Nodes[localDefID].Start:doc.Tree.Nodes[localDefID].End]
 					globalBytes := tree.Source[node.Start:node.End]
 
-					for _, fd := range res.FieldDefs {
+					for _, fdIdx := range fieldDefsByLocal[localDefID] {
+						fd := res.FieldDefs[fdIdx]
+
 						if bytes.Equal(fd.ReceiverName, localName) {
 							propBytes := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
 
@@ -3588,6 +3608,8 @@ func (s *Server) publishDiagnostics(uri string) {
 
 	// 2. Undefined Globals
 	if s.DiagUndefinedGlobals {
+		suggestCache := make(map[string]string)
+
 		for _, refID := range doc.Resolver.GlobalRefs {
 			node := doc.Tree.Nodes[refID]
 			if node.Start == node.End {
@@ -3605,9 +3627,14 @@ func (s *Server) publishDiagnostics(uri string) {
 
 			if _, exists := s.GlobalIndex[key]; !exists {
 				identStr := string(identBytes)
-				msg := fmt.Sprintf("Undefined global '%s'.", identStr)
 
-				suggestion := s.suggestGlobal(identStr)
+				suggestion, ok := suggestCache[identStr]
+				if !ok {
+					suggestion = s.suggestGlobal(identStr)
+					suggestCache[identStr] = suggestion
+				}
+
+				msg := fmt.Sprintf("Undefined global '%s'.", identStr)
 
 				var diagData any
 
@@ -3893,21 +3920,34 @@ func (s *Server) publishDiagnostics(uri string) {
 
 	// 7. Deprecated
 	if s.DiagDeprecated {
-		for i := 1; i < len(doc.Tree.Nodes); i++ {
-			node := doc.Tree.Nodes[i]
+		depCache := make(map[ast.NodeID]DepInfo)
 
-			if node.Kind != ast.KindIdent {
-				continue
+		checkDep := func(d *Document, id ast.NodeID) DepInfo {
+			if info, ok := depCache[id]; ok && d == doc {
+				return info
 			}
+			isDep, msg := d.HasDeprecatedTag(id)
+			info := DepInfo{isDep, msg}
+			if d == doc {
+				depCache[id] = info
+			}
+			return info
+		}
 
-			ctx := s.resolveSymbolNode(uri, doc, ast.NodeID(i))
-			if ctx != nil && ctx.TargetDefID != ast.InvalidNode && ctx.TargetDefID != ast.NodeID(i) {
-				isDep, msg := ctx.TargetDoc.HasDeprecatedTag(ctx.TargetDefID)
-				if isDep {
-					diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", ctx.DisplayName)
+		// Check all resolved local references and locally resolved fields
+		for i, defID := range doc.Resolver.References {
+			if defID != ast.InvalidNode && defID != ast.NodeID(i) {
+				if doc.Tree.Nodes[i].Kind != ast.KindIdent {
+					continue
+				}
 
-					if msg != "" {
-						diagMsg += ": " + msg
+				info := checkDep(doc, defID)
+				if info.IsDep {
+					identBytes := doc.Source[doc.Tree.Nodes[i].Start:doc.Tree.Nodes[i].End]
+					diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", string(identBytes))
+
+					if info.Msg != "" {
+						diagMsg += ": " + info.Msg
 					} else {
 						diagMsg += "."
 					}
@@ -3919,6 +3959,64 @@ func (s *Server) publishDiagnostics(uri string) {
 						Tags:     []DiagnosticTag{Deprecated},
 						Message:  diagMsg,
 					})
+				}
+			}
+		}
+
+		// Check unresolved global references
+		for _, refID := range doc.Resolver.GlobalRefs {
+			identBytes := doc.Source[doc.Tree.Nodes[refID].Start:doc.Tree.Nodes[refID].End]
+			hash := ast.HashBytes(identBytes)
+
+			if sym, ok := s.getGlobalSymbol(0, hash); ok && sym.NodeID != ast.InvalidNode {
+				if symDoc, docOk := s.Documents[sym.URI]; docOk {
+					info := checkDep(symDoc, sym.NodeID)
+					if info.IsDep {
+						diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", string(identBytes))
+
+						if info.Msg != "" {
+							diagMsg += ": " + info.Msg
+						} else {
+							diagMsg += "."
+						}
+
+						s.diagBuf = append(s.diagBuf, Diagnostic{
+							Range:    getNodeRange(doc.Tree, refID),
+							Severity: SeverityHint,
+							Code:     "deprecated",
+							Tags:     []DiagnosticTag{Deprecated},
+							Message:  diagMsg,
+						})
+					}
+				}
+			}
+		}
+
+		// Check unresolved global field accesses
+		for _, pf := range doc.Resolver.PendingFields {
+			if doc.Resolver.References[pf.PropNodeID] == ast.InvalidNode && pf.ReceiverHash != 0 {
+				if sym, ok := s.getGlobalSymbol(pf.ReceiverHash, pf.PropHash); ok && sym.NodeID != ast.InvalidNode {
+					if symDoc, docOk := s.Documents[sym.URI]; docOk {
+						info := checkDep(symDoc, sym.NodeID)
+						if info.IsDep {
+							identBytes := doc.Source[doc.Tree.Nodes[pf.PropNodeID].Start:doc.Tree.Nodes[pf.PropNodeID].End]
+							diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", string(identBytes))
+
+							if info.Msg != "" {
+								diagMsg += ": " + info.Msg
+							} else {
+								diagMsg += "."
+							}
+
+							s.diagBuf = append(s.diagBuf, Diagnostic{
+								Range:    getNodeRange(doc.Tree, pf.PropNodeID),
+								Severity: SeverityHint,
+								Code:     "deprecated",
+								Tags:     []DiagnosticTag{Deprecated},
+								Message:  diagMsg,
+							})
+						}
+					}
 				}
 			}
 		}
@@ -4024,10 +4122,10 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 	if defID != ast.InvalidNode {
 		ctx.TargetDefID = defID
 
-		if !ctx.IsGlobal && ctx.TargetDoc != nil && ctx.TargetDoc.ExportedGlobals != nil {
-			if keys, exported := ctx.TargetDoc.ExportedGlobals[defID]; exported && len(keys) > 0 {
+		if !ctx.IsGlobal && ctx.TargetDoc != nil && ctx.TargetDoc.ExportedGlobalDefs != nil {
+			if exportedKey, exported := ctx.TargetDoc.ExportedGlobalDefs[defID]; exported {
 				ctx.IsGlobal = true
-				ctx.GKey = keys[0]
+				ctx.GKey = exportedKey
 			}
 		}
 	} else if gKey.PropHash != 0 {
@@ -4235,10 +4333,12 @@ func (s *Server) getGlobalSymbol(recHash, propHash uint64) (GlobalSymbol, bool) 
 func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, depth int, name string) {
 	if doc, ok := s.Documents[uri]; ok {
 		if doc.ExportedGlobals == nil {
-			doc.ExportedGlobals = make(map[ast.NodeID][]GlobalKey)
+			doc.ExportedGlobals = make(map[GlobalKey]ast.NodeID)
+			doc.ExportedGlobalDefs = make(map[ast.NodeID]GlobalKey)
 		}
 
-		doc.ExportedGlobals[nodeID] = append(doc.ExportedGlobals[nodeID], key)
+		doc.ExportedGlobals[key] = nodeID
+		doc.ExportedGlobalDefs[nodeID] = key
 	}
 
 	if existing, exists := s.GlobalIndex[key]; exists {
@@ -4265,63 +4365,56 @@ func (s *Server) removeDocumentGlobals(uri string, doc *Document) {
 		return
 	}
 
-	for _, keys := range doc.ExportedGlobals {
-		for _, key := range keys {
-			if sym, ok := s.GlobalIndex[key]; ok && sym.URI == uri {
-				delete(s.GlobalIndex, key)
+	for key := range doc.ExportedGlobals {
+		if sym, ok := s.GlobalIndex[key]; ok && sym.URI == uri {
+			delete(s.GlobalIndex, key)
 
-				var (
-					bestSym GlobalSymbol
-					found   bool
-				)
+			var (
+				bestSym GlobalSymbol
+				found   bool
+			)
 
-				for otherURI, otherDoc := range s.Documents {
-					if otherURI == uri {
-						continue
-					}
+			for otherURI, otherDoc := range s.Documents {
+				if otherURI == uri {
+					continue
+				}
 
-					for nodeID, otherKeys := range otherDoc.ExportedGlobals {
-						for _, k := range otherKeys {
-							if k == key {
-								d := getASTDepth(otherDoc.Tree, nodeID)
+				if nodeID, exists := otherDoc.ExportedGlobals[key]; exists {
+					d := getASTDepth(otherDoc.Tree, nodeID)
 
-								isStd := strings.HasPrefix(otherURI, "std://")
-								bestIsStd := strings.HasPrefix(bestSym.URI, "std://")
+					isStd := strings.HasPrefix(otherURI, "std://")
+					bestIsStd := strings.HasPrefix(bestSym.URI, "std://")
 
-								var take bool
+					var take bool
 
-								if !found {
-									take = true
-								} else if d < bestSym.Depth {
-									take = true
-								} else if d == bestSym.Depth {
-									if isStd && !bestIsStd {
-										take = true
-									} else if isStd == bestIsStd {
-										if otherURI > bestSym.URI || (otherURI == bestSym.URI && nodeID > bestSym.NodeID) {
-											take = true
-										}
-									}
-								}
-
-								if take {
-									bestSym = GlobalSymbol{
-										URI:    otherURI,
-										NodeID: nodeID,
-										Depth:  d,
-										Name:   sym.Name,
-									}
-
-									found = true
-								}
+					if !found {
+						take = true
+					} else if d < bestSym.Depth {
+						take = true
+					} else if d == bestSym.Depth {
+						if isStd && !bestIsStd {
+							take = true
+						} else if isStd == bestIsStd {
+							if otherURI > bestSym.URI || (otherURI == bestSym.URI && nodeID > bestSym.NodeID) {
+								take = true
 							}
 						}
 					}
-				}
 
-				if found {
-					s.GlobalIndex[key] = bestSym
+					if take {
+						bestSym = GlobalSymbol{
+							URI:    otherURI,
+							NodeID: nodeID,
+							Depth:  d,
+							Name:   sym.Name,
+						}
+						found = true
+					}
 				}
+			}
+
+			if found {
+				s.GlobalIndex[key] = bestSym
 			}
 		}
 	}

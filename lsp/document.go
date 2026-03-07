@@ -12,13 +12,14 @@ import (
 )
 
 type Document struct {
-	Server          *Server
-	URI             string
-	Source          []byte
-	Tree            *ast.Tree
-	Resolver        *semantic.Resolver
-	Errors          []parser.ParseError
-	ExportedGlobals map[ast.NodeID][]GlobalKey
+	Server             *Server
+	URI                string
+	Source             []byte
+	Tree               *ast.Tree
+	Resolver           *semantic.Resolver
+	Errors             []parser.ParseError
+	ExportedGlobals    map[GlobalKey]ast.NodeID
+	ExportedGlobalDefs map[ast.NodeID]GlobalKey
 
 	TypeCache []TypeSet
 	Inferring []bool

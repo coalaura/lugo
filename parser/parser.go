@@ -66,6 +66,7 @@ type Parser struct {
 	lex       *lexer.Lexer
 	tree      *ast.Tree
 	Errors    []ParseError
+	MaxErrors int
 	prev      token.Token
 	curr      token.Token
 	peek      token.Token
@@ -74,10 +75,11 @@ type Parser struct {
 	listStack []ast.NodeID
 }
 
-func New(source []byte, tree *ast.Tree) *Parser {
+func New(source []byte, tree *ast.Tree, maxErrors int) *Parser {
 	p := &Parser{
 		lex:       lexer.New(source),
 		tree:      tree,
+		MaxErrors: maxErrors,
 		listStack: make([]ast.NodeID, 0, 256),
 	}
 
@@ -138,10 +140,18 @@ func (p *Parser) isAt(kinds ...token.Kind) bool {
 }
 
 func (p *Parser) error(msg string) {
+	if p.MaxErrors > 0 && len(p.Errors) >= p.MaxErrors {
+		return
+	}
+
 	p.Errors = append(p.Errors, ParseError{Message: msg, Start: p.curr.Start, End: p.curr.End})
 }
 
 func (p *Parser) errorAt(start, end uint32, msg string) {
+	if p.MaxErrors > 0 && len(p.Errors) >= p.MaxErrors {
+		return
+	}
+
 	p.Errors = append(p.Errors, ParseError{Message: msg, Start: start, End: end})
 }
 
@@ -1119,8 +1129,14 @@ func (p *Parser) parseTableConstructor() ast.NodeID {
 
 		if p.curr.Kind == token.Comma || p.curr.Kind == token.Semicolon {
 			p.nextToken()
-		} else {
+		} else if p.curr.Kind == token.RBrace || p.curr.Kind == token.EOF {
 			break
+		} else {
+			p.error("expected ',' or ';' in table")
+
+			if field == ast.InvalidNode {
+				p.nextToken()
+			}
 		}
 	}
 
