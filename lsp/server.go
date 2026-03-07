@@ -3179,37 +3179,35 @@ func (s *Server) isSideEffectFree(doc *Document, id ast.NodeID) bool {
 
 		return true
 	case ast.KindCallExpr, ast.KindMethodCall:
-		var name string
+		var nameBytes []byte
 
 		if node.Kind == ast.KindMethodCall {
 			nameNode := doc.Tree.Nodes[node.Right]
-			name = string(doc.Source[nameNode.Start:nameNode.End])
+			nameBytes = doc.Source[nameNode.Start:nameNode.End]
 		} else {
 			leftNode := doc.Tree.Nodes[node.Left]
 
 			switch leftNode.Kind {
 			case ast.KindIdent:
-				name = string(doc.Source[leftNode.Start:leftNode.End])
+				nameBytes = doc.Source[leftNode.Start:leftNode.End]
 			case ast.KindMemberExpr:
 				rightNode := doc.Tree.Nodes[leftNode.Right]
-				name = string(doc.Source[rightNode.Start:rightNode.End])
+				nameBytes = doc.Source[rightNode.Start:rightNode.End]
 			}
 		}
 
-		if name != "" {
-			lowerName := strings.ToLower(name)
-
-			if strings.HasPrefix(lowerName, "get") ||
-				strings.HasPrefix(lowerName, "is") ||
-				strings.HasPrefix(lowerName, "has") ||
-				strings.HasPrefix(lowerName, "can") ||
-				strings.HasPrefix(lowerName, "unpack") ||
-				strings.HasPrefix(lowerName, "math.") ||
-				strings.HasPrefix(lowerName, "type") ||
-				strings.HasPrefix(lowerName, "tostring") ||
-				strings.HasPrefix(lowerName, "tonumber") ||
-				strings.HasPrefix(lowerName, "pairs") ||
-				strings.HasPrefix(lowerName, "ipairs") {
+		if len(nameBytes) > 0 {
+			if hasPrefixFold(nameBytes, []byte("get")) ||
+				hasPrefixFold(nameBytes, []byte("is")) ||
+				hasPrefixFold(nameBytes, []byte("has")) ||
+				hasPrefixFold(nameBytes, []byte("can")) ||
+				hasPrefixFold(nameBytes, []byte("unpack")) ||
+				hasPrefixFold(nameBytes, []byte("math.")) ||
+				hasPrefixFold(nameBytes, []byte("type")) ||
+				hasPrefixFold(nameBytes, []byte("tostring")) ||
+				hasPrefixFold(nameBytes, []byte("tonumber")) ||
+				hasPrefixFold(nameBytes, []byte("pairs")) ||
+				hasPrefixFold(nameBytes, []byte("ipairs")) {
 
 				// Check args
 				for i := uint16(0); i < node.Count; i++ {
@@ -3336,6 +3334,16 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 				walk(fullPath)
 			} else if strings.HasSuffix(name, ".lua") {
 				uri := s.pathToURI(fullPath)
+
+				if s.OpenFiles[uri] {
+					if s.activeURIs != nil {
+						s.activeURIs[uri] = true
+					}
+
+					*unchanged++
+
+					continue
+				}
 
 				b, fsErr := os.ReadFile(fullPath)
 				if fsErr == nil {
@@ -5138,4 +5146,25 @@ func levenshteinFast(s, t string, maxDist int) int {
 	}
 
 	return p0[ls]
+}
+
+// hasPrefixFold does a zero-allocation, case-insensitive prefix check.
+func hasPrefixFold(b, prefix []byte) bool {
+	if len(b) < len(prefix) {
+		return false
+	}
+
+	for i, pb := range prefix {
+		cb := b[i]
+
+		if cb >= 'A' && cb <= 'Z' {
+			cb += 32 // fast to-lower
+		}
+
+		if cb != pb {
+			return false
+		}
+	}
+
+	return true
 }

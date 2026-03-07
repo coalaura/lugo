@@ -416,7 +416,6 @@ func (r *Resolver) visit(id ast.NodeID) {
 		}
 	case ast.KindMethodName:
 		r.visit(node.Left)
-		r.visitArgs(node.Extra, node.Count)
 	case ast.KindCallExpr:
 		r.visit(node.Left)
 		r.visitArgs(node.Extra, node.Count)

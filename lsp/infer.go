@@ -367,16 +367,22 @@ func (doc *Document) inferLoopVariable(defID, nameListID ast.NodeID, nameList as
 		case 0:
 			return TypeSet{Basics: TypeNumber}
 		case 1:
-			argID := doc.Tree.ExtraList[firstExpr.Extra]
-			return doc.extractArrayElementType(doc.InferType(argID))
+			if firstExpr.Count > 0 {
+				argID := doc.Tree.ExtraList[firstExpr.Extra]
+
+				return doc.extractArrayElementType(doc.InferType(argID))
+			}
 		}
 	} else if bytes.Equal(funcName, []byte("pairs")) {
 		switch idx {
 		case 0:
 			return TypeSet{Basics: TypeAny}
 		case 1:
-			argID := doc.Tree.ExtraList[firstExpr.Extra]
-			return doc.extractArrayElementType(doc.InferType(argID))
+			if firstExpr.Count > 0 {
+				argID := doc.Tree.ExtraList[firstExpr.Extra]
+
+				return doc.extractArrayElementType(doc.InferType(argID))
+			}
 		}
 	}
 
