@@ -202,6 +202,13 @@
                         "scope": "resource",
                         "markdownDescription": "Enable CodeLens annotations (e.g., reference counts) above function definitions.",
                         "order": 19
+                    },
+                    "lugo.features.formatting": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable the built-in Lua formatter for inline format fixing and document formatting.",
+                        "order": 20
                     }
                 }
             }

@@ -170,6 +170,7 @@ async function startClient(context) {
 			featureDocHighlight: config.get("features.documentHighlight") !== false,
 			featureHoverEval: config.get("features.hoverEvaluation") !== false,
 			featureCodeLens: config.get("features.codeLens") !== false,
+			featureFormatting: config.get("features.formatting") !== false,
 		},
 	};
 

@@ -148,6 +148,7 @@ type Server struct {
 	FeatureDocHighlight  bool
 	FeatureHoverEval     bool
 	FeatureCodeLens      bool
+	FeatureFormatting    bool
 }
 
 func NewServer(version string) *Server {
@@ -286,6 +287,7 @@ func (s *Server) handleMessage(req Request) {
 			s.FeatureDocHighlight = params.InitializationOptions.FeatureDocHighlight
 			s.FeatureHoverEval = params.InitializationOptions.FeatureHoverEval
 			s.FeatureCodeLens = params.InitializationOptions.FeatureCodeLens
+			s.FeatureFormatting = params.InitializationOptions.FeatureFormatting
 		}
 
 		var codeLensOptions *CodeLensOptions
@@ -304,15 +306,16 @@ func (s *Server) handleMessage(req Request) {
 				RenameProvider: map[string]bool{
 					"prepareProvider": true,
 				},
-				ReferencesProvider:        true,
-				DocumentSymbolProvider:    true,
-				WorkspaceSymbolProvider:   true,
-				InlayHintProvider:         s.InlayParamHints,
-				CodeActionProvider:        true,
-				FoldingRangeProvider:      true,
-				CallHierarchyProvider:     true,
-				DocumentHighlightProvider: s.FeatureDocHighlight,
-				CodeLensProvider:          codeLensOptions,
+				ReferencesProvider:         true,
+				DocumentSymbolProvider:     true,
+				WorkspaceSymbolProvider:    true,
+				InlayHintProvider:          s.InlayParamHints,
+				CodeActionProvider:         true,
+				FoldingRangeProvider:       true,
+				CallHierarchyProvider:      true,
+				DocumentHighlightProvider:  s.FeatureDocHighlight,
+				DocumentFormattingProvider: s.FeatureFormatting,
+				CodeLensProvider:           codeLensOptions,
 				SignatureHelpProvider: &SignatureHelpOptions{
 					TriggerCharacters: []string{"(", ","},
 				},
@@ -2779,6 +2782,56 @@ func (s *Server) handleMessage(req Request) {
 			Result: SemanticTokens{
 				Data: s.semDataBuf,
 			},
+		})
+	case "textDocument/formatting":
+		if !s.FeatureFormatting {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		var params DocumentFormattingParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		// Initialize formatter using the editor's tab/space preferences
+		formatter := NewFormatter(params.Options.TabSize, !params.Options.InsertSpaces)
+		formatted := formatter.Format(doc.Source)
+
+		if bytes.Equal(doc.Source, formatted) {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		endLine, endCol := doc.Tree.Position(uint32(len(doc.Source)))
+
+		changes := []TextEdit{
+			{
+				Range: Range{
+					Start: Position{Line: 0, Character: 0},
+					End:   Position{Line: endLine, Character: endCol},
+				},
+				NewText: string(formatted),
+			},
+		}
+
+		WriteMessage(s.Writer, Response{
+			RPC:    "2.0",
+			ID:     req.ID,
+			Result: changes,
 		})
 	}
 }

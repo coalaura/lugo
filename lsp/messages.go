@@ -51,6 +51,7 @@ type InitializationOptions struct {
 	FeatureDocHighlight bool `json:"featureDocHighlight"`
 	FeatureHoverEval    bool `json:"featureHoverEval"`
 	FeatureCodeLens     bool `json:"featureCodeLens"`
+	FeatureFormatting   bool `json:"featureFormatting"`
 }
 
 type InitializeResult struct {
@@ -71,6 +72,7 @@ type ServerCapabilities struct {
 	LinkedEditingRangeProvider bool                   `json:"linkedEditingRangeProvider"`
 	CallHierarchyProvider      bool                   `json:"callHierarchyProvider"`
 	DocumentHighlightProvider  bool                   `json:"documentHighlightProvider,omitempty"`
+	DocumentFormattingProvider bool                   `json:"documentFormattingProvider,omitempty"`
 	CodeLensProvider           *CodeLensOptions       `json:"codeLensProvider,omitempty"`
 	SignatureHelpProvider      *SignatureHelpOptions  `json:"signatureHelpProvider,omitempty"`
 	CompletionProvider         *CompletionOptions     `json:"completionProvider,omitempty"`
@@ -513,4 +515,14 @@ type DidChangeWatchedFilesParams struct {
 type FileEvent struct {
 	URI  string `json:"uri"`
 	Type int    `json:"type"`
+}
+
+type DocumentFormattingParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Options      FormattingOptions      `json:"options"`
+}
+
+type FormattingOptions struct {
+	TabSize      int  `json:"tabSize"`
+	InsertSpaces bool `json:"insertSpaces"`
 }
