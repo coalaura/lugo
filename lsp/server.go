@@ -1264,7 +1264,7 @@ func (s *Server) handleMessage(req Request) {
 		items := make([]CompletionItem, 0, 64)
 		seen := make(map[string]bool)
 
-		addCompletion := func(label string, kind CompletionItemKind, detail string, isDep bool) {
+		addCompletion := func(label string, kind CompletionItemKind, detail string, isDep bool, sortText string) {
 			if seen[label] {
 				return
 			}
@@ -1278,10 +1278,11 @@ func (s *Server) handleMessage(req Request) {
 			}
 
 			items = append(items, CompletionItem{
-				Label:  label,
-				Kind:   kind,
-				Detail: detail,
-				Tags:   tags,
+				Label:    label,
+				Kind:     kind,
+				Detail:   detail,
+				SortText: sortText,
+				Tags:     tags,
 			})
 		}
 
@@ -1380,7 +1381,7 @@ func (s *Server) handleMessage(req Request) {
 
 					isDep, _ := doc.HasDeprecatedTag(fd.NodeID)
 
-					addCompletion(ast.String(doc.Source[node.Start:node.End]), kind, "field", isDep)
+					addCompletion(ast.String(doc.Source[node.Start:node.End]), kind, "field", isDep, "1")
 				}
 			}
 
@@ -1408,7 +1409,12 @@ func (s *Server) handleMessage(req Request) {
 
 						isDep, _ := symDoc.HasDeprecatedTag(sym.NodeID)
 
-						addCompletion(ast.String(symDoc.Source[node.Start:node.End]), kind, "field", isDep)
+						sortGroup := "2"
+						if sym.URI == uri {
+							sortGroup = "1"
+						}
+
+						addCompletion(ast.String(symDoc.Source[node.Start:node.End]), kind, "field", isDep, sortGroup)
 					}
 				}
 			}
@@ -1423,7 +1429,7 @@ func (s *Server) handleMessage(req Request) {
 					kind = FunctionCompletion
 				}
 
-				addCompletion(ast.String(name), kind, "local", isDep)
+				addCompletion(ast.String(name), kind, "local", isDep, "0")
 
 				return true
 			})
@@ -1444,14 +1450,19 @@ func (s *Server) handleMessage(req Request) {
 
 							isDep, _ := symDoc.HasDeprecatedTag(sym.NodeID)
 
-							addCompletion(ast.String(symDoc.Source[node.Start:node.End]), kind, "global", isDep)
+							sortGroup := "2"
+							if sym.URI == uri {
+								sortGroup = "1"
+							}
+
+							addCompletion(ast.String(symDoc.Source[node.Start:node.End]), kind, "global", isDep, sortGroup)
 						}
 					}
 				}
 			}
 
 			for _, kw := range luaKeywords {
-				addCompletion(kw, KeywordCompletion, "keyword", false)
+				addCompletion(kw, KeywordCompletion, "keyword", false, "3")
 			}
 		}
 

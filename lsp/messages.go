@@ -222,6 +222,7 @@ type CompletionItem struct {
 	Kind          CompletionItemKind  `json:"kind"`
 	Detail        string              `json:"detail,omitempty"`
 	Documentation *MarkupContent      `json:"documentation,omitempty"`
+	SortText      string              `json:"sortText,omitempty"`
 	Tags          []CompletionItemTag `json:"tags,omitempty"`
 }
 
