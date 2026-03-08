@@ -209,6 +209,13 @@
                         "scope": "resource",
                         "markdownDescription": "Enable the built-in Lua formatter for inline format fixing and document formatting.",
                         "order": 20
+                    },
+                    "lugo.features.formatOpinionated": {
+                        "type": "boolean",
+                        "default": false,
+                        "scope": "resource",
+                        "markdownDescription": "Apply opinionated formatting tweaks (e.g., forcing blank lines between unrelated statements, before returns).",
+                        "order": 21
                     }
                 }
             }

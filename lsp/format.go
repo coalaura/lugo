@@ -8,15 +8,9 @@ import (
 )
 
 type Formatter struct {
-	IndentSize int
-	UseTabs    bool
-}
-
-func NewFormatter(indentSize int, useTabs bool) *Formatter {
-	return &Formatter{
-		IndentSize: indentSize,
-		UseTabs:    useTabs,
-	}
+	IndentSize  int
+	UseTabs     bool
+	Opinionated bool
 }
 
 const (
@@ -34,9 +28,29 @@ type Scope struct {
 	LineIdx     int
 }
 
+type StmtKind int
+
+const (
+	StmtUnknown StmtKind = iota
+	StmtLocal
+	StmtAssign
+	StmtCall
+	StmtControl
+	StmtFunction
+	StmtReturn
+)
+
+func NewFormatter(indentSize int, useTabs bool, opinionated bool) *Formatter {
+	return &Formatter{
+		IndentSize:  indentSize,
+		UseTabs:     useTabs,
+		Opinionated: opinionated,
+	}
+}
+
 // Format iterates over the source's token stream and elegantly fixes whitespace.
-// It keeps existing vertical line breaks (up to 2), correctly processes minified statements,
-// and strictly enforces Lua indentation rules.
+// It enforces blank lines between unrelated statements, strips trailing semicolons safely,
+// expands minified code, and strictly enforces Lua indentation rules.
 func (f *Formatter) Format(source []byte) []byte {
 	lex := lexer.New(source)
 
@@ -56,11 +70,14 @@ func (f *Formatter) Format(source []byte) []byte {
 	out.Grow(len(source) + len(source)/10)
 
 	var (
-		stack       []Scope
-		isLineStart = true
-		prevTok     token.Token
-		prevPrev    token.Kind
-		lineIdx     int
+		stack             []Scope
+		isLineStart       = true
+		prevTok           token.Token
+		prevNonCommentTok token.Token
+		prevNonCommentIdx int = -1
+		prevPrev          token.Kind
+		lineIdx           int
+		lastStmtKind      StmtKind
 	)
 
 	for i, tok := range tokens {
@@ -77,7 +94,68 @@ func (f *Formatter) Format(source []byte) []byte {
 		var forceNl bool
 
 		if nl == 0 && prevTok.Kind != 0 {
-			forceNl = f.needsNewline(prevTok.Kind, tok.Kind, stack)
+			forceNl = f.needsNewline(prevNonCommentTok.Kind, tok.Kind, stack)
+		}
+
+		var skipSemicolon bool
+
+		if f.Opinionated && tok.Kind == token.Semicolon {
+			var nextNonComment *token.Token
+
+			for j := i + 1; j < len(tokens); j++ {
+				if tokens[j].Kind != token.Comment {
+					nextNonComment = &tokens[j]
+
+					break
+				}
+			}
+
+			if nextNonComment == nil {
+				skipSemicolon = true
+			} else {
+				gapAfter := source[tok.End:nextNonComment.Start]
+
+				if bytes.ContainsRune(gapAfter, '\n') || f.needsNewline(tok.Kind, nextNonComment.Kind, stack) {
+					if nextNonComment.Kind != token.LParen && nextNonComment.Kind != token.LBrack {
+						skipSemicolon = true
+					}
+				}
+			}
+		}
+
+		if skipSemicolon {
+			continue
+		}
+
+		isStmtLevel := len(stack) == 0 || stack[len(stack)-1].Kind == ScopeBlock
+
+		if f.Opinionated && isStmtLevel && tok.Kind != token.Comment {
+			if (nl > 0 || forceNl || i == 0) && f.isStatementStart(prevNonCommentTok.Kind) {
+				currStmtKind := f.getStmtKind(tokens, i)
+
+				if currStmtKind != StmtUnknown {
+					if f.wantsBlankLine(lastStmtKind, currStmtKind) {
+						isJustAfterBlockOpener := prevNonCommentTok.Kind == token.Do || prevNonCommentTok.Kind == token.Then || prevNonCommentTok.Kind == token.Repeat || prevNonCommentTok.Kind == token.Else || prevNonCommentTok.Kind == token.ElseIf
+
+						if prevNonCommentTok.Kind == token.RParen && prevNonCommentIdx != -1 {
+							if f.isFunctionSignatureEnd(tokens, prevNonCommentIdx) {
+								isJustAfterBlockOpener = true
+							}
+						}
+
+						isJustBeforeBlockCloser := tok.Kind == token.End || tok.Kind == token.Until || tok.Kind == token.ElseIf || tok.Kind == token.Else
+
+						if !isJustAfterBlockOpener && !isJustBeforeBlockCloser {
+							if nl < 2 {
+								nl = 2
+								forceNl = true
+							}
+						}
+					}
+
+					lastStmtKind = currStmtKind
+				}
+			}
 		}
 
 		if nl > 0 || forceNl {
@@ -168,7 +246,12 @@ func (f *Formatter) Format(source []byte) []byte {
 			pushScope(ScopeBrack, false)
 		}
 
-		prevPrev = prevTok.Kind
+		if tok.Kind != token.Comment {
+			prevPrev = prevNonCommentTok.Kind
+			prevNonCommentTok = tok
+			prevNonCommentIdx = i
+		}
+
 		prevTok = tok
 	}
 
@@ -270,6 +353,132 @@ func (f *Formatter) isComplexTable(tokens []token.Token, startIndex int) bool {
 		case token.Function, token.If, token.For, token.While:
 			if depth == 1 {
 				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (f *Formatter) getStmtKind(tokens []token.Token, startIndex int) StmtKind {
+	tok := tokens[startIndex]
+
+	switch tok.Kind {
+	case token.Local:
+		for j := startIndex + 1; j < len(tokens); j++ {
+			if tokens[j].Kind == token.Comment {
+				continue
+			}
+
+			if tokens[j].Kind == token.Function {
+				return StmtFunction
+			}
+
+			break
+		}
+		return StmtLocal
+	case token.If, token.For, token.While, token.Repeat, token.Break, token.Goto, token.DoubleColon, token.Do:
+		return StmtControl
+	case token.Function:
+		return StmtFunction
+	case token.Return:
+		return StmtReturn
+	case token.Ident, token.LParen:
+		depth := 0
+	Loop:
+		for j := startIndex; j < len(tokens); j++ {
+			t := tokens[j].Kind
+
+			if t == token.LParen || t == token.LBrace || t == token.LBrack {
+				depth++
+			} else if t == token.RParen || t == token.RBrace || t == token.RBrack {
+				depth--
+			} else if depth == 0 {
+				if t == token.Assign || t == token.Comma {
+					return StmtAssign
+				}
+
+				switch t {
+				case token.Do, token.Then, token.Else, token.ElseIf, token.End, token.Until, token.Semicolon, token.If, token.For, token.While, token.Repeat, token.Break, token.Goto, token.DoubleColon, token.Local, token.Return, token.Function:
+					break Loop
+				}
+
+				if j > startIndex {
+					prev := tokens[j-1].Kind
+
+					if f.isExprEnd(prev) && t == token.Ident {
+						break Loop
+					}
+				}
+			}
+		}
+
+		return StmtCall
+	}
+
+	return StmtUnknown
+}
+
+func (f *Formatter) wantsBlankLine(a, b StmtKind) bool {
+	if a == StmtUnknown || b == StmtUnknown {
+		return false
+	}
+
+	// Group locals and assignments together
+	if (a == StmtLocal || a == StmtAssign) && (b == StmtLocal || b == StmtAssign) {
+		return false
+	}
+
+	// Group consecutive function calls together
+	if a == StmtCall && b == StmtCall {
+		return false
+	}
+
+	// Enforce blank lines between completely unrelated statement blocks
+	return true
+}
+
+func (f *Formatter) isStatementStart(prev token.Kind) bool {
+	if prev == 0 || prev == token.Semicolon {
+		return true
+	}
+
+	switch prev {
+	case token.Do, token.Then, token.Else, token.Repeat:
+		return true
+	}
+
+	return f.isExprEnd(prev)
+}
+
+// isFunctionSignatureEnd identifies if an RParen is closing a function parameters list
+func (f *Formatter) isFunctionSignatureEnd(tokens []token.Token, rParenIdx int) bool {
+	var depth int
+
+	for i := rParenIdx; i >= 0; i-- {
+		k := tokens[i].Kind
+
+		if k == token.RParen {
+			depth++
+		} else if k == token.LParen {
+			depth--
+			if depth == 0 {
+				for j := i - 1; j >= 0; j-- {
+					k2 := tokens[j].Kind
+					if k2 == token.Comment {
+						continue
+					}
+
+					if k2 == token.Function {
+						return true
+					}
+
+					if k2 == token.Ident || k2 == token.Dot || k2 == token.Colon {
+						continue
+					}
+
+					return false
+				}
 			}
 		}
 	}

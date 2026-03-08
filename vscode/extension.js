@@ -171,6 +171,7 @@ async function startClient(context) {
 			featureHoverEval: config.get("features.hoverEvaluation") !== false,
 			featureCodeLens: config.get("features.codeLens") !== false,
 			featureFormatting: config.get("features.formatting") !== false,
+			formatOpinionated: config.get("features.formatOpinionated") === true,
 		},
 	};
 

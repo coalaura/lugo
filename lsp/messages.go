@@ -52,6 +52,7 @@ type InitializationOptions struct {
 	FeatureHoverEval    bool `json:"featureHoverEval"`
 	FeatureCodeLens     bool `json:"featureCodeLens"`
 	FeatureFormatting   bool `json:"featureFormatting"`
+	FormatOpinionated   bool `json:"formatOpinionated"`
 }
 
 type InitializeResult struct {

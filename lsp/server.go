@@ -149,6 +149,7 @@ type Server struct {
 	FeatureHoverEval     bool
 	FeatureCodeLens      bool
 	FeatureFormatting    bool
+	FormatOpinionated    bool
 }
 
 func NewServer(version string) *Server {
@@ -288,6 +289,7 @@ func (s *Server) handleMessage(req Request) {
 			s.FeatureHoverEval = params.InitializationOptions.FeatureHoverEval
 			s.FeatureCodeLens = params.InitializationOptions.FeatureCodeLens
 			s.FeatureFormatting = params.InitializationOptions.FeatureFormatting
+			s.FormatOpinionated = params.InitializationOptions.FormatOpinionated
 		}
 
 		var codeLensOptions *CodeLensOptions
@@ -2806,8 +2808,7 @@ func (s *Server) handleMessage(req Request) {
 			return
 		}
 
-		// Initialize formatter using the editor's tab/space preferences
-		formatter := NewFormatter(params.Options.TabSize, !params.Options.InsertSpaces)
+		formatter := NewFormatter(params.Options.TabSize, !params.Options.InsertSpaces, s.FormatOpinionated)
 		formatted := formatter.Format(doc.Source)
 
 		if bytes.Equal(doc.Source, formatted) {
