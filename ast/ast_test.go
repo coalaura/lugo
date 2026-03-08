@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/coalaura/lugo/ast"
+	"github.com/coalaura/lugo/parser"
 )
 
 func TestTree_PositionAndOffset(t *testing.T) {
@@ -46,5 +47,44 @@ func TestTree_PositionAndOffset(t *testing.T) {
 	outOffset := tree.Offset(99, 99)
 	if outOffset != uint32(len(input)) {
 		t.Errorf("Out of bounds Offset should clamp to EOF (%d), got %d", len(input), outOffset)
+	}
+}
+
+func TestTree_NodeAt(t *testing.T) {
+	input := []byte("local a = 1\nprint(a)")
+	tree := ast.NewTree(input)
+	p := parser.New(input, tree, 0)
+	p.Parse()
+
+	// 'a' is at offset 6
+	nodeID := tree.NodeAt(6)
+	if nodeID == ast.InvalidNode {
+		t.Fatalf("Expected valid node at offset 6, got InvalidNode")
+	}
+
+	node := tree.Nodes[nodeID]
+	if node.Kind != ast.KindIdent || string(tree.Source[node.Start:node.End]) != "a" {
+		t.Errorf("Expected identifier 'a', got %v", node.Kind)
+	}
+}
+
+func BenchmarkNodeAt(b *testing.B) {
+	src := []byte(`
+		local function fib(n)
+			if n < 2 then return n end
+			return fib(n-1) + fib(n-2)
+		end
+	`)
+
+	tree := ast.NewTree(src)
+
+	p := parser.New(src, tree, 0)
+	p.Parse()
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		// Search for 'n' in 'n < 2' (offset ~35)
+		tree.NodeAt(35)
 	}
 }

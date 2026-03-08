@@ -11,6 +11,7 @@ import (
 // Helper to find all identifiers matching a specific string in the AST
 func findIdents(tree *ast.Tree, name string) []ast.NodeID {
 	var ids []ast.NodeID
+
 	for i := 1; i < len(tree.Nodes); i++ {
 		if tree.Nodes[i].Kind == ast.KindIdent {
 			text := string(tree.Source[tree.Nodes[i].Start:tree.Nodes[i].End])
@@ -19,6 +20,7 @@ func findIdents(tree *ast.Tree, name string) []ast.NodeID {
 			}
 		}
 	}
+
 	return ids
 }
 
@@ -29,6 +31,7 @@ func TestResolver_LocalScope(t *testing.T) {
 	`)
 
 	tree := ast.NewTree(input)
+
 	p := parser.New(input, tree, 0)
 	root := p.Parse()
 
@@ -62,6 +65,7 @@ func TestResolver_Shadowing(t *testing.T) {
 	`)
 
 	tree := ast.NewTree(input)
+
 	p := parser.New(input, tree, 0)
 	root := p.Parse()
 
@@ -100,6 +104,7 @@ func TestResolver_Globals(t *testing.T) {
 	`)
 
 	tree := ast.NewTree(input)
+
 	p := parser.New(input, tree, 0)
 	root := p.Parse()
 
@@ -115,5 +120,51 @@ func TestResolver_Globals(t *testing.T) {
 		if len(res.GlobalRefs) != 2 {
 			t.Errorf("Expected 2 global references (print, MyGlobal), got %d", len(res.GlobalRefs))
 		}
+	}
+}
+
+func TestResolver_TablesAndMethods(t *testing.T) {
+	input := []byte(`
+		local obj = {}
+		function obj:method()
+			return self
+		end
+	`)
+
+	tree := ast.NewTree(input)
+
+	p := parser.New(input, tree, 0)
+	root := p.Parse()
+
+	res := semantic.New(tree)
+	res.Resolve(root)
+
+	if len(res.FieldDefs) != 1 {
+		t.Errorf("Expected 1 field definition (method), got %d", len(res.FieldDefs))
+	}
+}
+
+func BenchmarkResolver(b *testing.B) {
+	src := []byte(`
+		local a = 1
+		local function add(x, y)
+			local temp = x + y
+			return temp + a
+		end
+		add(10, 20)
+	`)
+
+	tree := ast.NewTree(src)
+
+	p := parser.New(src, tree, 0)
+	root := p.Parse()
+
+	res := semantic.New(tree)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		res.Reset()
+		res.Resolve(root)
 	}
 }

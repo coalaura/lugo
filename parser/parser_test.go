@@ -100,7 +100,9 @@ func TestParser_ValidSyntax(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			src := []byte(tt.input)
+
 			tree := ast.NewTree(src)
+
 			p := parser.New(src, tree, 0)
 
 			rootID := p.Parse()
@@ -123,8 +125,7 @@ func TestParser_ErrorRecovery(t *testing.T) {
 		name           string
 		input          string
 		expectedErrors int
-		// We verify recovery by checking if a specific valid variable name was successfully parsed AFTER the error
-		verifyIdent string
+		verifyIdent    string
 	}{
 		{
 			name: "Missing RHS Assignment",
@@ -160,7 +161,9 @@ func TestParser_ErrorRecovery(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			src := []byte(tt.input)
+
 			tree := ast.NewTree(src)
+
 			p := parser.New(src, tree, 0)
 
 			p.Parse()
@@ -169,13 +172,14 @@ func TestParser_ErrorRecovery(t *testing.T) {
 				t.Fatalf("Expected %d errors, got %d. Errors: %v", tt.expectedErrors, len(p.Errors), p.Errors)
 			}
 
-			// Mathematically prove recovery: Walk the flat AST and find the identifier that occurs AFTER the panic
 			found := false
+
 			for _, node := range tree.Nodes {
 				if node.Kind == ast.KindIdent {
 					name := string(src[node.Start:node.End])
 					if name == tt.verifyIdent {
 						found = true
+
 						break
 					}
 				}
@@ -185,5 +189,27 @@ func TestParser_ErrorRecovery(t *testing.T) {
 				t.Errorf("Parser failed to recover! Could not find the subsequent identifier %q in the AST", tt.verifyIdent)
 			}
 		})
+	}
+}
+
+func BenchmarkParser(b *testing.B) {
+	src := []byte(`
+		local function fib(n)
+			if n < 2 then return n end
+			return fib(n-1) + fib(n-2)
+		end
+		local result = fib(10)
+	`)
+
+	tree := ast.NewTree(src)
+
+	p := parser.New(src, tree, 0)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		tree.Reset(src)
+		p.Reset(src, tree)
+		p.Parse()
 	}
 }

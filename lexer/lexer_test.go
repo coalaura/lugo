@@ -114,3 +114,26 @@ func TestLexer_Comprehensive(t *testing.T) {
 		})
 	}
 }
+
+func BenchmarkLexer(b *testing.B) {
+	src := []byte(`
+		local function factorial(n)
+			if n == 0 then return 1 end
+			return n * factorial(n - 1)
+		end
+		print(factorial(5))
+	`)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		l := lexer.New(src)
+
+		for {
+			tok := l.Next()
+			if tok.Kind == token.EOF {
+				break
+			}
+		}
+	}
+}

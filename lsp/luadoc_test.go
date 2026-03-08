@@ -79,3 +79,30 @@ func TestParseLuaDoc_ComplexTypesAndFields(t *testing.T) {
 		t.Errorf("Class parsed incorrectly: %+v", doc.Class)
 	}
 }
+
+func TestParseLuaDoc_AdvancedTags(t *testing.T) {
+	comments := []byte(`
+@alias ID string | number
+@generic T : Item
+@see other_function
+@type number
+	`)
+
+	doc := parseLuaDoc(comments)
+
+	if doc.Alias == nil || doc.Alias.Name != "ID" || doc.Alias.Type != "string | number" {
+		t.Errorf("Alias parsed incorrectly: %+v", doc.Alias)
+	}
+
+	if len(doc.Generics) != 1 || doc.Generics[0].Name != "T" || doc.Generics[0].Parent != "Item" {
+		t.Errorf("Generic parsed incorrectly: %+v", doc.Generics)
+	}
+
+	if len(doc.See) != 1 || doc.See[0] != "other_function" {
+		t.Errorf("See parsed incorrectly: %v", doc.See)
+	}
+
+	if doc.Type == nil || doc.Type.Type != "number" {
+		t.Errorf("Type parsed incorrectly: %+v", doc.Type)
+	}
+}

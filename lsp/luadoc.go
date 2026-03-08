@@ -81,7 +81,7 @@ type LuaDoc struct {
 func findTypeEnd(s []byte) int {
 	var depth int
 
-	for i := range s {
+	for i := 0; i < len(s); i++ {
 		c := s[i]
 
 		if c == '(' || c == '<' || c == '{' || c == '[' {
@@ -96,6 +96,17 @@ func findTypeEnd(s []byte) int {
 
 			if j >= 0 && (s[j] == ':' || s[j] == ',' || s[j] == '|') {
 				continue // Type is still going (e.g., 'fun(): boolean' or 'string | number')
+			}
+
+			var k int
+
+			for k = i + 1; k < len(s) && (s[k] == ' ' || s[k] == '\t'); k++ {
+			}
+
+			if k < len(s) && (s[k] == '|' || s[k] == ',') {
+				i = k - 1
+
+				continue
 			}
 
 			return i
