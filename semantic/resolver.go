@@ -183,7 +183,7 @@ func (r *Resolver) declare(identID ast.NodeID) {
 
 func (r *Resolver) defineField(memberNodeID ast.NodeID) {
 	node := r.Tree.Nodes[memberNodeID]
-	if node.Right == ast.InvalidNode || r.Tree.Nodes[node.Right].Kind != ast.KindIdent {
+	if node.Right == ast.InvalidNode || r.Tree.Nodes[node.Right].Kind != ast.KindIdent || r.Tree.Nodes[node.Right].Start == r.Tree.Nodes[node.Right].End {
 		return
 	}
 
@@ -224,6 +224,10 @@ func (r *Resolver) resolveReference(identID ast.NodeID, isDef bool) {
 	}
 
 	targetNode := r.Tree.Nodes[identID]
+	if targetNode.Start == targetNode.End {
+		return
+	}
+
 	targetSrc := r.Tree.Source[targetNode.Start:targetNode.End]
 
 	for i := len(r.scopeStack) - 1; i >= 0; i-- {
@@ -455,7 +459,7 @@ func (r *Resolver) visit(id ast.NodeID) {
 	case ast.KindMemberExpr, ast.KindMethodCall:
 		r.visit(node.Left)
 
-		if node.Right != ast.InvalidNode && r.Tree.Nodes[node.Right].Kind == ast.KindIdent {
+		if node.Right != ast.InvalidNode && r.Tree.Nodes[node.Right].Kind == ast.KindIdent && r.Tree.Nodes[node.Right].Start < r.Tree.Nodes[node.Right].End {
 			recDef, recHash, recName := r.GetReceiverContext(node.Left)
 
 			if len(recName) > 0 {
@@ -494,7 +498,7 @@ func (r *Resolver) visit(id ast.NodeID) {
 
 			switch fieldNode.Kind {
 			case ast.KindRecordField:
-				if len(recBytes) > 0 && r.Tree.Nodes[fieldNode.Left].Kind == ast.KindIdent {
+				if len(recBytes) > 0 && r.Tree.Nodes[fieldNode.Left].Kind == ast.KindIdent && r.Tree.Nodes[fieldNode.Left].Start < r.Tree.Nodes[fieldNode.Left].End {
 					propHash := ast.HashBytes(r.source(fieldNode.Left))
 
 					r.FieldDefs = append(r.FieldDefs, FieldDef{

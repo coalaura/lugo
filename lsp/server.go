@@ -1285,7 +1285,7 @@ func (s *Server) handleMessage(req Request) {
 		seen := make(map[string]bool)
 
 		addCompletion := func(label string, kind CompletionItemKind, detail string, isDep bool, sortText string) {
-			if seen[label] {
+			if label == "" || seen[label] {
 				return
 			}
 
@@ -1527,6 +1527,9 @@ func (s *Server) handleMessage(req Request) {
 					valNode := doc.Tree.Nodes[fieldNode.Right]
 
 					name := ast.String(doc.Source[keyNode.Start:keyNode.End])
+					if name == "" {
+						name = "<error>"
+					}
 
 					kind := SymbolKindField
 
@@ -1574,7 +1577,11 @@ func (s *Server) handleMessage(req Request) {
 				}
 			case ast.KindLocalFunction, ast.KindFunctionStmt:
 				nameNode := doc.Tree.Nodes[node.Left]
+
 				name := ast.String(doc.Source[nameNode.Start:nameNode.End])
+				if name == "" {
+					name = "<error>"
+				}
 
 				kind := SymbolKindFunction
 
@@ -1610,6 +1617,9 @@ func (s *Server) handleMessage(req Request) {
 						}
 
 						name := ast.String(doc.Source[lNode.Start:lNode.End])
+						if name == "" {
+							name = "<error>"
+						}
 
 						if rNode.Kind == ast.KindFunctionExpr {
 							syms = append(syms, DocumentSymbol{
@@ -3594,6 +3604,10 @@ func (s *Server) updateDocument(uri string, source []byte) {
 
 	for _, defID := range res.GlobalDefs {
 		node := tree.Nodes[defID]
+		if node.Start == node.End {
+			continue
+		}
+
 		identBytes := tree.Source[node.Start:node.End]
 		hash := ast.HashBytes(identBytes)
 
@@ -3872,6 +3886,10 @@ func (s *Server) publishDiagnostics(uri string) {
 
 		for _, defID := range doc.Resolver.LocalDefs {
 			node := doc.Tree.Nodes[defID]
+			if node.Start == node.End {
+				continue
+			}
+
 			nameBytes := doc.Source[node.Start:node.End]
 
 			if len(nameBytes) > 0 && nameBytes[0] == '_' {
@@ -4398,7 +4416,11 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 	identNode := doc.Tree.Nodes[nodeID]
 	identBytes := doc.Source[identNode.Start:identNode.End]
 	identName := ast.String(identBytes)
+
 	displayName := identName
+	if displayName == "" {
+		displayName = "<error>"
+	}
 
 	defID := doc.Resolver.References[nodeID]
 	parentID := identNode.Parent
@@ -4943,7 +4965,12 @@ func (s *Server) buildCallHierarchyItemFromDef(uri string, doc *Document, defID 
 	isFunc := valID != ast.InvalidNode && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr
 
 	node := doc.Tree.Nodes[defID]
+
 	name := ast.String(doc.Source[node.Start:node.End])
+	if name == "" {
+		name = "<error>"
+	}
+
 	kind := SymbolKindVariable
 
 	if isFunc {
