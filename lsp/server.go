@@ -132,24 +132,33 @@ type Server struct {
 	sharedParser *parser.Parser
 	diagBuf      []Diagnostic
 
-	DiagUndefinedGlobals bool
-	DiagImplicitGlobals  bool
-	DiagUnusedLocal      bool
-	DiagUnusedFunction   bool
-	DiagUnusedParameter  bool
-	DiagUnusedLoopVar    bool
-	DiagShadowing        bool
-	DiagUnreachableCode  bool
-	DiagAmbiguousReturns bool
-	DiagDeprecated       bool
-	MaxParseErrors       int
-	InlayParamHints      bool
-	InlaySuppressMatch   bool
-	FeatureDocHighlight  bool
-	FeatureHoverEval     bool
-	FeatureCodeLens      bool
-	FeatureFormatting    bool
-	FormatOpinionated    bool
+	DiagUndefinedGlobals     bool
+	DiagImplicitGlobals      bool
+	DiagUnusedLocal          bool
+	DiagUnusedFunction       bool
+	DiagUnusedParameter      bool
+	DiagUnusedLoopVar        bool
+	DiagShadowing            bool
+	DiagUnreachableCode      bool
+	DiagAmbiguousReturns     bool
+	DiagDeprecated           bool
+	DiagDuplicateField       bool
+	DiagUnbalancedAssignment bool
+	DiagDuplicateLocal       bool
+	DiagSelfAssignment       bool
+	DiagEmptyBlock           bool
+	DiagTypeCheck            bool
+
+	MaxParseErrors int
+
+	InlayParamHints    bool
+	InlaySuppressMatch bool
+
+	FeatureDocHighlight bool
+	FeatureHoverEval    bool
+	FeatureCodeLens     bool
+	FeatureFormatting   bool
+	FormatOpinionated   bool
 }
 
 func NewServer(version string) *Server {
@@ -279,6 +288,12 @@ func (s *Server) handleMessage(req Request) {
 			s.DiagUnreachableCode = params.InitializationOptions.DiagUnreachableCode
 			s.DiagAmbiguousReturns = params.InitializationOptions.DiagAmbiguousReturns
 			s.DiagDeprecated = params.InitializationOptions.DiagDeprecated
+			s.DiagDuplicateField = params.InitializationOptions.DiagDuplicateField
+			s.DiagUnbalancedAssignment = params.InitializationOptions.DiagUnbalancedAssignment
+			s.DiagDuplicateLocal = params.InitializationOptions.DiagDuplicateLocal
+			s.DiagSelfAssignment = params.InitializationOptions.DiagSelfAssignment
+			s.DiagEmptyBlock = params.InitializationOptions.DiagEmptyBlock
+			s.DiagTypeCheck = params.InitializationOptions.DiagTypeCheck
 
 			s.MaxParseErrors = params.InitializationOptions.ParserMaxErrors
 
@@ -2464,6 +2479,51 @@ func (s *Server) handleMessage(req Request) {
 						},
 					},
 				})
+			case "self-assignment":
+				if stmtIDFloat, ok := diag.Data.(float64); ok {
+					stmtID := ast.NodeID(stmtIDFloat)
+					stmtNode := doc.Tree.Nodes[stmtID]
+
+					// Only provide a clean fix if it's a single assignment
+					if doc.Tree.Nodes[stmtNode.Left].Count == 1 {
+						actions = append(actions, CodeAction{
+							Title:       "Remove self-assignment",
+							Kind:        "quickfix",
+							Diagnostics: []Diagnostic{diag},
+							IsPreferred: true,
+							Edit: &WorkspaceEdit{
+								Changes: map[string][]TextEdit{
+									uri: {
+										{
+											Range:   getNodeRange(doc.Tree, stmtID),
+											NewText: "",
+										},
+									},
+								},
+							},
+						})
+					}
+				}
+			case "empty-block":
+				if doStmtIDFloat, ok := diag.Data.(float64); ok {
+					doStmtID := ast.NodeID(doStmtIDFloat)
+					actions = append(actions, CodeAction{
+						Title:       "Remove empty 'do' block",
+						Kind:        "quickfix",
+						Diagnostics: []Diagnostic{diag},
+						IsPreferred: true,
+						Edit: &WorkspaceEdit{
+							Changes: map[string][]TextEdit{
+								uri: {
+									{
+										Range:   getNodeRange(doc.Tree, doStmtID),
+										NewText: "",
+									},
+								},
+							},
+						},
+					})
+				}
 			}
 		}
 
@@ -4125,6 +4185,187 @@ func (s *Server) publishDiagnostics(uri string) {
 					}
 				}
 			}
+		}
+	}
+
+	// 8. Syntax & Correctness Checks
+	for i := 1; i < len(doc.Tree.Nodes); i++ {
+		nodeID := ast.NodeID(i)
+		node := doc.Tree.Nodes[nodeID]
+
+		// Empty block
+		if s.DiagEmptyBlock && node.Kind == ast.KindBlock && node.Count == 0 {
+			if node.Parent != ast.InvalidNode && doc.Tree.Nodes[node.Parent].Kind != ast.KindFile {
+				var data any
+
+				pNode := doc.Tree.Nodes[node.Parent]
+				if pNode.Kind == ast.KindDo {
+					data = float64(node.Parent)
+				}
+
+				s.diagBuf = append(s.diagBuf, Diagnostic{
+					Range:    getNodeRange(doc.Tree, nodeID),
+					Severity: SeverityHint,
+					Code:     "empty-block",
+					Tags:     []DiagnosticTag{Unnecessary},
+					Message:  "This block is empty.",
+					Data:     data,
+				})
+			}
+		}
+
+		// Duplicate table fields
+		if s.DiagDuplicateField && node.Kind == ast.KindTableExpr {
+			seenKeys := make(map[uint64]ast.NodeID)
+
+			for j := uint16(0); j < node.Count; j++ {
+				fieldID := doc.Tree.ExtraList[node.Extra+uint32(j)]
+				fieldNode := doc.Tree.Nodes[fieldID]
+
+				if fieldNode.Kind == ast.KindRecordField {
+					keyNode := doc.Tree.Nodes[fieldNode.Left]
+					if keyNode.Kind == ast.KindIdent {
+						keyBytes := doc.Source[keyNode.Start:keyNode.End]
+						hash := ast.HashBytes(keyBytes)
+
+						if prevID, exists := seenKeys[hash]; exists {
+							s.diagBuf = append(s.diagBuf, Diagnostic{
+								Range:    getNodeRange(doc.Tree, fieldNode.Left),
+								Severity: SeverityWarning,
+								Code:     "duplicate-field",
+								Message:  fmt.Sprintf("Duplicate field '%s' in table.", ast.String(keyBytes)),
+								RelatedInformation: []DiagnosticRelatedInformation{
+									{
+										Location: Location{URI: uri, Range: getNodeRange(doc.Tree, prevID)},
+										Message:  "Previously defined here",
+									},
+								},
+							})
+						} else {
+							seenKeys[hash] = fieldNode.Left
+						}
+					}
+				}
+			}
+		}
+
+		// Unbalanced assignments
+		if s.DiagUnbalancedAssignment && (node.Kind == ast.KindLocalAssign || node.Kind == ast.KindAssign) {
+			lhsList := doc.Tree.Nodes[node.Left]
+			if node.Right != ast.InvalidNode {
+				rhsList := doc.Tree.Nodes[node.Right]
+
+				if lhsList.Count != rhsList.Count && rhsList.Count > 0 {
+					lastRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(rhsList.Count-1)]
+					lastRhsNode := doc.Tree.Nodes[lastRhsID]
+
+					if lastRhsNode.Kind != ast.KindCallExpr && lastRhsNode.Kind != ast.KindMethodCall && lastRhsNode.Kind != ast.KindVararg {
+						msg := "Assigning fewer values than variables; some variables will be initialized to nil."
+
+						if rhsList.Count > lhsList.Count {
+							msg = "Assigning more values than variables; excess values will be discarded."
+						}
+
+						s.diagBuf = append(s.diagBuf, Diagnostic{
+							Range:    getRange(doc.Tree, doc.Tree.Nodes[node.Left].Start, doc.Tree.Nodes[node.Right].End),
+							Severity: SeverityWarning,
+							Code:     "unbalanced-assignment",
+							Message:  msg,
+						})
+					}
+				}
+			}
+		}
+
+		// Self assignment
+		if s.DiagSelfAssignment && node.Kind == ast.KindAssign {
+			lhsList := doc.Tree.Nodes[node.Left]
+			if node.Right != ast.InvalidNode {
+				rhsList := doc.Tree.Nodes[node.Right]
+
+				maxCheck := min(rhsList.Count, lhsList.Count)
+
+				for j := range maxCheck {
+					lID := doc.Tree.ExtraList[lhsList.Extra+uint32(j)]
+					rID := doc.Tree.ExtraList[rhsList.Extra+uint32(j)]
+
+					lSource := doc.Source[doc.Tree.Nodes[lID].Start:doc.Tree.Nodes[lID].End]
+					rSource := doc.Source[doc.Tree.Nodes[rID].Start:doc.Tree.Nodes[rID].End]
+
+					if bytes.Equal(lSource, rSource) {
+						s.diagBuf = append(s.diagBuf, Diagnostic{
+							Range:    getRange(doc.Tree, doc.Tree.Nodes[lID].Start, doc.Tree.Nodes[rID].End),
+							Severity: SeverityWarning,
+							Code:     "self-assignment",
+							Tags:     []DiagnosticTag{Unnecessary},
+							Message:  fmt.Sprintf("Assigning variable '%s' to itself.", ast.String(lSource)),
+							Data:     float64(nodeID),
+						})
+					}
+				}
+			}
+		}
+
+		// Type check: call non-function
+		if s.DiagTypeCheck && (node.Kind == ast.KindCallExpr || node.Kind == ast.KindMethodCall) {
+			var funcID ast.NodeID
+
+			if node.Kind == ast.KindMethodCall {
+				funcID = node.Left
+			} else {
+				funcID = node.Left
+			}
+
+			switch node.Kind {
+			case ast.KindCallExpr:
+				t := doc.InferType(funcID)
+				if t.Basics != TypeUnknown && t.CustomName == "" && t.Basics&(TypeFunction|TypeAny|TypeTable|TypeUserdata) == 0 {
+					s.diagBuf = append(s.diagBuf, Diagnostic{
+						Range:    getNodeRange(doc.Tree, funcID),
+						Severity: SeverityWarning,
+						Code:     "call-non-function",
+						Message:  fmt.Sprintf("Attempt to call a non-function value (inferred type: %s).", t.Format()),
+					})
+				}
+			case ast.KindMethodCall:
+				t := doc.InferType(funcID)
+				if t.Basics != TypeUnknown && t.CustomName == "" && t.Basics&(TypeTable|TypeAny|TypeString|TypeUserdata) == 0 {
+					s.diagBuf = append(s.diagBuf, Diagnostic{
+						Range:    getNodeRange(doc.Tree, funcID),
+						Severity: SeverityWarning,
+						Code:     "index-non-table",
+						Message:  fmt.Sprintf("Attempt to index a non-table value (inferred type: %s).", t.Format()),
+					})
+				}
+			}
+		}
+
+		// Type check: index non-table
+		if s.DiagTypeCheck && (node.Kind == ast.KindMemberExpr || node.Kind == ast.KindIndexExpr) {
+			t := doc.InferType(node.Left)
+			if t.Basics != TypeUnknown && t.CustomName == "" && t.Basics&(TypeTable|TypeAny|TypeString|TypeUserdata) == 0 {
+				s.diagBuf = append(s.diagBuf, Diagnostic{
+					Range:    getNodeRange(doc.Tree, node.Left),
+					Severity: SeverityWarning,
+					Code:     "index-non-table",
+					Message:  fmt.Sprintf("Attempt to index a non-table value (inferred type: %s).", t.Format()),
+				})
+			}
+		}
+	}
+
+	// 9. Duplicate Locals
+	if s.DiagDuplicateLocal {
+		for _, defID := range doc.Resolver.DuplicateLocals {
+			node := doc.Tree.Nodes[defID]
+			nameBytes := doc.Source[node.Start:node.End]
+
+			s.diagBuf = append(s.diagBuf, Diagnostic{
+				Range:    getNodeRange(doc.Tree, defID),
+				Severity: SeverityWarning,
+				Code:     "duplicate-local",
+				Message:  fmt.Sprintf("Local variable '%s' is already defined in the current scope.", ast.String(nameBytes)),
+			})
 		}
 	}
 

@@ -163,6 +163,12 @@ async function startClient(context) {
 			diagUnreachableCode: config.get("diagnostics.unreachableCode") !== false,
 			diagAmbiguousReturns: config.get("diagnostics.ambiguousReturns") !== false,
 			diagDeprecated: config.get("diagnostics.deprecated") !== false,
+			diagDuplicateField: config.get("diagnostics.duplicateField") !== false,
+			diagUnbalancedAssignment: config.get("diagnostics.unbalancedAssignment") !== false,
+			diagDuplicateLocal: config.get("diagnostics.duplicateLocal") !== false,
+			diagSelfAssignment: config.get("diagnostics.selfAssignment") !== false,
+			diagEmptyBlock: config.get("diagnostics.emptyBlock") !== false,
+			diagTypeCheck: config.get("diagnostics.typeCheck") === true,
 
 			inlayParamHints: config.get("inlayHints.parameterNames") !== false,
 			inlaySuppressMatch: config.get("inlayHints.suppressWhenArgumentMatchesName") !== false,

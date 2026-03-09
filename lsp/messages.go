@@ -34,16 +34,22 @@ type InitializationOptions struct {
 
 	ParserMaxErrors int `json:"parserMaxErrors"`
 
-	DiagUndefinedGlobals bool `json:"diagUndefinedGlobals"`
-	DiagImplicitGlobals  bool `json:"diagImplicitGlobals"`
-	DiagUnusedLocal      bool `json:"diagUnusedLocal"`
-	DiagUnusedFunction   bool `json:"diagUnusedFunction"`
-	DiagUnusedParameter  bool `json:"diagUnusedParameter"`
-	DiagUnusedLoopVar    bool `json:"diagUnusedLoopVar"`
-	DiagShadowing        bool `json:"diagShadowing"`
-	DiagUnreachableCode  bool `json:"diagUnreachableCode"`
-	DiagAmbiguousReturns bool `json:"diagAmbiguousReturns"`
-	DiagDeprecated       bool `json:"diagDeprecated"`
+	DiagUndefinedGlobals     bool `json:"diagUndefinedGlobals"`
+	DiagImplicitGlobals      bool `json:"diagImplicitGlobals"`
+	DiagUnusedLocal          bool `json:"diagUnusedLocal"`
+	DiagUnusedFunction       bool `json:"diagUnusedFunction"`
+	DiagUnusedParameter      bool `json:"diagUnusedParameter"`
+	DiagUnusedLoopVar        bool `json:"diagUnusedLoopVar"`
+	DiagShadowing            bool `json:"diagShadowing"`
+	DiagUnreachableCode      bool `json:"diagUnreachableCode"`
+	DiagAmbiguousReturns     bool `json:"diagAmbiguousReturns"`
+	DiagDeprecated           bool `json:"diagDeprecated"`
+	DiagDuplicateField       bool `json:"diagDuplicateField"`
+	DiagUnbalancedAssignment bool `json:"diagUnbalancedAssignment"`
+	DiagDuplicateLocal       bool `json:"diagDuplicateLocal"`
+	DiagSelfAssignment       bool `json:"diagSelfAssignment"`
+	DiagEmptyBlock           bool `json:"diagEmptyBlock"`
+	DiagTypeCheck            bool `json:"diagTypeCheck"`
 
 	InlayParamHints    bool `json:"inlayParamHints"`
 	InlaySuppressMatch bool `json:"inlaySuppressMatch"`

@@ -28,6 +28,7 @@ type TypeSet struct {
 	Basics     BasicType
 	CustomName string
 	DeclNode   ast.NodeID
+	DeclURI    string
 }
 
 func ParseTypeString(tStr string) TypeSet {
@@ -163,9 +164,11 @@ func (doc *Document) InferType(id ast.NodeID) TypeSet {
 	case ast.KindFunctionExpr, ast.KindLocalFunction, ast.KindFunctionStmt:
 		t.Basics = TypeFunction
 		t.DeclNode = id
+		t.DeclURI = doc.URI
 	case ast.KindTableExpr:
 		t.Basics = TypeTable
 		t.DeclNode = id
+		t.DeclURI = doc.URI
 	case ast.KindBinaryExpr:
 		op := node.Extra
 
@@ -181,7 +184,11 @@ func (doc *Document) InferType(id ast.NodeID) TypeSet {
 				t.CustomName = tRight.CustomName
 				t.Basics = tRight.Basics
 			} else {
-				t.Basics = TypeNumber
+				if tLeft.Basics == TypeUnknown || tRight.Basics == TypeUnknown || tLeft.Basics&TypeAny != 0 || tRight.Basics&TypeAny != 0 {
+					t.Basics = TypeAny
+				} else {
+					t.Basics = TypeNumber
+				}
 			}
 		case token.Concat:
 			t.Basics = TypeString
@@ -192,6 +199,14 @@ func (doc *Document) InferType(id ast.NodeID) TypeSet {
 			tRight := doc.InferType(node.Right)
 
 			t.Basics = tLeft.Basics | tRight.Basics
+
+			if tLeft.Basics == TypeUnknown && tLeft.CustomName == "" {
+				t.Basics |= TypeAny
+			}
+
+			if tRight.Basics == TypeUnknown && tRight.CustomName == "" {
+				t.Basics |= TypeAny
+			}
 
 			if t.CustomName == "" {
 				t.CustomName = tLeft.CustomName
@@ -234,6 +249,10 @@ func (doc *Document) inferIdent(id ast.NodeID) TypeSet {
 		targetDef ast.NodeID = doc.Resolver.References[id]
 	)
 
+	localDefID := targetDef
+	identName := doc.Source[doc.Tree.Nodes[id].Start:doc.Tree.Nodes[id].End]
+	identHash := ast.HashBytes(identName)
+
 	if doc.Server != nil {
 		ctx := doc.Server.resolveSymbolNode(doc.URI, doc, id)
 		if ctx != nil && ctx.TargetDoc != nil && ctx.TargetDefID != ast.InvalidNode {
@@ -247,38 +266,76 @@ func (doc *Document) inferIdent(id ast.NodeID) TypeSet {
 	}
 
 	luadoc := parseLuaDoc(targetDoc.getCommentsAbove(targetDef))
+
+	var t TypeSet
+
 	if luadoc.Type != nil {
-		return ParseTypeString(luadoc.Type.Type)
+		t = ParseTypeString(luadoc.Type.Type)
+	} else if luadoc.Class != nil {
+		t = TypeSet{CustomName: luadoc.Class.Name}
+	} else {
+		valID := targetDoc.getAssignedValue(targetDef)
+		if valID != ast.InvalidNode {
+			t = targetDoc.InferType(valID)
+		} else if targetDoc.Tree.Nodes[targetDef].Kind == ast.KindIdent {
+			pID := targetDoc.Tree.Nodes[targetDef].Parent
+			if pID != ast.InvalidNode {
+				pNode := targetDoc.Tree.Nodes[pID]
+
+				switch pNode.Kind {
+				case ast.KindFunctionExpr:
+					t = targetDoc.inferFunctionParameter(targetDef, pID)
+				case ast.KindNameList:
+					t = targetDoc.inferLoopVariable(targetDef, pID, pNode)
+				}
+			}
+		}
 	}
 
-	if luadoc.Class != nil {
-		return TypeSet{CustomName: luadoc.Class.Name}
+	checkReassignments := func(d *Document) {
+		for _, reassignment := range d.Resolver.Reassignments {
+			var match bool
+
+			if reassignment.DefID != ast.InvalidNode {
+				if d == targetDoc && reassignment.DefID == targetDef {
+					match = true
+				} else if d == doc && reassignment.DefID == localDefID {
+					match = true
+				}
+			} else {
+				if reassignment.NameHash == identHash {
+					match = true
+				}
+			}
+
+			if match {
+				rt := d.InferType(reassignment.ValID)
+
+				if rt.Basics == TypeUnknown && rt.CustomName == "" {
+					t.Basics |= TypeAny
+				} else {
+					t.Basics |= rt.Basics
+
+					if t.CustomName == "" {
+						t.CustomName = rt.CustomName
+					}
+
+					if t.DeclNode == ast.InvalidNode && rt.DeclNode != ast.InvalidNode {
+						t.DeclNode = rt.DeclNode
+						t.DeclURI = rt.DeclURI
+					}
+				}
+			}
+		}
 	}
 
-	valID := targetDoc.getAssignedValue(targetDef)
-	if valID != ast.InvalidNode {
-		return targetDoc.InferType(valID)
+	checkReassignments(doc)
+
+	if targetDoc != doc {
+		checkReassignments(targetDoc)
 	}
 
-	if targetDoc.Tree.Nodes[targetDef].Kind != ast.KindIdent {
-		return TypeSet{}
-	}
-
-	pID := targetDoc.Tree.Nodes[targetDef].Parent
-	if pID == ast.InvalidNode {
-		return TypeSet{}
-	}
-
-	pNode := targetDoc.Tree.Nodes[pID]
-
-	switch pNode.Kind {
-	case ast.KindFunctionExpr:
-		return targetDoc.inferFunctionParameter(targetDef, pID)
-	case ast.KindNameList:
-		return targetDoc.inferLoopVariable(targetDef, pID, pNode)
-	}
-
-	return TypeSet{}
+	return t
 }
 
 func (doc *Document) inferFunctionParameter(defID, funcExprID ast.NodeID) TypeSet {
@@ -392,13 +449,20 @@ func (doc *Document) inferLoopVariable(defID, nameListID ast.NodeID, nameList as
 func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 	leftType := doc.InferType(node.Left)
 
-	if leftType.DeclNode == ast.InvalidNode {
-		return TypeSet{}
-	}
+	var (
+		t         TypeSet
+		targetDoc *Document
+	)
 
-	recNode := doc.Tree.Nodes[leftType.DeclNode]
-	if recNode.Kind != ast.KindTableExpr {
-		return TypeSet{}
+	if leftType.DeclNode != ast.InvalidNode && leftType.DeclURI != "" {
+		targetDoc = doc
+		if leftType.DeclURI != doc.URI {
+			if doc.Server != nil {
+				targetDoc = doc.Server.Documents[leftType.DeclURI]
+			} else {
+				targetDoc = nil
+			}
+		}
 	}
 
 	rightNode := doc.Tree.Nodes[node.Right]
@@ -407,24 +471,60 @@ func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 	}
 
 	fieldName := doc.Source[rightNode.Start:rightNode.End]
+	propHash := ast.HashBytes(fieldName)
 
-	for i := uint16(0); i < recNode.Count; i++ {
-		fieldID := doc.Tree.ExtraList[recNode.Extra+uint32(i)]
-		field := doc.Tree.Nodes[fieldID]
+	// 1. Check initial table literal
+	if targetDoc != nil {
+		recNode := targetDoc.Tree.Nodes[leftType.DeclNode]
+		if recNode.Kind == ast.KindTableExpr {
+			for i := uint16(0); i < recNode.Count; i++ {
+				fieldID := targetDoc.Tree.ExtraList[recNode.Extra+uint32(i)]
+				field := targetDoc.Tree.Nodes[fieldID]
 
-		if field.Kind == ast.KindRecordField {
-			key := doc.Tree.Nodes[field.Left]
+				if field.Kind == ast.KindRecordField {
+					key := targetDoc.Tree.Nodes[field.Left]
 
-			if key.Kind == ast.KindIdent {
-				keyName := doc.Source[key.Start:key.End]
-				if bytes.Equal(keyName, fieldName) {
-					return doc.InferType(field.Right)
+					if key.Kind == ast.KindIdent {
+						keyName := targetDoc.Source[key.Start:key.End]
+						if bytes.Equal(keyName, fieldName) {
+							t = targetDoc.InferType(field.Right)
+
+							break
+						}
+					}
 				}
 			}
 		}
 	}
 
-	return TypeSet{}
+	// 2. Check subsequent assignments in the local document
+	recDef, recHash, _ := doc.Resolver.GetReceiverContext(node.Left)
+
+	for _, fd := range doc.Resolver.FieldDefs {
+		if (recDef != ast.InvalidNode && fd.ReceiverDef == recDef) || (recDef == ast.InvalidNode && recHash != 0 && fd.ReceiverHash == recHash) {
+			if fd.PropHash == propHash {
+				valID := doc.getAssignedValue(fd.NodeID)
+				if valID != ast.InvalidNode {
+					rt := doc.InferType(valID)
+					if rt.Basics == TypeUnknown && rt.CustomName == "" {
+						t.Basics |= TypeAny
+					} else {
+						t.Basics |= rt.Basics
+						if t.CustomName == "" {
+							t.CustomName = rt.CustomName
+						}
+
+						if t.DeclNode == ast.InvalidNode && rt.DeclNode != ast.InvalidNode {
+							t.DeclNode = rt.DeclNode
+							t.DeclURI = rt.DeclURI
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return t
 }
 
 func (doc *Document) inferCallExpr(node ast.Node) TypeSet {
@@ -464,15 +564,26 @@ func (doc *Document) inferCallExpr(node ast.Node) TypeSet {
 }
 
 func (doc *Document) extractArrayElementType(t TypeSet) TypeSet {
-	if t.DeclNode != ast.InvalidNode {
-		node := doc.Tree.Nodes[t.DeclNode]
-		if node.Kind == ast.KindTableExpr {
-			for i := uint16(0); i < node.Count; i++ {
-				childID := doc.Tree.ExtraList[node.Extra+uint32(i)]
+	if t.DeclNode != ast.InvalidNode && t.DeclURI != "" {
+		targetDoc := doc
+		if t.DeclURI != doc.URI {
+			if doc.Server != nil {
+				targetDoc = doc.Server.Documents[t.DeclURI]
+			} else {
+				targetDoc = nil
+			}
+		}
 
-				child := doc.Tree.Nodes[childID]
-				if child.Kind != ast.KindRecordField && child.Kind != ast.KindIndexField {
-					return doc.InferType(childID)
+		if targetDoc != nil {
+			node := targetDoc.Tree.Nodes[t.DeclNode]
+			if node.Kind == ast.KindTableExpr {
+				for i := uint16(0); i < node.Count; i++ {
+					childID := targetDoc.Tree.ExtraList[node.Extra+uint32(i)]
+
+					child := targetDoc.Tree.Nodes[childID]
+					if child.Kind != ast.KindRecordField && child.Kind != ast.KindIndexField {
+						return targetDoc.InferType(childID)
+					}
 				}
 			}
 		}
@@ -506,6 +617,10 @@ func (doc *Document) inferFunctionReturnType(funcExprID ast.NodeID) TypeSet {
 					rt := doc.InferType(firstExpr)
 
 					t.Basics |= rt.Basics
+
+					if rt.Basics == TypeUnknown && rt.CustomName == "" {
+						t.Basics |= TypeAny
+					}
 
 					if t.CustomName == "" {
 						t.CustomName = rt.CustomName

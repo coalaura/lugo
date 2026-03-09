@@ -33,6 +33,12 @@ type FieldKey struct {
 	PropHash uint64
 }
 
+type Reassignment struct {
+	NameHash uint64
+	DefID    ast.NodeID
+	ValID    ast.NodeID
+}
+
 // Resolver walks the AST and links variable references to their local definitions.
 type Resolver struct {
 	Tree *ast.Tree
@@ -45,26 +51,32 @@ type Resolver struct {
 
 	PendingFields []FieldRef
 
-	scopeStack []ast.NodeID
+	scopeStack  []ast.NodeID
+	scopeStarts []int
 
-	UsageCount    []uint16
-	LocalDefs     []ast.NodeID
-	ShadowedOuter []ShadowPair
+	DuplicateLocals []ast.NodeID
+	UsageCount      []uint16
+	LocalDefs       []ast.NodeID
+	ShadowedOuter   []ShadowPair
+	Reassignments   []Reassignment
 }
 
 func New(tree *ast.Tree) *Resolver {
 	return &Resolver{
-		Tree:          tree,
-		References:    make([]ast.NodeID, len(tree.Nodes)),
-		UsageCount:    make([]uint16, len(tree.Nodes)),
-		LocalDefs:     make([]ast.NodeID, 0, 512),
-		ShadowedOuter: make([]ShadowPair, 0, 64),
-		PendingFields: make([]FieldRef, 0, 128),
-		FieldDefs:     make([]FieldDef, 0, 512),
-		fieldMap:      make(map[FieldKey]ast.NodeID, 512),
-		GlobalDefs:    make([]ast.NodeID, 0, 256),
-		GlobalRefs:    make([]ast.NodeID, 0, 512),
-		scopeStack:    make([]ast.NodeID, 0, 256),
+		Tree:            tree,
+		References:      make([]ast.NodeID, len(tree.Nodes)),
+		UsageCount:      make([]uint16, len(tree.Nodes)),
+		LocalDefs:       make([]ast.NodeID, 0, 512),
+		ShadowedOuter:   make([]ShadowPair, 0, 64),
+		PendingFields:   make([]FieldRef, 0, 128),
+		FieldDefs:       make([]FieldDef, 0, 512),
+		fieldMap:        make(map[FieldKey]ast.NodeID, 512),
+		GlobalDefs:      make([]ast.NodeID, 0, 256),
+		GlobalRefs:      make([]ast.NodeID, 0, 512),
+		scopeStack:      make([]ast.NodeID, 0, 256),
+		scopeStarts:     make([]int, 0, 64),
+		DuplicateLocals: make([]ast.NodeID, 0, 16),
+		Reassignments:   make([]Reassignment, 0, 128),
 	}
 }
 
@@ -95,8 +107,11 @@ func (r *Resolver) Reset() {
 
 	r.PendingFields = r.PendingFields[:0]
 	r.scopeStack = r.scopeStack[:0]
+	r.scopeStarts = r.scopeStarts[:0]
+	r.DuplicateLocals = r.DuplicateLocals[:0]
 	r.LocalDefs = r.LocalDefs[:0]
 	r.ShadowedOuter = r.ShadowedOuter[:0]
+	r.Reassignments = r.Reassignments[:0]
 }
 
 func (r *Resolver) Resolve(root ast.NodeID) {
@@ -115,6 +130,19 @@ func (r *Resolver) Resolve(root ast.NodeID) {
 	}
 }
 
+func (r *Resolver) pushScope() int {
+	startScope := len(r.scopeStack)
+
+	r.scopeStarts = append(r.scopeStarts, startScope)
+
+	return startScope
+}
+
+func (r *Resolver) popScope(startScope int) {
+	r.scopeStarts = r.scopeStarts[:len(r.scopeStarts)-1]
+	r.scopeStack = r.scopeStack[:startScope]
+}
+
 func (r *Resolver) declare(identID ast.NodeID) {
 	if identID == ast.InvalidNode {
 		return
@@ -128,12 +156,22 @@ func (r *Resolver) declare(identID ast.NodeID) {
 
 	// ignore "_" prefix
 	if len(name) > 0 && name[0] != '_' {
+		var scopeStart int
+
+		if len(r.scopeStarts) > 0 {
+			scopeStart = r.scopeStarts[len(r.scopeStarts)-1]
+		}
+
 		for i := len(r.scopeStack) - 1; i >= 0; i-- {
 			if bytes.Equal(r.source(r.scopeStack[i]), name) {
-				r.ShadowedOuter = append(r.ShadowedOuter, ShadowPair{
-					Shadowing: identID,
-					Shadowed:  r.scopeStack[i],
-				})
+				if i >= scopeStart {
+					r.DuplicateLocals = append(r.DuplicateLocals, identID)
+				} else {
+					r.ShadowedOuter = append(r.ShadowedOuter, ShadowPair{
+						Shadowing: identID,
+						Shadowed:  r.scopeStack[i],
+					})
+				}
 
 				break
 			}
@@ -149,7 +187,7 @@ func (r *Resolver) defineField(memberNodeID ast.NodeID) {
 		return
 	}
 
-	recDef, recHash, recName := r.getReceiverContext(node.Left)
+	recDef, recHash, recName := r.GetReceiverContext(node.Left)
 	if len(recName) == 0 {
 		return
 	}
@@ -211,7 +249,7 @@ func (r *Resolver) resolveReference(identID ast.NodeID, isDef bool) {
 	}
 }
 
-func (r *Resolver) getReceiverContext(recID ast.NodeID) (ast.NodeID, uint64, []byte) {
+func (r *Resolver) GetReceiverContext(recID ast.NodeID) (ast.NodeID, uint64, []byte) {
 	if recID == ast.InvalidNode {
 		return ast.InvalidNode, 0, nil
 	}
@@ -275,7 +313,7 @@ func (r *Resolver) getTableReceiver(id ast.NodeID) (ast.NodeID, []byte) {
 					} else if r.Tree.Nodes[lID].Kind == ast.KindIdent {
 						return r.References[lID], r.source(lID)
 					} else if r.Tree.Nodes[lID].Kind == ast.KindMemberExpr {
-						defID, _, recBytes := r.getReceiverContext(lID)
+						defID, _, recBytes := r.GetReceiverContext(lID)
 						return defID, recBytes
 					}
 				}
@@ -324,13 +362,13 @@ func (r *Resolver) visit(id ast.NodeID) {
 		r.visit(node.Left)
 		r.visit(node.Right)
 	case ast.KindBlock:
-		startScope := len(r.scopeStack)
+		startScope := r.pushScope()
 
 		for i := uint16(0); i < node.Count; i++ {
 			r.visit(r.Tree.ExtraList[node.Extra+uint32(i)])
 		}
 
-		r.scopeStack = r.scopeStack[:startScope]
+		r.popScope(startScope)
 	case ast.KindLocalAssign:
 		r.visit(node.Right) // RHS evaluated before LHS is added to scope
 
@@ -347,16 +385,16 @@ func (r *Resolver) visit(id ast.NodeID) {
 			r.visit(r.Tree.ExtraList[node.Extra+uint32(i)])
 		}
 
-		startScope := len(r.scopeStack)
+		startScope := r.pushScope()
 
 		r.declare(node.Left)
 		r.visit(node.Right)
 
-		r.scopeStack = r.scopeStack[:startScope]
+		r.popScope(startScope)
 	case ast.KindForIn:
 		r.visit(ast.NodeID(node.Extra))
 
-		startScope := len(r.scopeStack)
+		startScope := r.pushScope()
 		nameList := r.Tree.Nodes[node.Left]
 
 		for i := uint16(0); i < nameList.Count; i++ {
@@ -364,7 +402,8 @@ func (r *Resolver) visit(id ast.NodeID) {
 		}
 
 		r.visit(node.Right)
-		r.scopeStack = r.scopeStack[:startScope]
+
+		r.popScope(startScope)
 	case ast.KindIdent, ast.KindVararg:
 		r.resolveReference(id, false)
 	case ast.KindAssign:
@@ -376,6 +415,27 @@ func (r *Resolver) visit(id ast.NodeID) {
 			switch exprNode.Kind {
 			case ast.KindIdent:
 				r.resolveReference(exprID, true)
+
+				defID := r.References[exprID]
+				rhsList := node.Right
+				if rhsList != ast.InvalidNode {
+					rhsNode := r.Tree.Nodes[rhsList]
+					if i < uint16(rhsNode.Count) {
+						valID := r.Tree.ExtraList[rhsNode.Extra+uint32(i)]
+
+						var nameHash uint64
+
+						if defID == ast.InvalidNode {
+							nameHash = ast.HashBytes(r.source(exprID))
+						}
+
+						r.Reassignments = append(r.Reassignments, Reassignment{
+							DefID:    defID,
+							NameHash: nameHash,
+							ValID:    valID,
+						})
+					}
+				}
 			case ast.KindMemberExpr, ast.KindIndexExpr:
 				r.visit(exprNode.Left)
 
@@ -396,7 +456,7 @@ func (r *Resolver) visit(id ast.NodeID) {
 		r.visit(node.Left)
 
 		if node.Right != ast.InvalidNode && r.Tree.Nodes[node.Right].Kind == ast.KindIdent {
-			recDef, recHash, recName := r.getReceiverContext(node.Left)
+			recDef, recHash, recName := r.GetReceiverContext(node.Left)
 
 			if len(recName) > 0 {
 				propHash := ast.HashBytes(r.source(node.Right))
@@ -457,7 +517,7 @@ func (r *Resolver) visit(id ast.NodeID) {
 			}
 		}
 	case ast.KindFunctionExpr, ast.KindFunctionStmt:
-		startScope := len(r.scopeStack)
+		startScope := r.pushScope()
 
 		if node.Kind == ast.KindFunctionExpr {
 			for i := uint16(0); i < node.Count; i++ {
@@ -479,9 +539,9 @@ func (r *Resolver) visit(id ast.NodeID) {
 
 		r.visit(node.Right)
 
-		r.scopeStack = r.scopeStack[:startScope]
+		r.popScope(startScope)
 	case ast.KindRepeat:
-		startScope := len(r.scopeStack)
+		startScope := r.pushScope()
 
 		// Condition is evaluated inside the block's scope
 		blockNode := r.Tree.Nodes[node.Left]
@@ -492,7 +552,7 @@ func (r *Resolver) visit(id ast.NodeID) {
 
 		r.visit(node.Right)
 
-		r.scopeStack = r.scopeStack[:startScope]
+		r.popScope(startScope)
 	case ast.KindExprList:
 		r.visitArgs(node.Extra, node.Count)
 	case ast.KindIf:
