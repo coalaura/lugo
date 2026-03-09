@@ -95,7 +95,7 @@ func (f *Formatter) Format(source []byte) []byte {
 		var forceNl bool
 
 		if nl == 0 && prevTok.Kind != 0 {
-			forceNl = f.needsNewline(prevNonCommentTok.Kind, tok.Kind, stack)
+			forceNl = f.needsNewline(prevNonCommentTok.Kind, tok.Kind, stack, lineIdx)
 		}
 
 		var skipSemicolon bool
@@ -116,7 +116,7 @@ func (f *Formatter) Format(source []byte) []byte {
 			} else {
 				gapAfter := source[tok.End:nextNonComment.Start]
 
-				if bytes.ContainsRune(gapAfter, '\n') || f.needsNewline(tok.Kind, nextNonComment.Kind, stack) {
+				if bytes.ContainsRune(gapAfter, '\n') || f.needsNewline(tok.Kind, nextNonComment.Kind, stack, lineIdx) {
 					if nextNonComment.Kind != token.LParen && nextNonComment.Kind != token.LBrack {
 						skipSemicolon = true
 					}
@@ -130,31 +130,76 @@ func (f *Formatter) Format(source []byte) []byte {
 
 		isStmtLevel := len(stack) == 0 || stack[len(stack)-1].Kind == ScopeBlock
 
-		if f.Opinionated && isStmtLevel && tok.Kind != token.Comment {
-			if (nl > 0 || forceNl || i == 0) && f.isStatementStart(prevNonCommentTok.Kind) {
-				currStmtKind := f.getStmtKind(tokens, i)
+		if f.Opinionated && isStmtLevel {
+			if nl > 0 || forceNl || i == 0 {
+				var (
+					isFirstOfGroup bool
+					targetStmtIdx  = -1
+				)
 
-				if currStmtKind != StmtUnknown {
-					if f.wantsBlankLine(lastStmtKind, currStmtKind) {
-						isJustAfterBlockOpener := prevNonCommentTok.Kind == token.Do || prevNonCommentTok.Kind == token.Then || prevNonCommentTok.Kind == token.Repeat || prevNonCommentTok.Kind == token.Else || prevNonCommentTok.Kind == token.ElseIf
+				if tok.Kind != token.Comment {
+					if prevTok.Kind != token.Comment || bytes.Count(gap, []byte{'\n'}) > 1 {
+						isFirstOfGroup = true
+						targetStmtIdx = i
+					}
+				} else {
+					if prevTok.Kind != token.Comment || bytes.Count(gap, []byte{'\n'}) > 1 {
+						contiguous := true
 
-						if prevNonCommentTok.Kind == token.RParen && prevNonCommentIdx != -1 {
-							if f.isFunctionSignatureEnd(tokens, prevNonCommentIdx) {
-								isJustAfterBlockOpener = true
+						for j := i + 1; j < len(tokens); j++ {
+							gapAfter := source[tokens[j-1].End:tokens[j].Start]
+							if bytes.Count(gapAfter, []byte{'\n'}) > 1 {
+								contiguous = false
+
+								break
+							}
+
+							if tokens[j].Kind != token.Comment {
+								targetStmtIdx = j
+
+								break
 							}
 						}
 
-						isJustBeforeBlockCloser := tok.Kind == token.End || tok.Kind == token.Until || tok.Kind == token.ElseIf || tok.Kind == token.Else
-
-						if !isJustAfterBlockOpener && !isJustBeforeBlockCloser {
-							if nl < 2 {
-								nl = 2
-								forceNl = true
-							}
+						if contiguous && targetStmtIdx != -1 {
+							isFirstOfGroup = true
 						}
 					}
+				}
 
-					lastStmtKind = currStmtKind
+				if isFirstOfGroup && targetStmtIdx != -1 {
+					var prevStmtEnd token.Kind
+
+					if prevNonCommentIdx != -1 {
+						prevStmtEnd = tokens[prevNonCommentIdx].Kind
+					}
+
+					if f.isStatementStart(prevStmtEnd) {
+						currStmtKind := f.getStmtKind(tokens, targetStmtIdx)
+
+						if currStmtKind != StmtUnknown {
+							if f.wantsBlankLine(lastStmtKind, currStmtKind) {
+								isJustAfterBlockOpener := prevStmtEnd == token.Do || prevStmtEnd == token.Then || prevStmtEnd == token.Repeat || prevStmtEnd == token.Else || prevStmtEnd == token.ElseIf || prevStmtEnd == token.LBrace
+
+								if prevStmtEnd == token.RParen && prevNonCommentIdx != -1 {
+									if f.isFunctionSignatureEnd(tokens, prevNonCommentIdx) {
+										isJustAfterBlockOpener = true
+									}
+								}
+
+								isJustBeforeBlockCloser := tokens[targetStmtIdx].Kind == token.End || tokens[targetStmtIdx].Kind == token.Until || tokens[targetStmtIdx].Kind == token.ElseIf || tokens[targetStmtIdx].Kind == token.Else
+
+								if !isJustAfterBlockOpener && !isJustBeforeBlockCloser {
+									if nl < 2 {
+										nl = 2
+										forceNl = true
+									}
+								}
+							}
+
+							lastStmtKind = currStmtKind
+						}
+					}
 				}
 			}
 		}
@@ -175,7 +220,7 @@ func (f *Formatter) Format(source []byte) []byte {
 		}
 
 		if isLineStart {
-			currentLineIndent = f.calculateLineIndent(stack, tokens, i, source)
+			currentLineIndent = f.calculateLineIndent(stack, tokens, i, source, lineIdx)
 			if currentLineIndent > 0 {
 				if f.UseTabs {
 					out.Write(bytes.Repeat([]byte{'\t'}, currentLineIndent))
@@ -256,11 +301,15 @@ func (f *Formatter) Format(source []byte) []byte {
 	return res
 }
 
-func (f *Formatter) calculateLineIndent(stack []Scope, tokens []token.Token, startIndex int, source []byte) int {
-	tempStack := make([]Scope, len(stack))
-	copy(tempStack, stack)
+func (f *Formatter) calculateLineIndent(stack []Scope, tokens []token.Token, startIndex int, source []byte, currentLine int) int {
+	var indent int
 
-	lineIndent := -1
+	if len(stack) > 0 {
+		indent = stack[len(stack)-1].InnerIndent
+	}
+
+	currentDepth := len(stack)
+	minDepth := currentDepth
 
 	for i := startIndex; i < len(tokens); i++ {
 		tok := tokens[i]
@@ -269,7 +318,7 @@ func (f *Formatter) calculateLineIndent(stack []Scope, tokens []token.Token, sta
 			prev := tokens[i-1]
 			gap := source[prev.End:tok.Start]
 
-			if bytes.ContainsRune(gap, '\n') || f.needsNewline(prev.Kind, tok.Kind, tempStack) {
+			if bytes.ContainsRune(gap, '\n') || f.needsNewline(prev.Kind, tok.Kind, stack, currentLine) {
 				break
 			}
 		}
@@ -278,52 +327,69 @@ func (f *Formatter) calculateLineIndent(stack []Scope, tokens []token.Token, sta
 			continue
 		}
 
-		poppedBase := -1
+		switch tok.Kind {
+		case token.End, token.Until, token.ElseIf, token.Else, token.RBrace, token.RParen, token.RBrack:
+			currentDepth--
 
-		pop := func(kind int) bool {
-			for j := len(tempStack) - 1; j >= 0; j-- {
-				if tempStack[j].Kind == kind {
-					poppedBase = tempStack[j].BaseIndent
-					tempStack = tempStack[:j]
+			if currentDepth < minDepth {
+				minDepth = currentDepth
+			}
+		}
 
-					return true
+		switch tok.Kind {
+		case token.Do, token.Then, token.Repeat, token.Function, token.Else, token.LBrace, token.LParen, token.LBrack:
+			currentDepth++
+		}
+	}
+
+	if minDepth < len(stack) {
+		if minDepth < 0 {
+			minDepth = 0 // Safeguard against malformed code with too many closers
+		}
+
+		return stack[minDepth].BaseIndent
+	}
+
+	isBlock := len(stack) == 0 || stack[len(stack)-1].Kind == ScopeBlock
+
+	if startIndex > 0 {
+		prevNonCommentIdx := startIndex - 1
+
+		for prevNonCommentIdx >= 0 && tokens[prevNonCommentIdx].Kind == token.Comment {
+			prevNonCommentIdx--
+		}
+
+		if prevNonCommentIdx >= 0 {
+			prevK := tokens[prevNonCommentIdx].Kind
+			currK := tokens[startIndex].Kind
+
+			var isContinuation bool
+
+			if (prevK >= token.Plus && prevK <= token.Assign) || prevK == token.And || prevK == token.Or || prevK == token.Not || prevK == token.Concat {
+				isContinuation = true
+			} else if prevK == token.Return || prevK == token.Local {
+				isContinuation = true
+			} else if prevK == token.Comma && isBlock {
+				isContinuation = true
+			}
+
+			if !isContinuation {
+				if (currK >= token.Plus && currK <= token.GreaterEq) || currK == token.And || currK == token.Or || currK == token.Concat {
+					if currK != token.Minus && currK != token.Hash && currK != token.Not && currK != token.BitXor {
+						isContinuation = true
+					}
+				} else if currK == token.Dot || currK == token.Colon {
+					isContinuation = true
 				}
 			}
 
-			return false
-		}
-
-		var isCloser bool
-
-		switch tok.Kind {
-		case token.End, token.Until, token.ElseIf, token.Else:
-			isCloser = pop(ScopeBlock)
-		case token.RBrace:
-			isCloser = pop(ScopeBrace)
-		case token.RParen:
-			isCloser = pop(ScopeParen)
-		case token.RBrack:
-			isCloser = pop(ScopeBrack)
-		}
-
-		if isCloser {
-			if poppedBase != -1 {
-				lineIndent = poppedBase
+			if isContinuation {
+				indent++
 			}
-		} else {
-			break
 		}
 	}
 
-	if lineIndent != -1 {
-		return lineIndent
-	}
-
-	if len(tempStack) > 0 {
-		return tempStack[len(tempStack)-1].InnerIndent
-	}
-
-	return 0
+	return indent
 }
 
 func (f *Formatter) isComplexTable(tokens []token.Token, startIndex int) bool {
@@ -506,7 +572,7 @@ func (f *Formatter) isExprEnd(k token.Kind) bool {
 	return false
 }
 
-func (f *Formatter) needsNewline(left, right token.Kind, stack []Scope) bool {
+func (f *Formatter) needsNewline(left, right token.Kind, stack []Scope, currentLine int) bool {
 	if left == token.Illegal || left == token.EOF || right == token.Illegal || right == token.EOF {
 		return false
 	}
