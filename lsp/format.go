@@ -78,6 +78,7 @@ func (f *Formatter) Format(source []byte) []byte {
 		prevPrev          token.Kind
 		lineIdx           int
 		lastStmtKind      StmtKind
+		currentLineIndent int
 	)
 
 	for i, tok := range tokens {
@@ -174,12 +175,12 @@ func (f *Formatter) Format(source []byte) []byte {
 		}
 
 		if isLineStart {
-			lineIndent := f.calculateLineIndent(stack, tokens, i, source)
-			if lineIndent > 0 {
+			currentLineIndent = f.calculateLineIndent(stack, tokens, i, source)
+			if currentLineIndent > 0 {
 				if f.UseTabs {
-					out.Write(bytes.Repeat([]byte{'\t'}, lineIndent))
+					out.Write(bytes.Repeat([]byte{'\t'}, currentLineIndent))
 				} else {
-					out.Write(bytes.Repeat([]byte{' '}, lineIndent*f.IndentSize))
+					out.Write(bytes.Repeat([]byte{' '}, currentLineIndent*f.IndentSize))
 				}
 			}
 
@@ -216,20 +217,10 @@ func (f *Formatter) Format(source []byte) []byte {
 		}
 
 		pushScope := func(kind int, isComplex bool) {
-			var base int
-
-			if len(stack) > 0 {
-				base = stack[len(stack)-1].InnerIndent
-			}
-
-			if len(stack) > 0 && stack[len(stack)-1].LineIdx == lineIdx {
-				base = stack[len(stack)-1].BaseIndent
-			}
-
 			stack = append(stack, Scope{
 				Kind:        kind,
-				BaseIndent:  base,
-				InnerIndent: base + 1,
+				BaseIndent:  currentLineIndent,
+				InnerIndent: currentLineIndent + 1,
 				IsComplex:   isComplex,
 				LineIdx:     lineIdx,
 			})
