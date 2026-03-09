@@ -44,12 +44,15 @@ Lugo implements a comprehensive suite of modern Language Server Protocol feature
 
 ### Advanced Diagnostics
 Lugo performs workspace-wide analysis to catch bugs before runtime:
-* **Undefined Globals:** Detects typos with wildcard ignore support (e.g., `N_0x*`) and suggests the closest known global.
-* **Implicit Globals:** Warns when you forget the `local` keyword inside a function.
+* **Undefined Globals:** Detects typos with wildcard ignore support (e.g., `N_0x*`) and provides quick-fixes to the closest known global.
+* **Implicit Globals:** Warns when you forget the `local` keyword inside a function and provides a quick-fix to inject it.
 * **Unused Variables:** Granular detection for unused locals, functions, parameters and loop variables.
 * **Shadowing:** Warns when a local shadows an outer scope or global, providing a clickable link to the shadowed definition.
 * **Unreachable Code:** Detects dead code after `return`, `break` or `goto`.
 * **Ambiguous Returns:** Catches Lua's infamous newline evaluation trap where expressions on the next line are accidentally returned.
+* **Redundant Code:** Warns about empty blocks (`do end`) and assigning a variable to itself (with quick-fixes to remove them).
+* **Sanity Checks:** Detects duplicate fields in table literals and unbalanced assignments (assigning fewer or more values than variables).
+* **Type Checking:** Optionally catches strictly invalid operations like attempting to call a number or index a non-table.
 * **Deprecation:** Warns when using symbols marked with `@deprecated`.
 
 ## Installation
@@ -57,8 +60,71 @@ Lugo performs workspace-wide analysis to catch bugs before runtime:
 ### VS Code
 Simply install the extension from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=coalaura.lugo-vscode). The extension automatically detects your OS and architecture and runs the correct bundled Go binary. No external dependencies are required.
 
-### Other Editors (Neovim, etc.)
-Lugo is entirely editor-agnostic. You can download the standalone LSP binaries for Windows, Linux and macOS from the [GitHub Releases](https://github.com/coalaura/lugo/releases) page and attach them to your client of choice using standard LSP configurations over `stdio`.
+### Other Editors (Neovim, Helix, etc.)
+Lugo is entirely editor-agnostic and communicates using standard JSON-RPC over `stdio`. You can download the standalone LSP binaries for Windows, Linux, and macOS from the [GitHub Releases](https://github.com/coalaura/lugo/releases) page.
+
+Because Lugo does not rely on a generic wrapper, you must pass your settings directly into `initializationOptions` when setting up the client.
+
+#### Neovim (`nvim-lspconfig`)
+You can easily add Lugo as a custom server in your `init.lua`:
+
+```lua
+local lspconfig = require('lspconfig')
+local configs = require('lspconfig.configs')
+
+-- Define the custom Lugo server
+if not configs.lugo then
+	configs.lugo = {
+		default_config = {
+			cmd = { '/path/to/your/lugo-linux-amd64' }, -- Update this path
+			filetypes = { 'lua' },
+			root_dir = lspconfig.util.root_pattern('.git', '.luarc.json'),
+			settings = {}
+		}
+	}
+end
+
+-- Setup and pass initialization options directly
+lspconfig.lugo.setup({
+	init_options = {
+		libraryPaths = {},
+		ignoreGlobs = { "**/node_modules/**", "**/.git/**" },
+		knownGlobals = { "vim" },
+
+		-- Parser
+		parserMaxErrors = 50,
+
+		-- Diagnostics
+		diagUndefinedGlobals = true,
+		diagImplicitGlobals = true,
+		diagUnusedLocal = true,
+		diagUnusedFunction = true,
+		diagUnusedParameter = true,
+		diagUnusedLoopVar = true,
+		diagShadowing = true,
+		diagUnreachableCode = true,
+		diagAmbiguousReturns = true,
+		diagDeprecated = true,
+		diagDuplicateField = true,
+		diagUnbalancedAssignment = true,
+		diagDuplicateLocal = true,
+		diagSelfAssignment = true,
+		diagEmptyBlock = true,
+		diagTypeCheck = false, -- Set to true if using strict LuaCATS annotations
+
+		-- Inlay Hints
+		inlayParamHints = true,
+		inlaySuppressMatch = true,
+
+		-- Editor Features
+		featureDocHighlight = true,
+		featureHoverEval = true,
+		featureCodeLens = true,
+		featureFormatting = true,
+		formatOpinionated = false
+	}
+})
+```
 
 ## Configuration
 
@@ -80,6 +146,12 @@ You can configure Lugo via your VS Code `settings.json` (also available via the 
 * `lugo.diagnostics.shadowing`: Toggle warnings when a local shadows an outer scope or global.
 * `lugo.diagnostics.unreachableCode`: Toggle graying out unreachable code.
 * `lugo.diagnostics.ambiguousReturns`: Toggle warnings for expressions accidentally returned due to newlines.
+* `lugo.diagnostics.duplicateField`: Toggle warnings for duplicate fields inside table literals.
+* `lugo.diagnostics.unbalancedAssignment`: Toggle warnings when assigning fewer or more values than variables.
+* `lugo.diagnostics.duplicateLocal`: Toggle warnings when a local variable is defined twice in the exact same scope.
+* `lugo.diagnostics.selfAssignment`: Toggle warnings when assigning a variable to itself.
+* `lugo.diagnostics.emptyBlock`: Toggle hints for empty blocks (e.g., `do end`).
+* `lugo.diagnostics.typeCheck`: Toggle strict type checking for operations like calling numbers or indexing non-tables.
 * `lugo.diagnostics.deprecated`: Toggle warnings for usage of `@deprecated` symbols.
 
 **Editor Features**
