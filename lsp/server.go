@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/fs"
 	"iter"
-	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -2816,7 +2815,7 @@ func (s *Server) handleMessage(req Request) {
 
 		took := time.Since(start)
 
-		log.Printf("Formatted document in %s\n", took)
+		s.Log.Printf("Formatted document in %s\n", took)
 
 		if bytes.Equal(doc.Source, formatted) {
 			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
