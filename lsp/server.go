@@ -3765,6 +3765,10 @@ func (s *Server) publishDiagnostics(uri string) {
 		return
 	}
 
+	if strings.HasPrefix(uri, "std://") {
+		return
+	}
+
 	doc := s.Documents[uri]
 
 	s.diagBuf = s.diagBuf[:0]
@@ -4296,7 +4300,7 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 
 		// Self assignment
-		if s.DiagSelfAssignment && node.Kind == ast.KindAssign {
+		if s.DiagSelfAssignment && node.Kind == ast.KindAssign && !doc.IsMeta {
 			lhsList := doc.Tree.Nodes[node.Left]
 			if node.Right != ast.InvalidNode {
 				rhsList := doc.Tree.Nodes[node.Right]
