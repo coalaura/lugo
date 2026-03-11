@@ -216,6 +216,106 @@ func (s *Server) Start() error {
 	return nil
 }
 
+func (s *Server) setLibraryPaths(paths []string) bool {
+	if slices.Equal(s.LibraryPaths, paths) {
+		return false
+	}
+
+	s.LibraryPaths = slices.Clone(paths)
+	s.lowerLibraryPaths = s.lowerLibraryPaths[:0]
+
+	for _, lib := range s.LibraryPaths {
+		s.lowerLibraryPaths = append(s.lowerLibraryPaths, strings.ToLower(filepath.Clean(filepath.FromSlash(lib))))
+	}
+
+	return true
+}
+
+func (s *Server) setIgnoreGlobs(globs []string) bool {
+	if slices.Equal(s.IgnoreGlobs, globs) {
+		return false
+	}
+
+	s.IgnoreGlobs = slices.Clone(globs)
+	s.compileIgnorePatterns()
+
+	return true
+}
+
+func (s *Server) setKnownGlobals(globals []string) bool {
+	var (
+		newKnownGlobals     map[string]bool
+		newKnownGlobalGlobs []string
+	)
+
+	if len(globals) > 0 {
+		newKnownGlobals = make(map[string]bool, len(globals))
+		newKnownGlobalGlobs = make([]string, 0, len(globals))
+
+		for _, g := range globals {
+			if strings.ContainsAny(g, "*?") {
+				newKnownGlobalGlobs = append(newKnownGlobalGlobs, g)
+			} else {
+				newKnownGlobals[g] = true
+			}
+		}
+	}
+
+	if mapsEqualStringBool(s.KnownGlobals, newKnownGlobals) && slices.Equal(s.KnownGlobalGlobs, newKnownGlobalGlobs) {
+		return false
+	}
+
+	s.KnownGlobals = newKnownGlobals
+	s.KnownGlobalGlobs = newKnownGlobalGlobs
+
+	return true
+}
+
+func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsReindex bool, needsRepublish bool) {
+	if s.setLibraryPaths(opts.LibraryPaths) {
+		needsReindex = true
+	}
+
+	if s.setIgnoreGlobs(opts.IgnoreGlobs) {
+		needsReindex = true
+	}
+
+	if s.setKnownGlobals(opts.KnownGlobals) {
+		needsReindex = true
+	}
+
+	setCfg(&s.MaxParseErrors, opts.ParserMaxErrors, &needsRepublish)
+
+	setCfg(&s.DiagUndefinedGlobals, opts.DiagUndefinedGlobals, &needsRepublish)
+	setCfg(&s.DiagImplicitGlobals, opts.DiagImplicitGlobals, &needsRepublish)
+	setCfg(&s.DiagUnusedLocal, opts.DiagUnusedLocal, &needsRepublish)
+	setCfg(&s.DiagUnusedFunction, opts.DiagUnusedFunction, &needsRepublish)
+	setCfg(&s.DiagUnusedParameter, opts.DiagUnusedParameter, &needsRepublish)
+	setCfg(&s.DiagUnusedLoopVar, opts.DiagUnusedLoopVar, &needsRepublish)
+	setCfg(&s.DiagShadowing, opts.DiagShadowing, &needsRepublish)
+	setCfg(&s.DiagUnreachableCode, opts.DiagUnreachableCode, &needsRepublish)
+	setCfg(&s.DiagAmbiguousReturns, opts.DiagAmbiguousReturns, &needsRepublish)
+	setCfg(&s.DiagDeprecated, opts.DiagDeprecated, &needsRepublish)
+	setCfg(&s.DiagDuplicateField, opts.DiagDuplicateField, &needsRepublish)
+	setCfg(&s.DiagUnbalancedAssignment, opts.DiagUnbalancedAssignment, &needsRepublish)
+	setCfg(&s.DiagDuplicateLocal, opts.DiagDuplicateLocal, &needsRepublish)
+	setCfg(&s.DiagSelfAssignment, opts.DiagSelfAssignment, &needsRepublish)
+	setCfg(&s.DiagEmptyBlock, opts.DiagEmptyBlock, &needsRepublish)
+	setCfg(&s.DiagTypeCheck, opts.DiagTypeCheck, &needsRepublish)
+
+	setCfg(&s.InlayParamHints, opts.InlayParamHints, nil)
+	setCfg(&s.InlaySuppressMatch, opts.InlaySuppressMatch, nil)
+	setCfg(&s.InlayImplicitSelf, opts.InlayImplicitSelf, nil)
+
+	setCfg(&s.FeatureDocHighlight, opts.FeatureDocHighlight, nil)
+	setCfg(&s.FeatureHoverEval, opts.FeatureHoverEval, nil)
+	setCfg(&s.FeatureCodeLens, opts.FeatureCodeLens, nil)
+	setCfg(&s.FeatureFormatting, opts.FeatureFormatting, nil)
+	setCfg(&s.FormatOpinionated, opts.FormatOpinionated, nil)
+
+	return needsReindex, needsRepublish
+}
+
 func (s *Server) handleMessage(req Request) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -260,62 +360,7 @@ func (s *Server) handleMessage(req Request) {
 			s.RootURI = params.RootURI
 			s.lowerRootPath = strings.ToLower(s.uriToPath(params.RootURI))
 
-			s.LibraryPaths = params.InitializationOptions.LibraryPaths
-
-			for _, lib := range s.LibraryPaths {
-				s.lowerLibraryPaths = append(s.lowerLibraryPaths, strings.ToLower(filepath.Clean(filepath.FromSlash(lib))))
-			}
-
-			s.IgnoreGlobs = params.InitializationOptions.IgnoreGlobs
-			s.compileIgnorePatterns()
-
-			s.KnownGlobals = make(map[string]bool)
-			s.KnownGlobalGlobs = []string{}
-
-			for _, g := range params.InitializationOptions.KnownGlobals {
-				if strings.ContainsAny(g, "*?") {
-					s.KnownGlobalGlobs = append(s.KnownGlobalGlobs, g)
-				} else {
-					s.KnownGlobals[g] = true
-				}
-			}
-
-			s.DiagUndefinedGlobals = params.InitializationOptions.DiagUndefinedGlobals
-			s.DiagImplicitGlobals = params.InitializationOptions.DiagImplicitGlobals
-			s.DiagUnusedLocal = params.InitializationOptions.DiagUnusedLocal
-			s.DiagUnusedFunction = params.InitializationOptions.DiagUnusedFunction
-			s.DiagUnusedParameter = params.InitializationOptions.DiagUnusedParameter
-			s.DiagUnusedLoopVar = params.InitializationOptions.DiagUnusedLoopVar
-			s.DiagShadowing = params.InitializationOptions.DiagShadowing
-			s.DiagUnreachableCode = params.InitializationOptions.DiagUnreachableCode
-			s.DiagAmbiguousReturns = params.InitializationOptions.DiagAmbiguousReturns
-			s.DiagDeprecated = params.InitializationOptions.DiagDeprecated
-			s.DiagDuplicateField = params.InitializationOptions.DiagDuplicateField
-			s.DiagUnbalancedAssignment = params.InitializationOptions.DiagUnbalancedAssignment
-			s.DiagDuplicateLocal = params.InitializationOptions.DiagDuplicateLocal
-			s.DiagSelfAssignment = params.InitializationOptions.DiagSelfAssignment
-			s.DiagEmptyBlock = params.InitializationOptions.DiagEmptyBlock
-			s.DiagTypeCheck = params.InitializationOptions.DiagTypeCheck
-
-			s.MaxParseErrors = params.InitializationOptions.ParserMaxErrors
-
-			s.InlayParamHints = params.InitializationOptions.InlayParamHints
-			s.InlaySuppressMatch = params.InitializationOptions.InlaySuppressMatch
-			s.InlayImplicitSelf = params.InitializationOptions.InlayImplicitSelf
-
-			s.FeatureDocHighlight = params.InitializationOptions.FeatureDocHighlight
-			s.FeatureHoverEval = params.InitializationOptions.FeatureHoverEval
-			s.FeatureCodeLens = params.InitializationOptions.FeatureCodeLens
-			s.FeatureFormatting = params.InitializationOptions.FeatureFormatting
-			s.FormatOpinionated = params.InitializationOptions.FormatOpinionated
-		}
-
-		var codeLensOptions *CodeLensOptions
-
-		if s.FeatureCodeLens {
-			codeLensOptions = &CodeLensOptions{
-				ResolveProvider: true,
-			}
+			s.applyInitializationOptions(params.InitializationOptions)
 		}
 
 		result := InitializeResult{
@@ -326,19 +371,21 @@ func (s *Server) handleMessage(req Request) {
 				RenameProvider: map[string]bool{
 					"prepareProvider": true,
 				},
-				ReferencesProvider:      true,
-				DocumentSymbolProvider:  true,
-				WorkspaceSymbolProvider: true,
-				InlayHintProvider:       s.InlayParamHints || s.InlayImplicitSelf,
-				FoldingRangeProvider:    true,
-				CallHierarchyProvider:   true,
+				ReferencesProvider:         true,
+				DocumentSymbolProvider:     true,
+				WorkspaceSymbolProvider:    true,
+				InlayHintProvider:          true,
+				FoldingRangeProvider:       true,
+				CallHierarchyProvider:      true,
+				DocumentHighlightProvider:  true,
+				DocumentFormattingProvider: true,
 				CodeActionProvider: map[string]any{
 					"codeActionKinds": []string{"quickfix", "refactor.rewrite"},
 					"resolveProvider": true,
 				},
-				DocumentHighlightProvider:  s.FeatureDocHighlight,
-				DocumentFormattingProvider: s.FeatureFormatting,
-				CodeLensProvider:           codeLensOptions,
+				CodeLensProvider: &CodeLensOptions{
+					ResolveProvider: true,
+				},
 				SignatureHelpProvider: &SignatureHelpOptions{
 					TriggerCharacters: []string{"(", ","},
 				},
@@ -361,6 +408,21 @@ func (s *Server) handleMessage(req Request) {
 		err = WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: result})
 		if err != nil {
 			s.Log.Errorf("WriteMessage error: %v\n", err)
+		}
+	case "workspace/didChangeConfiguration":
+		var params DidChangeConfigurationParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		needsReindex, needsRepublish := s.applyInitializationOptions(params.Settings)
+
+		if needsReindex {
+			s.refreshWorkspace()
+		} else if needsRepublish {
+			s.publishWorkspaceDiagnostics()
 		}
 	case "lugo/readStd":
 		var params ReadStdParams
@@ -393,104 +455,7 @@ func (s *Server) handleMessage(req Request) {
 			Result: ReadStdResult{Content: content},
 		})
 	case "lugo/reindex":
-		s.Log.Println("Starting workspace re-index...")
-
-		/*
-			cpuFile, err := os.Create("C:\\Users\\Laura\\lugo\\lugo_cpu.prof")
-			if err == nil {
-				pprof.StartCPUProfile(cpuFile)
-			}
-
-			traceFile, err := os.Create("C:\\Users\\Laura\\lugo\\lugo_trace.out")
-			if err == nil {
-				trace.Start(traceFile)
-			}
-		*/
-
-		s.IsIndexing = true
-
-		start1 := time.Now()
-
-		if s.activeURIs == nil {
-			s.activeURIs = make(map[string]bool, len(s.Documents))
-		} else {
-			clear(s.activeURIs)
-		}
-
-		var (
-			total     int
-			indexed   int
-			unchanged int
-			failed    int
-		)
-
-		s.indexEmbeddedStdlib(&total, &indexed, &unchanged)
-
-		for _, libPath := range s.LibraryPaths {
-			s.Log.Printf("Indexing external library: %s\n", libPath)
-
-			s.indexWorkspace(libPath, &total, &indexed, &unchanged, &failed)
-		}
-
-		if s.RootURI != "" {
-			s.Log.Printf("Indexing workspace: %s\n", s.RootURI)
-
-			s.indexWorkspace(s.RootURI, &total, &indexed, &unchanged, &failed)
-		}
-
-		for uri := range s.Documents {
-			if !s.activeURIs[uri] && !s.OpenFiles[uri] {
-				s.clearDocument(uri)
-			}
-		}
-
-		for uri, doc := range s.Documents {
-			if s.OpenFiles[uri] && !s.activeURIs[uri] {
-				total += len(doc.Source)
-
-				s.updateDocument(uri, doc.Source)
-			}
-		}
-
-		s.activeURIs = nil
-
-		s.IsIndexing = false
-
-		took1 := time.Since(start1)
-
-		s.Log.Printf("Re-indexed workspace in %s (indexed=%d, unchanged=%d, failed=%d)\n", took1, indexed, unchanged, failed)
-
-		start2 := time.Now()
-
-		var diagCount int
-
-		for uri := range s.Documents {
-			if s.isWorkspaceURI(uri) {
-				s.publishDiagnostics(uri)
-
-				diagCount++
-			}
-		}
-
-		took2 := time.Since(start2)
-
-		s.Log.Printf("Published diagnostics for %d workspace files in %s\n", diagCount, took2)
-
-		s.Log.Printf("Total time taken for %d bytes: %s\n", total, took1+took2)
-
-		/*
-			if traceFile != nil {
-				trace.Stop()
-
-				traceFile.Close()
-			}
-
-			if cpuFile != nil {
-				pprof.StopCPUProfile()
-
-				cpuFile.Close()
-			}
-		*/
+		s.refreshWorkspace()
 
 		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: "ok"})
 	case "textDocument/didOpen":
@@ -3818,6 +3783,112 @@ func (s *Server) findCommaBefore(source []byte, start, limit uint32) uint32 {
 	return commaPos
 }
 
+func (s *Server) refreshWorkspace() {
+	/*
+		cpuFile, err := os.Create("C:\\Users\\Laura\\lugo\\lugo_cpu.prof")
+		if err == nil {
+			pprof.StartCPUProfile(cpuFile)
+		}
+
+		traceFile, err := os.Create("C:\\Users\\Laura\\lugo\\lugo_trace.out")
+		if err == nil {
+			trace.Start(traceFile)
+		}
+	*/
+
+	s.Log.Println("Starting workspace re-index...")
+
+	s.IsIndexing = true
+
+	start := time.Now()
+
+	if s.activeURIs == nil {
+		s.activeURIs = make(map[string]bool, len(s.Documents))
+	} else {
+		clear(s.activeURIs)
+	}
+
+	var (
+		total     int
+		indexed   int
+		unchanged int
+		failed    int
+	)
+
+	s.indexEmbeddedStdlib(&total, &indexed, &unchanged)
+
+	for _, libPath := range s.LibraryPaths {
+		s.Log.Printf("Indexing external library: %s\n", libPath)
+
+		s.indexWorkspace(libPath, &total, &indexed, &unchanged, &failed)
+	}
+
+	if s.RootURI != "" {
+		s.Log.Printf("Indexing workspace: %s\n", s.RootURI)
+
+		s.indexWorkspace(s.RootURI, &total, &indexed, &unchanged, &failed)
+	}
+
+	for uri := range s.Documents {
+		if !s.activeURIs[uri] && !s.OpenFiles[uri] {
+			s.clearDocument(uri)
+		}
+	}
+
+	for uri, doc := range s.Documents {
+		if s.OpenFiles[uri] && !s.activeURIs[uri] {
+			total += len(doc.Source)
+
+			s.updateDocument(uri, doc.Source)
+		}
+	}
+
+	s.activeURIs = nil
+	s.IsIndexing = false
+
+	took := time.Since(start)
+
+	s.Log.Printf("Re-indexed workspace in %s (indexed=%d, unchanged=%d, failed=%d)\n", took, indexed, unchanged, failed)
+
+	s.publishWorkspaceDiagnostics()
+
+	took = time.Since(start)
+
+	s.Log.Printf("Total time taken for %d bytes: %s\n", total, took)
+
+	/*
+		if traceFile != nil {
+			trace.Stop()
+
+			traceFile.Close()
+		}
+
+		if cpuFile != nil {
+			pprof.StopCPUProfile()
+
+			cpuFile.Close()
+		}
+	*/
+}
+
+func (s *Server) publishWorkspaceDiagnostics() {
+	start := time.Now()
+
+	var diagCount int
+
+	for uri := range s.Documents {
+		if s.isWorkspaceURI(uri) || s.OpenFiles[uri] {
+			s.publishDiagnostics(uri)
+
+			diagCount++
+		}
+	}
+
+	took := time.Since(start)
+
+	s.Log.Printf("Published diagnostics for %d files in %s\n", diagCount, took)
+}
+
 func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged, failed *int) {
 	var path string
 
@@ -6321,4 +6392,30 @@ func trimTrailingWhitespace(text string) string {
 	}
 
 	return out.String()
+}
+
+func setCfg[T comparable](dst *T, value T, flag *bool) {
+	if *dst == value {
+		return
+	}
+
+	*dst = value
+
+	if flag != nil {
+		*flag = true
+	}
+}
+
+func mapsEqualStringBool(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for k, av := range a {
+		if bv, ok := b[k]; !ok || bv != av {
+			return false
+		}
+	}
+
+	return true
 }

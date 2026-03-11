@@ -8,8 +8,6 @@ let client, restarting, indexing, debounce;
 
 async function restartClient(context) {
 	if (restarting) {
-		scheduleClientRestart(context);
-
 		return;
 	}
 
@@ -26,11 +24,73 @@ async function restartClient(context) {
 	restarting = false;
 }
 
-function scheduleClientRestart(context) {
+function buildInitializationOptions() {
+	const filesConfig = vscode.workspace.getConfiguration("files"),
+		searchConfig = vscode.workspace.getConfiguration("search"),
+		lugoConfig = vscode.workspace.getConfiguration("lugo");
+
+	let ignoreGlobs = lugoConfig.get("workspace.ignoreGlobs") || [];
+
+	const nativeExcludes = {
+		...(filesConfig.get("exclude") || {}),
+		...(searchConfig.get("exclude") || {}),
+	};
+
+	for (const [key, val] of Object.entries(nativeExcludes)) {
+		if (val === true) {
+			ignoreGlobs.push(key);
+		}
+	}
+
+	ignoreGlobs = [...new Set(ignoreGlobs)];
+
+	return {
+		libraryPaths: lugoConfig.get("workspace.libraryPaths") || [],
+		ignoreGlobs: ignoreGlobs,
+		knownGlobals: lugoConfig.get("environment.knownGlobals") || [],
+
+		parserMaxErrors: lugoConfig.get("parser.maxErrors") ?? 50,
+
+		diagUndefinedGlobals: lugoConfig.get("diagnostics.undefinedGlobals") !== false,
+		diagImplicitGlobals: lugoConfig.get("diagnostics.implicitGlobals") !== false,
+		diagUnusedLocal: lugoConfig.get("diagnostics.unused.local") !== false,
+		diagUnusedFunction: lugoConfig.get("diagnostics.unused.function") !== false,
+		diagUnusedParameter: lugoConfig.get("diagnostics.unused.parameter") !== false,
+		diagUnusedLoopVar: lugoConfig.get("diagnostics.unused.loopVar") !== false,
+		diagShadowing: lugoConfig.get("diagnostics.shadowing") !== false,
+		diagUnreachableCode: lugoConfig.get("diagnostics.unreachableCode") !== false,
+		diagAmbiguousReturns: lugoConfig.get("diagnostics.ambiguousReturns") !== false,
+		diagDeprecated: lugoConfig.get("diagnostics.deprecated") !== false,
+		diagDuplicateField: lugoConfig.get("diagnostics.duplicateField") !== false,
+		diagUnbalancedAssignment: lugoConfig.get("diagnostics.unbalancedAssignment") !== false,
+		diagDuplicateLocal: lugoConfig.get("diagnostics.duplicateLocal") !== false,
+		diagSelfAssignment: lugoConfig.get("diagnostics.selfAssignment") !== false,
+		diagEmptyBlock: lugoConfig.get("diagnostics.emptyBlock") !== false,
+		diagTypeCheck: lugoConfig.get("diagnostics.typeCheck") === true,
+
+		inlayParamHints: lugoConfig.get("inlayHints.parameterNames") !== false,
+		inlaySuppressMatch: lugoConfig.get("inlayHints.suppressWhenArgumentMatchesName") !== false,
+		inlayImplicitSelf: lugoConfig.get("inlayHints.implicitSelf") !== false,
+
+		featureDocHighlight: lugoConfig.get("features.documentHighlight") !== false,
+		featureHoverEval: lugoConfig.get("features.hoverEvaluation") !== false,
+		featureCodeLens: lugoConfig.get("features.codeLens") !== false,
+		featureFormatting: lugoConfig.get("features.formatting") !== false,
+		formatOpinionated: lugoConfig.get("features.formatOpinionated") === true,
+	};
+}
+
+function scheduleConfigUpdate() {
 	clearTimeout(debounce);
 
 	debounce = setTimeout(() => {
-		restartClient(context);
+		if (!client || !client.isRunning()) {
+			return;
+		}
+
+		client.sendNotification("workspace/didChangeConfiguration", {
+			settings: buildInitializationOptions(),
+		});
 	}, 1000);
 }
 
@@ -54,9 +114,9 @@ async function activate(context) {
 	context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider("std", stdProvider));
 
 	context.subscriptions.push(
-		vscode.workspace.onDidChangeConfiguration(e => {
+		vscode.workspace.onDidChangeConfiguration(async e => {
 			if (e.affectsConfiguration("lugo") || e.affectsConfiguration("files.exclude") || e.affectsConfiguration("search.exclude")) {
-				scheduleClientRestart(context);
+				scheduleConfigUpdate();
 			}
 		})
 	);
@@ -76,6 +136,7 @@ async function activate(context) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand("lugo.applySafeFixesFile", () => {
 			const editor = vscode.window.activeTextEditor;
+
 			if (editor) {
 				vscode.commands.executeCommand("lugo.applySafeFixes", editor.document.uri.toString());
 			}
@@ -100,25 +161,7 @@ async function activate(context) {
 }
 
 async function startClient(context) {
-	const config = vscode.workspace.getConfiguration("lugo");
-
-	const filesConfig = vscode.workspace.getConfiguration("files"),
-		searchConfig = vscode.workspace.getConfiguration("search");
-
-	let ignoreGlobs = config.get("workspace.ignoreGlobs") || [];
-
-	const nativeExcludes = {
-		...(filesConfig.get("exclude") || {}),
-		...(searchConfig.get("exclude") || {}),
-	};
-
-	for (const [key, val] of Object.entries(nativeExcludes)) {
-		if (val === true) {
-			ignoreGlobs.push(key);
-		}
-	}
-
-	ignoreGlobs = [...new Set(ignoreGlobs)];
+	const initializationOptions = buildInitializationOptions();
 
 	const platform = os.platform(),
 		arch = os.arch(),
@@ -146,40 +189,7 @@ async function startClient(context) {
 		synchronize: {
 			fileEvents: vscode.workspace.createFileSystemWatcher("**/*.lua"),
 		},
-		initializationOptions: {
-			libraryPaths: config.get("workspace.libraryPaths") || [],
-			ignoreGlobs: ignoreGlobs,
-			knownGlobals: config.get("environment.knownGlobals") || [],
-
-			parserMaxErrors: config.get("parser.maxErrors") ?? 50,
-
-			diagUndefinedGlobals: config.get("diagnostics.undefinedGlobals") !== false,
-			diagImplicitGlobals: config.get("diagnostics.implicitGlobals") !== false,
-			diagUnusedLocal: config.get("diagnostics.unused.local") !== false,
-			diagUnusedFunction: config.get("diagnostics.unused.function") !== false,
-			diagUnusedParameter: config.get("diagnostics.unused.parameter") !== false,
-			diagUnusedLoopVar: config.get("diagnostics.unused.loopVar") !== false,
-			diagShadowing: config.get("diagnostics.shadowing") !== false,
-			diagUnreachableCode: config.get("diagnostics.unreachableCode") !== false,
-			diagAmbiguousReturns: config.get("diagnostics.ambiguousReturns") !== false,
-			diagDeprecated: config.get("diagnostics.deprecated") !== false,
-			diagDuplicateField: config.get("diagnostics.duplicateField") !== false,
-			diagUnbalancedAssignment: config.get("diagnostics.unbalancedAssignment") !== false,
-			diagDuplicateLocal: config.get("diagnostics.duplicateLocal") !== false,
-			diagSelfAssignment: config.get("diagnostics.selfAssignment") !== false,
-			diagEmptyBlock: config.get("diagnostics.emptyBlock") !== false,
-			diagTypeCheck: config.get("diagnostics.typeCheck") === true,
-
-			inlayParamHints: config.get("inlayHints.parameterNames") !== false,
-			inlaySuppressMatch: config.get("inlayHints.suppressWhenArgumentMatchesName") !== false,
-			inlayImplicitSelf: config.get("inlayHints.implicitSelf") !== false,
-
-			featureDocHighlight: config.get("features.documentHighlight") !== false,
-			featureHoverEval: config.get("features.hoverEvaluation") !== false,
-			featureCodeLens: config.get("features.codeLens") !== false,
-			featureFormatting: config.get("features.formatting") !== false,
-			formatOpinionated: config.get("features.formatOpinionated") === true,
-		},
+		initializationOptions: initializationOptions,
 	};
 
 	client = new LanguageClient("lugo", "Lugo LSP", serverOptions, clientOptions);
