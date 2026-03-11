@@ -154,6 +154,7 @@ type Server struct {
 
 	InlayParamHints    bool
 	InlaySuppressMatch bool
+	InlayImplicitSelf  bool
 
 	FeatureDocHighlight bool
 	FeatureHoverEval    bool
@@ -300,6 +301,7 @@ func (s *Server) handleMessage(req Request) {
 
 			s.InlayParamHints = params.InitializationOptions.InlayParamHints
 			s.InlaySuppressMatch = params.InitializationOptions.InlaySuppressMatch
+			s.InlayImplicitSelf = params.InitializationOptions.InlayImplicitSelf
 
 			s.FeatureDocHighlight = params.InitializationOptions.FeatureDocHighlight
 			s.FeatureHoverEval = params.InitializationOptions.FeatureHoverEval
@@ -327,7 +329,7 @@ func (s *Server) handleMessage(req Request) {
 				ReferencesProvider:      true,
 				DocumentSymbolProvider:  true,
 				WorkspaceSymbolProvider: true,
-				InlayHintProvider:       s.InlayParamHints,
+				InlayHintProvider:       s.InlayParamHints || s.InlayImplicitSelf,
 				FoldingRangeProvider:    true,
 				CallHierarchyProvider:   true,
 				CodeActionProvider: map[string]any{
@@ -2309,7 +2311,7 @@ func (s *Server) handleMessage(req Request) {
 			return
 		}
 
-		if !s.InlayParamHints {
+		if !s.InlayParamHints && !s.InlayImplicitSelf {
 			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []InlayHint{}})
 
 			return
@@ -2333,6 +2335,50 @@ func (s *Server) handleMessage(req Request) {
 			node := doc.Tree.Nodes[i]
 
 			if node.Start > endOffset || node.End < startOffset {
+				continue
+			}
+
+			// 1. Implicit 'self' hint for method definitions
+			if s.InlayImplicitSelf && node.Kind == ast.KindFunctionStmt {
+				if doc.Tree.Nodes[node.Left].Kind == ast.KindMethodName {
+					nameNode := doc.Tree.Nodes[node.Left]
+					funcNode := doc.Tree.Nodes[node.Right]
+
+					var parenOff uint32
+
+					for j := nameNode.End; j < uint32(len(doc.Source)); j++ {
+						if doc.Source[j] == '(' {
+							parenOff = j + 1
+
+							break
+						}
+					}
+
+					if parenOff > 0 {
+						var label string
+
+						if funcNode.Count > 0 {
+							label = "self, "
+						} else {
+							label = "self"
+						}
+
+						sLine, sCol := doc.Tree.Position(parenOff)
+
+						hints = append(hints, InlayHint{
+							Position: Position{Line: sLine, Character: sCol},
+							Label:    label,
+							Kind:     ParameterHint,
+							Tooltip:  "Implicit 'self' parameter from colon syntax",
+						})
+					}
+				}
+
+				continue
+			}
+
+			// 2. Parameter name hints for function calls
+			if !s.InlayParamHints {
 				continue
 			}
 
@@ -2601,9 +2647,13 @@ func (s *Server) handleMessage(req Request) {
 		}
 
 		var (
-			targetIf   ast.NodeID = ast.InvalidNode
-			targetCond ast.NodeID = ast.InvalidNode
-			condTitle  string
+			targetIf          ast.NodeID = ast.InvalidNode
+			targetCond        ast.NodeID = ast.InvalidNode
+			condTitle         string
+			targetTableInsert ast.NodeID = ast.InvalidNode
+			targetMethod      ast.NodeID = ast.InvalidNode
+			targetNestedIf    ast.NodeID = ast.InvalidNode
+			nestedIfTitle     string
 		)
 
 		cursorLine := params.Range.Start.Line
@@ -2628,6 +2678,80 @@ func (s *Server) handleMessage(req Request) {
 					break
 				}
 			}
+		}
+
+		offset := doc.Tree.Offset(params.Range.Start.Line, params.Range.Start.Character)
+		curr := doc.Tree.NodeAt(offset)
+
+		for curr != ast.InvalidNode {
+			node := doc.Tree.Nodes[curr]
+
+			// 1. Convert Method Signature
+			if node.Kind == ast.KindFunctionStmt && targetMethod == ast.InvalidNode {
+				funcExprNode := doc.Tree.Nodes[node.Right]
+				blockNode := doc.Tree.Nodes[funcExprNode.Right]
+
+				if offset <= blockNode.Start {
+					nameNode := doc.Tree.Nodes[node.Left]
+					if nameNode.Kind == ast.KindMethodName || nameNode.Kind == ast.KindMemberExpr {
+						targetMethod = curr
+					}
+				}
+			}
+
+			// 2. Optimize table.insert
+			if node.Kind == ast.KindCallExpr && targetTableInsert == ast.InvalidNode && node.Count == 2 {
+				leftNode := doc.Tree.Nodes[node.Left]
+				if leftNode.Kind == ast.KindMemberExpr {
+					recName := doc.Source[doc.Tree.Nodes[leftNode.Left].Start:doc.Tree.Nodes[leftNode.Left].End]
+					propName := doc.Source[doc.Tree.Nodes[leftNode.Right].Start:doc.Tree.Nodes[leftNode.Right].End]
+
+					if bytes.Equal(recName, []byte("table")) && bytes.Equal(propName, []byte("insert")) {
+						targetTableInsert = curr
+					}
+				}
+			}
+
+			// 3. Merge Nested If
+			if node.Kind == ast.KindIf && targetNestedIf == ast.InvalidNode {
+				var hasElse bool
+
+				for i := uint16(0); i < node.Count; i++ {
+					childID := doc.Tree.ExtraList[node.Extra+uint32(i)]
+					if doc.Tree.Nodes[childID].Kind == ast.KindElseIf || doc.Tree.Nodes[childID].Kind == ast.KindElse {
+						hasElse = true
+
+						break
+					}
+				}
+
+				if !hasElse {
+					blockNode := doc.Tree.Nodes[node.Right]
+					if blockNode.Count == 1 {
+						innerStmtID := doc.Tree.ExtraList[blockNode.Extra]
+						innerStmt := doc.Tree.Nodes[innerStmtID]
+						if innerStmt.Kind == ast.KindIf {
+							var innerHasElse bool
+
+							for i := uint16(0); i < innerStmt.Count; i++ {
+								childID := doc.Tree.ExtraList[innerStmt.Extra+uint32(i)]
+								if doc.Tree.Nodes[childID].Kind == ast.KindElseIf || doc.Tree.Nodes[childID].Kind == ast.KindElse {
+									innerHasElse = true
+
+									break
+								}
+							}
+
+							if !innerHasElse {
+								targetNestedIf = curr
+								nestedIfTitle = "Merge nested 'if' statements"
+							}
+						}
+					}
+				}
+			}
+
+			curr = node.Parent
 		}
 
 		// 1. Condition Inverter
@@ -2673,6 +2797,57 @@ func (s *Server) handleMessage(req Request) {
 					},
 				})
 			}
+		}
+
+		// 3. Optimize table.insert
+		if targetTableInsert != ast.InvalidNode {
+			actions = append(actions, CodeAction{
+				Title:       "Optimize 'table.insert' to 't[#t+1]'",
+				Kind:        "refactor.rewrite",
+				IsPreferred: true,
+				Data: map[string]any{
+					"type":   "optimizeTableInsert",
+					"uri":    uri,
+					"nodeId": float64(targetTableInsert),
+				},
+			})
+		}
+
+		// 4. Convert Method Signature
+		if targetMethod != ast.InvalidNode {
+			methodNode := doc.Tree.Nodes[targetMethod]
+			nameNode := doc.Tree.Nodes[methodNode.Left]
+
+			title := "Convert to dot notation (.method)"
+
+			if nameNode.Kind == ast.KindMemberExpr {
+				title = "Convert to colon notation (:method)"
+			}
+
+			actions = append(actions, CodeAction{
+				Title:       title,
+				Kind:        "refactor.rewrite",
+				IsPreferred: false,
+				Data: map[string]any{
+					"type":   "convertMethodSig",
+					"uri":    uri,
+					"nodeId": float64(targetMethod),
+				},
+			})
+		}
+
+		// 5. Merge Nested If
+		if targetNestedIf != ast.InvalidNode {
+			actions = append(actions, CodeAction{
+				Title:       nestedIfTitle,
+				Kind:        "refactor.rewrite",
+				IsPreferred: false,
+				Data: map[string]any{
+					"type":   "mergeNestedIf",
+					"uri":    uri,
+					"nodeId": float64(targetNestedIf),
+				},
+			})
 		}
 
 		if actions == nil {
@@ -2733,7 +2908,116 @@ func (s *Server) handleMessage(req Request) {
 						Changes: map[string][]TextEdit{
 							uri: {{
 								Range:   getNodeRange(doc.Tree, nodeID),
-								NewText: outText,
+								NewText: trimTrailingWhitespace(outText),
+							}},
+						},
+					}
+				} else if actionType == "optimizeTableInsert" {
+					callNode := doc.Tree.Nodes[nodeID]
+					arg1ID := doc.Tree.ExtraList[callNode.Extra]
+					arg2ID := doc.Tree.ExtraList[callNode.Extra+1]
+
+					arg1 := ast.String(doc.Source[doc.Tree.Nodes[arg1ID].Start:doc.Tree.Nodes[arg1ID].End])
+					arg2 := ast.String(doc.Source[doc.Tree.Nodes[arg2ID].Start:doc.Tree.Nodes[arg2ID].End])
+
+					newText := fmt.Sprintf("%s[#%s+1] = %s", arg1, arg1, arg2)
+
+					action.Edit = &WorkspaceEdit{
+						Changes: map[string][]TextEdit{
+							uri: {{
+								Range:   getNodeRange(doc.Tree, nodeID),
+								NewText: newText,
+							}},
+						},
+					}
+				} else if actionType == "convertMethodSig" {
+					funcNode := doc.Tree.Nodes[nodeID]
+					nameNode := doc.Tree.Nodes[funcNode.Left]
+
+					leftNode := doc.Tree.Nodes[nameNode.Left]
+					rightNode := doc.Tree.Nodes[nameNode.Right]
+
+					leftStr := ast.String(doc.Source[leftNode.Start:leftNode.End])
+					rightStr := ast.String(doc.Source[rightNode.Start:rightNode.End])
+
+					var newText string
+
+					if nameNode.Kind == ast.KindMethodName {
+						newText = leftStr + "." + rightStr
+					} else {
+						newText = leftStr + ":" + rightStr
+					}
+
+					action.Edit = &WorkspaceEdit{
+						Changes: map[string][]TextEdit{
+							uri: {{
+								Range:   getNodeRange(doc.Tree, funcNode.Left),
+								NewText: newText,
+							}},
+						},
+					}
+				} else if actionType == "mergeNestedIf" {
+					ifNode := doc.Tree.Nodes[nodeID]
+					blockNode := doc.Tree.Nodes[ifNode.Right]
+					innerIfID := doc.Tree.ExtraList[blockNode.Extra]
+					innerIfNode := doc.Tree.Nodes[innerIfID]
+
+					wrapCond := func(condID ast.NodeID) string {
+						condNode := doc.Tree.Nodes[condID]
+						condStr := ast.String(doc.Source[condNode.Start:condNode.End])
+
+						if condNode.Kind == ast.KindBinaryExpr && token.Kind(condNode.Extra) == token.Or {
+							return "(" + condStr + ")"
+						}
+
+						return condStr
+					}
+
+					newCond := wrapCond(ifNode.Left) + " and " + wrapCond(innerIfNode.Left)
+
+					ifLine, _ := doc.Tree.Position(ifNode.Start)
+					lineStart := doc.Tree.LineOffsets[ifLine]
+
+					var indentBytes []byte
+
+					for i := lineStart; i < ifNode.Start; i++ {
+						if doc.Source[i] == ' ' || doc.Source[i] == '\t' {
+							indentBytes = append(indentBytes, doc.Source[i])
+						} else {
+							break
+						}
+					}
+					indent := string(indentBytes)
+
+					innerIndent := indent + "\t"
+
+					if bytes.Contains(indentBytes, []byte("    ")) {
+						innerIndent = indent + "    "
+					} else if bytes.Contains(indentBytes, []byte("  ")) {
+						innerIndent = indent + "  "
+					}
+
+					var newText strings.Builder
+
+					newText.WriteString("if ")
+					newText.WriteString(newCond)
+					newText.WriteString(" then\n")
+
+					innerBody := s.flattenBlock(doc, innerIfNode.Right, innerIndent, 999)
+					if innerBody != "" {
+						newText.WriteString(innerIndent)
+						newText.WriteString(innerBody)
+						newText.WriteString("\n")
+					}
+
+					newText.WriteString(indent)
+					newText.WriteString("end")
+
+					action.Edit = &WorkspaceEdit{
+						Changes: map[string][]TextEdit{
+							uri: {{
+								Range:   getNodeRange(doc.Tree, nodeID),
+								NewText: trimTrailingWhitespace(newText.String()),
 							}},
 						},
 					}
@@ -6021,4 +6305,20 @@ func hasPrefixFold(b, prefix []byte) bool {
 	}
 
 	return true
+}
+
+func trimTrailingWhitespace(text string) string {
+	var out strings.Builder
+
+	lines := strings.Split(text, "\n")
+
+	for i, line := range lines {
+		out.WriteString(strings.TrimRight(line, " \t\r"))
+
+		if i < len(lines)-1 {
+			out.WriteString("\n")
+		}
+	}
+
+	return out.String()
 }

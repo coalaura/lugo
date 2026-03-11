@@ -53,6 +53,7 @@ type InitializationOptions struct {
 
 	InlayParamHints    bool `json:"inlayParamHints"`
 	InlaySuppressMatch bool `json:"inlaySuppressMatch"`
+	InlayImplicitSelf  bool `json:"inlayImplicitSelf"`
 
 	FeatureDocHighlight bool `json:"featureDocHighlight"`
 	FeatureHoverEval    bool `json:"featureHoverEval"`
@@ -350,6 +351,7 @@ type InlayHint struct {
 	Position     Position      `json:"position"`
 	Label        string        `json:"label"`
 	Kind         InlayHintKind `json:"kind,omitempty"`
+	Tooltip      string        `json:"tooltip,omitempty"`
 	PaddingLeft  bool          `json:"paddingLeft,omitempty"`
 	PaddingRight bool          `json:"paddingRight,omitempty"`
 }

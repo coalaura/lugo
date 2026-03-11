@@ -172,6 +172,7 @@ async function startClient(context) {
 
 			inlayParamHints: config.get("inlayHints.parameterNames") !== false,
 			inlaySuppressMatch: config.get("inlayHints.suppressWhenArgumentMatchesName") !== false,
+			inlayImplicitSelf: config.get("inlayHints.implicitSelf") !== false,
 
 			featureDocHighlight: config.get("features.documentHighlight") !== false,
 			featureHoverEval: config.get("features.hoverEvaluation") !== false,
