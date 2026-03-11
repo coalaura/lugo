@@ -21,6 +21,7 @@ import (
 	"github.com/coalaura/lugo/ast"
 	"github.com/coalaura/lugo/parser"
 	"github.com/coalaura/lugo/semantic"
+	"github.com/coalaura/lugo/token"
 	"github.com/coalaura/plain"
 )
 
@@ -323,13 +324,15 @@ func (s *Server) handleMessage(req Request) {
 				RenameProvider: map[string]bool{
 					"prepareProvider": true,
 				},
-				ReferencesProvider:         true,
-				DocumentSymbolProvider:     true,
-				WorkspaceSymbolProvider:    true,
-				InlayHintProvider:          s.InlayParamHints,
-				CodeActionProvider:         true,
-				FoldingRangeProvider:       true,
-				CallHierarchyProvider:      true,
+				ReferencesProvider:      true,
+				DocumentSymbolProvider:  true,
+				WorkspaceSymbolProvider: true,
+				InlayHintProvider:       s.InlayParamHints,
+				FoldingRangeProvider:    true,
+				CallHierarchyProvider:   true,
+				CodeActionProvider: map[string]any{
+					"codeActionKinds": []string{"quickfix", "refactor.rewrite"},
+				},
 				DocumentHighlightProvider:  s.FeatureDocHighlight,
 				DocumentFormattingProvider: s.FeatureFormatting,
 				CodeLensProvider:           codeLensOptions,
@@ -2590,6 +2593,108 @@ func (s *Server) handleMessage(req Request) {
 					Edit: &WorkspaceEdit{
 						Changes: map[string][]TextEdit{
 							uri: allEdits,
+						},
+					},
+				})
+			}
+		}
+
+		var (
+			targetIf   ast.NodeID = ast.InvalidNode
+			targetCond ast.NodeID = ast.InvalidNode
+			condTitle  string
+		)
+
+		cursorLine := params.Range.Start.Line
+
+		for i := 1; i < len(doc.Tree.Nodes); i++ {
+			node := doc.Tree.Nodes[i]
+			if node.Kind == ast.KindIf || node.Kind == ast.KindElseIf || node.Kind == ast.KindWhile {
+				sLine, _ := doc.Tree.Position(node.Start)
+				if sLine == cursorLine {
+					switch node.Kind {
+					case ast.KindIf:
+						targetIf = ast.NodeID(i)
+						condTitle = "Invert 'if' condition"
+					case ast.KindElseIf:
+						condTitle = "Invert 'elseif' condition"
+					case ast.KindWhile:
+						condTitle = "Invert 'while' condition"
+					}
+
+					targetCond = node.Left
+
+					break
+				}
+			}
+		}
+
+		if targetCond != ast.InvalidNode {
+			invertedCond := s.invertCondition(doc, targetCond)
+
+			actions = append(actions, CodeAction{
+				Title:       condTitle,
+				Kind:        "refactor.rewrite",
+				IsPreferred: false,
+				Edit: &WorkspaceEdit{
+					Changes: map[string][]TextEdit{
+						uri: {
+							{
+								Range:   getNodeRange(doc.Tree, targetCond),
+								NewText: invertedCond,
+							},
+						},
+					},
+				},
+			})
+		}
+
+		if targetIf != ast.InvalidNode {
+			ifNode := doc.Tree.Nodes[targetIf]
+
+			var hasElseIf bool
+
+			for i := uint16(0); i < ifNode.Count; i++ {
+				child := doc.Tree.Nodes[doc.Tree.ExtraList[ifNode.Extra+uint32(i)]]
+				if child.Kind == ast.KindElseIf {
+					hasElseIf = true
+
+					break
+				}
+			}
+
+			_, isSafe := s.checkSafetyAndBudget(doc, targetIf, 3)
+
+			if !hasElseIf && isSafe {
+				ifLine, _ := doc.Tree.Position(ifNode.Start)
+				lineStart := doc.Tree.LineOffsets[ifLine]
+
+				var indentBytes []byte
+
+				for i := lineStart; i < ifNode.Start; i++ {
+					if doc.Source[i] == ' ' || doc.Source[i] == '\t' {
+						indentBytes = append(indentBytes, doc.Source[i])
+					} else {
+						break
+					}
+				}
+
+				indent := string(indentBytes)
+
+				outText := s.formatStatement(doc, targetIf, indent, 3)
+
+				actions = append(actions, CodeAction{
+					Title:       "Convert to early returns (recursive)",
+					Kind:        "refactor.rewrite",
+					IsPreferred: false,
+					Edit: &WorkspaceEdit{
+						Changes: map[string][]TextEdit{
+							uri: {
+								{
+									Range:   getNodeRange(doc.Tree, targetIf),
+									NewText: outText,
+								},
+							},
 						},
 					},
 				})
@@ -5230,6 +5335,376 @@ func (s *Server) suggestGlobal(name string) string {
 	}
 
 	return bestMatch
+}
+
+func (s *Server) checkSafetyAndBudget(doc *Document, targetIf ast.NodeID, budget int) ([]ast.NodeID, bool) {
+	var trailing []ast.NodeID
+
+	curr := targetIf
+	isImmediateBlock := true
+
+	for curr != ast.InvalidNode {
+		pID := doc.Tree.Nodes[curr].Parent
+		if pID == ast.InvalidNode {
+			break
+		}
+
+		pNode := doc.Tree.Nodes[pID]
+
+		if pNode.Kind == ast.KindBlock || pNode.Kind == ast.KindFile || pNode.Kind == ast.KindRepeat {
+			idx := -1
+			for i := uint16(0); i < pNode.Count; i++ {
+				if doc.Tree.ExtraList[pNode.Extra+uint32(i)] == curr {
+					idx = int(i)
+					break
+				}
+			}
+
+			if idx != -1 {
+				elementsAfter := int(pNode.Count) - 1 - idx
+
+				if isImmediateBlock {
+					if elementsAfter > budget {
+						return nil, false
+					}
+					for i := idx + 1; i < int(pNode.Count); i++ {
+						trailing = append(trailing, doc.Tree.ExtraList[pNode.Extra+uint32(i)])
+					}
+					isImmediateBlock = false
+				} else {
+					// If ANY outer block has trailing statements, we cannot early return,
+					// because we would accidentally skip executing them!
+					if elementsAfter > 0 {
+						return nil, false
+					}
+				}
+			}
+		} else if pNode.Kind == ast.KindIf || pNode.Kind == ast.KindElseIf || pNode.Kind == ast.KindElse || pNode.Kind == ast.KindDo {
+			// Transparent structural blocks
+		} else if pNode.Kind == ast.KindFunctionExpr || pNode.Kind == ast.KindFunctionStmt || pNode.Kind == ast.KindLocalFunction {
+			return trailing, true // Safe function boundary
+		} else if pNode.Kind == ast.KindWhile || pNode.Kind == ast.KindForIn || pNode.Kind == ast.KindForNum {
+			return nil, false // Exiting a loop is a break, not a return. Unsafe.
+		}
+
+		curr = pID
+	}
+
+	return trailing, true
+}
+
+func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string, budget int) string {
+	node := doc.Tree.Nodes[stmtID]
+	if node.Kind != ast.KindIf && node.Kind != ast.KindDo {
+		return reindentNodeText(doc, stmtID, indent)
+	}
+
+	innerIndent := indent + "\t"
+
+	if strings.Contains(indent, "    ") {
+		innerIndent = indent + "    "
+	} else if strings.Contains(indent, "  ") {
+		innerIndent = indent + "  "
+	}
+
+	if node.Kind == ast.KindDo {
+		var out strings.Builder
+
+		out.WriteString("do\n")
+		out.WriteString(s.flattenBlock(doc, node.Left, innerIndent, budget))
+		out.WriteString("\n")
+		out.WriteString(indent)
+		out.WriteString("end")
+
+		return out.String()
+	}
+
+	var (
+		hasElseIf bool
+		elseBlock ast.NodeID = ast.InvalidNode
+	)
+
+	for i := uint16(0); i < node.Count; i++ {
+		child := doc.Tree.Nodes[doc.Tree.ExtraList[node.Extra+uint32(i)]]
+
+		switch child.Kind {
+		case ast.KindElseIf:
+			hasElseIf = true
+		case ast.KindElse:
+			elseBlock = doc.Tree.ExtraList[node.Extra+uint32(i)]
+		}
+	}
+
+	trailing, isSafe := s.checkSafetyAndBudget(doc, stmtID, budget)
+
+	if !hasElseIf && isSafe {
+		var out strings.Builder
+
+		out.WriteString("if ")
+		out.WriteString(s.invertCondition(doc, node.Left))
+		out.WriteString(" then\n")
+
+		var lastEmitted ast.NodeID = ast.InvalidNode
+
+		if elseBlock != ast.InvalidNode {
+			elseNode := doc.Tree.Nodes[elseBlock]
+			elseBlockNode := doc.Tree.Nodes[elseNode.Left]
+
+			for i := uint16(0); i < elseBlockNode.Count; i++ {
+				childID := doc.Tree.ExtraList[elseBlockNode.Extra+uint32(i)]
+
+				if lastEmitted != ast.InvalidNode {
+					out.WriteString("\n")
+				}
+
+				out.WriteString(innerIndent)
+				out.WriteString(reindentNodeText(doc, childID, innerIndent))
+				out.WriteString("\n")
+
+				lastEmitted = childID
+			}
+		}
+
+		if !isTerminal(doc.Tree, lastEmitted) {
+			for _, trailID := range trailing {
+				if lastEmitted != ast.InvalidNode {
+					out.WriteString("\n")
+				}
+
+				out.WriteString(innerIndent)
+				out.WriteString(reindentNodeText(doc, trailID, innerIndent))
+				out.WriteString("\n")
+
+				lastEmitted = trailID
+			}
+
+			if !isTerminal(doc.Tree, lastEmitted) {
+				if lastEmitted != ast.InvalidNode {
+					out.WriteString("\n")
+				}
+
+				out.WriteString(innerIndent)
+				out.WriteString("return\n")
+			}
+		}
+
+		out.WriteString(indent)
+		out.WriteString("end\n\n")
+
+		out.WriteString(indent)
+		out.WriteString(s.flattenBlock(doc, node.Right, indent, budget))
+
+		return out.String()
+	}
+
+	var out strings.Builder
+
+	out.WriteString("if ")
+	out.WriteString(ast.String(doc.Source[doc.Tree.Nodes[node.Left].Start:doc.Tree.Nodes[node.Left].End]))
+	out.WriteString(" then\n")
+
+	thenText := s.flattenBlock(doc, node.Right, innerIndent, budget)
+	if thenText != "" {
+		out.WriteString(innerIndent)
+		out.WriteString(thenText)
+		out.WriteString("\n")
+	}
+
+	for i := uint16(0); i < node.Count; i++ {
+		childID := doc.Tree.ExtraList[node.Extra+uint32(i)]
+		child := doc.Tree.Nodes[childID]
+
+		switch child.Kind {
+		case ast.KindElseIf:
+			out.WriteString(indent)
+			out.WriteString("elseif ")
+			out.WriteString(ast.String(doc.Source[doc.Tree.Nodes[child.Left].Start:doc.Tree.Nodes[child.Left].End]))
+			out.WriteString(" then\n")
+
+			eiText := s.flattenBlock(doc, child.Right, innerIndent, budget)
+			if eiText != "" {
+				out.WriteString(innerIndent)
+				out.WriteString(eiText)
+				out.WriteString("\n")
+			}
+		case ast.KindElse:
+			out.WriteString(indent)
+			out.WriteString("else\n")
+
+			eText := s.flattenBlock(doc, child.Left, innerIndent, budget)
+			if eText != "" {
+				out.WriteString(innerIndent)
+				out.WriteString(eText)
+				out.WriteString("\n")
+			}
+		}
+	}
+
+	out.WriteString(indent)
+	out.WriteString("end")
+
+	return out.String()
+}
+
+func (s *Server) flattenBlock(doc *Document, blockID ast.NodeID, indent string, budget int) string {
+	if blockID == ast.InvalidNode {
+		return ""
+	}
+
+	var out strings.Builder
+
+	blockNode := doc.Tree.Nodes[blockID]
+
+	for i := uint16(0); i < blockNode.Count; i++ {
+		childID := doc.Tree.ExtraList[blockNode.Extra+uint32(i)]
+		stmtStr := s.formatStatement(doc, childID, indent, budget)
+
+		if i > 0 {
+			prevNode := doc.Tree.Nodes[doc.Tree.ExtraList[blockNode.Extra+uint32(i-1)]]
+			currNode := doc.Tree.Nodes[childID]
+			gap := doc.Source[prevNode.End:currNode.Start]
+
+			out.WriteString("\n")
+
+			if bytes.Count(gap, []byte{'\n'}) > 1 {
+				out.WriteString("\n")
+				out.WriteString(indent)
+			} else if currNode.Kind == ast.KindIf || currNode.Kind == ast.KindDo || currNode.Kind == ast.KindForNum || currNode.Kind == ast.KindForIn || currNode.Kind == ast.KindWhile {
+				out.WriteString("\n")
+				out.WriteString(indent)
+			} else {
+				out.WriteString(indent)
+			}
+		}
+
+		out.WriteString(stmtStr)
+	}
+
+	return out.String()
+}
+
+func (s *Server) invertCondition(doc *Document, condID ast.NodeID) string {
+	if condID == ast.InvalidNode {
+		return "true"
+	}
+
+	condNode := doc.Tree.Nodes[condID]
+	condStr := ast.String(doc.Source[condNode.Start:condNode.End])
+
+	switch condNode.Kind {
+	case ast.KindParenExpr:
+		return "(" + s.invertCondition(doc, condNode.Left) + ")"
+	case ast.KindUnaryExpr:
+		if bytes.HasPrefix(doc.Source[condNode.Start:condNode.End], []byte("not")) {
+			rightNode := doc.Tree.Nodes[condNode.Right]
+
+			return ast.String(doc.Source[rightNode.Start:rightNode.End])
+		}
+	case ast.KindBinaryExpr:
+		op := token.Kind(condNode.Extra)
+
+		if op == token.And || op == token.Or {
+			leftInverted := s.invertCondition(doc, condNode.Left)
+			rightInverted := s.invertCondition(doc, condNode.Right)
+
+			if op == token.And {
+				return leftInverted + " or " + rightInverted
+			}
+
+			leftNode := doc.Tree.Nodes[condNode.Left]
+			if leftNode.Kind == ast.KindBinaryExpr && token.Kind(leftNode.Extra) == token.And {
+				leftInverted = "(" + leftInverted + ")"
+			}
+
+			rightNode := doc.Tree.Nodes[condNode.Right]
+			if rightNode.Kind == ast.KindBinaryExpr && token.Kind(rightNode.Extra) == token.And {
+				rightInverted = "(" + rightInverted + ")"
+			}
+
+			return leftInverted + " and " + rightInverted
+		}
+
+		leftStr := ast.String(doc.Source[doc.Tree.Nodes[condNode.Left].Start:doc.Tree.Nodes[condNode.Left].End])
+		rightStr := ast.String(doc.Source[doc.Tree.Nodes[condNode.Right].Start:doc.Tree.Nodes[condNode.Right].End])
+
+		switch op {
+		case token.Eq:
+			return leftStr + " ~= " + rightStr
+		case token.NotEq:
+			return leftStr + " == " + rightStr
+		case token.Less:
+			return leftStr + " >= " + rightStr
+		case token.LessEq:
+			return leftStr + " > " + rightStr
+		case token.Greater:
+			return leftStr + " <= " + rightStr
+		case token.GreaterEq:
+			return leftStr + " < " + rightStr
+		}
+	}
+
+	if condNode.Kind == ast.KindIdent || condNode.Kind == ast.KindMemberExpr || condNode.Kind == ast.KindCallExpr || condNode.Kind == ast.KindMethodCall || condNode.Kind == ast.KindIndexExpr {
+		return "not " + condStr
+	}
+
+	return "not (" + condStr + ")"
+}
+
+func reindentNodeText(doc *Document, id ast.NodeID, targetIndent string) string {
+	node := doc.Tree.Nodes[id]
+	if node.Start >= node.End {
+		return ""
+	}
+
+	text := string(doc.Source[node.Start:node.End])
+
+	var baseIndent string
+
+	for i := int(node.Start) - 1; i >= 0; i-- {
+		c := doc.Source[i]
+		if c == '\n' {
+			baseIndent = string(doc.Source[i+1 : node.Start])
+
+			break
+		} else if c != ' ' && c != '\t' {
+			baseIndent = ""
+
+			break
+		}
+	}
+
+	if len(baseIndent) == 0 && node.Start > 0 {
+		for i := 0; i < int(node.Start); i++ {
+			c := doc.Source[i]
+
+			if c == ' ' || c == '\t' {
+				baseIndent += string(c)
+			} else {
+				baseIndent = ""
+			}
+		}
+	}
+
+	var out strings.Builder
+
+	lines := strings.Split(text, "\n")
+
+	for i, line := range lines {
+		if i > 0 {
+			out.WriteString("\n")
+			out.WriteString(targetIndent)
+
+			if strings.HasPrefix(line, baseIndent) {
+				out.WriteString(line[len(baseIndent):])
+			} else {
+				out.WriteString(strings.TrimLeft(line, " \t"))
+			}
+		} else {
+			out.WriteString(line)
+		}
+	}
+
+	return out.String()
 }
 
 func getRange(tree *ast.Tree, start, end uint32) Range {

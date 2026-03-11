@@ -74,7 +74,7 @@ type ServerCapabilities struct {
 	DocumentSymbolProvider     bool                   `json:"documentSymbolProvider"`
 	WorkspaceSymbolProvider    bool                   `json:"workspaceSymbolProvider"`
 	InlayHintProvider          bool                   `json:"inlayHintProvider"`
-	CodeActionProvider         bool                   `json:"codeActionProvider"`
+	CodeActionProvider         any                    `json:"codeActionProvider"`
 	FoldingRangeProvider       bool                   `json:"foldingRangeProvider"`
 	LinkedEditingRangeProvider bool                   `json:"linkedEditingRangeProvider"`
 	CallHierarchyProvider      bool                   `json:"callHierarchyProvider"`
