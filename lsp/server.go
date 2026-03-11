@@ -4298,6 +4298,19 @@ func (s *Server) publishDiagnostics(uri string) {
 		})
 	}
 
+	if doc.IsMeta {
+		WriteMessage(s.Writer, OutgoingNotification{
+			RPC:    "2.0",
+			Method: "textDocument/publishDiagnostics",
+			Params: PublishDiagnosticsParams{
+				URI:         uri,
+				Diagnostics: s.diagBuf,
+			},
+		})
+
+		return
+	}
+
 	// 2. Undefined Globals
 	if s.DiagUndefinedGlobals {
 		suggestCache := make(map[string]string)
@@ -4347,7 +4360,7 @@ func (s *Server) publishDiagnostics(uri string) {
 	}
 
 	// 3. Implicit Globals
-	if s.DiagImplicitGlobals && !doc.IsMeta {
+	if s.DiagImplicitGlobals {
 		for _, defID := range doc.Resolver.GlobalDefs {
 			node := doc.Tree.Nodes[defID]
 
@@ -4471,10 +4484,6 @@ func (s *Server) publishDiagnostics(uri string) {
 					shouldReport = s.DiagUnusedParameter
 				case "loop variable":
 					shouldReport = s.DiagUnusedLoopVar
-				}
-
-				if doc.IsMeta {
-					shouldReport = false
 				}
 
 				if shouldReport {
@@ -4809,7 +4818,7 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 
 		// Self assignment
-		if s.DiagSelfAssignment && node.Kind == ast.KindAssign && !doc.IsMeta {
+		if s.DiagSelfAssignment && node.Kind == ast.KindAssign {
 			lhsList := doc.Tree.Nodes[node.Left]
 			if node.Right != ast.InvalidNode {
 				rhsList := doc.Tree.Nodes[node.Right]
