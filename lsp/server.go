@@ -4909,7 +4909,7 @@ func (s *Server) resolveSymbolAt(uri string, offset uint32) *SymbolContext {
 }
 
 func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID) *SymbolContext {
-	if nodeID == ast.InvalidNode || doc.Tree.Nodes[nodeID].Kind != ast.KindIdent {
+	if nodeID == ast.InvalidNode || (doc.Tree.Nodes[nodeID].Kind != ast.KindIdent && doc.Tree.Nodes[nodeID].Kind != ast.KindVararg) {
 		return nil
 	}
 

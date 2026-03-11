@@ -465,7 +465,7 @@ func (p *Parser) parseIf() ast.NodeID {
 		blk := p.parseBlock(stopBlockIf)
 
 		elseifNode := p.tree.AddNode(ast.Node{
-			Kind: ast.KindElseIf, Start: elseifStart, End: p.curr.End,
+			Kind: ast.KindElseIf, Start: elseifStart, End: p.prev.End,
 			Left: cond, Right: blk,
 		})
 
@@ -482,7 +482,7 @@ func (p *Parser) parseIf() ast.NodeID {
 		blk := p.parseBlock(stopBlockEnd)
 
 		elseBlock = p.tree.AddNode(ast.Node{
-			Kind: ast.KindElse, Start: elseStart, End: p.curr.End,
+			Kind: ast.KindElse, Start: elseStart, End: p.prev.End,
 			Left: blk,
 		})
 	}
