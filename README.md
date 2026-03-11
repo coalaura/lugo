@@ -1,4 +1,4 @@
-# Lugo
+![banner](banner.jpg)
 
 [![Tests](https://github.com/coalaura/lugo/actions/workflows/test.yml/badge.svg)](https://github.com/coalaura/lugo/actions/workflows/test.yml)
 
