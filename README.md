@@ -117,6 +117,7 @@ lspconfig.lugo.setup({
 		-- Inlay Hints
 		inlayParamHints = true,
 		inlaySuppressMatch = true,
+		inlayImplicitSelf = true,
 
 		-- Editor Features
 		featureDocHighlight = true,
