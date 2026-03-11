@@ -370,6 +370,7 @@ type CodeAction struct {
 	Diagnostics []Diagnostic   `json:"diagnostics,omitempty"`
 	Edit        *WorkspaceEdit `json:"edit,omitempty"`
 	IsPreferred bool           `json:"isPreferred,omitempty"`
+	Data        any            `json:"data,omitempty"`
 }
 
 type CodeLensOptions struct {

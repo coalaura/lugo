@@ -332,6 +332,7 @@ func (s *Server) handleMessage(req Request) {
 				CallHierarchyProvider:   true,
 				CodeActionProvider: map[string]any{
 					"codeActionKinds": []string{"quickfix", "refactor.rewrite"},
+					"resolveProvider": true,
 				},
 				DocumentHighlightProvider:  s.FeatureDocHighlight,
 				DocumentFormattingProvider: s.FeatureFormatting,
@@ -2629,26 +2630,21 @@ func (s *Server) handleMessage(req Request) {
 			}
 		}
 
+		// 1. Condition Inverter
 		if targetCond != ast.InvalidNode {
-			invertedCond := s.invertCondition(doc, targetCond)
-
 			actions = append(actions, CodeAction{
 				Title:       condTitle,
 				Kind:        "refactor.rewrite",
 				IsPreferred: false,
-				Edit: &WorkspaceEdit{
-					Changes: map[string][]TextEdit{
-						uri: {
-							{
-								Range:   getNodeRange(doc.Tree, targetCond),
-								NewText: invertedCond,
-							},
-						},
-					},
+				Data: map[string]any{
+					"type":   "invertCondition",
+					"uri":    uri,
+					"nodeId": float64(targetCond),
 				},
 			})
 		}
 
+		// 2. Recursive Early-Return Converter
 		if targetIf != ast.InvalidNode {
 			ifNode := doc.Tree.Nodes[targetIf]
 
@@ -2666,36 +2662,14 @@ func (s *Server) handleMessage(req Request) {
 			_, isSafe := s.checkSafetyAndBudget(doc, targetIf, 3)
 
 			if !hasElseIf && isSafe {
-				ifLine, _ := doc.Tree.Position(ifNode.Start)
-				lineStart := doc.Tree.LineOffsets[ifLine]
-
-				var indentBytes []byte
-
-				for i := lineStart; i < ifNode.Start; i++ {
-					if doc.Source[i] == ' ' || doc.Source[i] == '\t' {
-						indentBytes = append(indentBytes, doc.Source[i])
-					} else {
-						break
-					}
-				}
-
-				indent := string(indentBytes)
-
-				outText := s.formatStatement(doc, targetIf, indent, 3)
-
 				actions = append(actions, CodeAction{
 					Title:       "Convert to early returns (recursive)",
 					Kind:        "refactor.rewrite",
 					IsPreferred: false,
-					Edit: &WorkspaceEdit{
-						Changes: map[string][]TextEdit{
-							uri: {
-								{
-									Range:   getNodeRange(doc.Tree, targetIf),
-									NewText: outText,
-								},
-							},
-						},
+					Data: map[string]any{
+						"type":   "earlyReturn",
+						"uri":    uri,
+						"nodeId": float64(targetIf),
 					},
 				})
 			}
@@ -2709,6 +2683,68 @@ func (s *Server) handleMessage(req Request) {
 			RPC:    "2.0",
 			ID:     req.ID,
 			Result: actions,
+		})
+	case "codeAction/resolve":
+		var action CodeAction
+
+		err := json.Unmarshal(req.Params, &action)
+		if err != nil {
+			return
+		}
+
+		if data, ok := action.Data.(map[string]any); ok {
+			actionType, _ := data["type"].(string)
+			uri, _ := data["uri"].(string)
+			nodeIDFloat, _ := data["nodeId"].(float64)
+
+			nodeID := ast.NodeID(nodeIDFloat)
+
+			if doc, ok := s.Documents[uri]; ok && nodeID != ast.InvalidNode {
+				if actionType == "invertCondition" {
+					invertedCond := s.invertCondition(doc, nodeID)
+					action.Edit = &WorkspaceEdit{
+						Changes: map[string][]TextEdit{
+							uri: {{
+								Range:   getNodeRange(doc.Tree, nodeID),
+								NewText: invertedCond,
+							}},
+						},
+					}
+				} else if actionType == "earlyReturn" {
+					ifNode := doc.Tree.Nodes[nodeID]
+					ifLine, _ := doc.Tree.Position(ifNode.Start)
+					lineStart := doc.Tree.LineOffsets[ifLine]
+
+					var indentBytes []byte
+
+					for i := lineStart; i < ifNode.Start; i++ {
+						if doc.Source[i] == ' ' || doc.Source[i] == '\t' {
+							indentBytes = append(indentBytes, doc.Source[i])
+						} else {
+							break
+						}
+					}
+
+					indent := string(indentBytes)
+
+					outText := s.formatStatement(doc, nodeID, indent, 3)
+
+					action.Edit = &WorkspaceEdit{
+						Changes: map[string][]TextEdit{
+							uri: {{
+								Range:   getNodeRange(doc.Tree, nodeID),
+								NewText: outText,
+							}},
+						},
+					}
+				}
+			}
+		}
+
+		WriteMessage(s.Writer, Response{
+			RPC:    "2.0",
+			ID:     req.ID,
+			Result: action,
 		})
 	case "textDocument/foldingRange":
 		var params FoldingRangeParams
