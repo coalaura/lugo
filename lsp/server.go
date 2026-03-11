@@ -3915,6 +3915,12 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 		path = realPath
 	}
 
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		s.Log.Warnf("%q not found\n", path)
+
+		return
+	}
+
 	if s.visitedDirs == nil {
 		s.visitedDirs = make(map[string]bool, 256)
 	} else {
