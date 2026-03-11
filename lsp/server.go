@@ -2144,12 +2144,43 @@ func (s *Server) handleMessage(req Request) {
 
 		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
 
+		var (
+			isComment bool
+			low       int
+			high      = len(doc.Tree.Comments)
+		)
+
+		for low < high {
+			mid := int(uint(low+high) >> 1)
+
+			c := doc.Tree.Comments[mid]
+			if c.End < offset {
+				low = mid + 1
+			} else if c.Start > offset {
+				high = mid
+			} else {
+				isComment = true
+
+				break
+			}
+		}
+
+		if isComment {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
 		var callID ast.NodeID = ast.InvalidNode
 
 		curr := doc.Tree.NodeAt(offset)
 
 		for curr != ast.InvalidNode {
 			node := doc.Tree.Nodes[curr]
+
+			if node.Kind == ast.KindBlock || node.Kind == ast.KindFunctionExpr || node.Kind == ast.KindString {
+				break
+			}
 
 			if node.Kind == ast.KindCallExpr || node.Kind == ast.KindMethodCall {
 				if offset > doc.Tree.Nodes[node.Left].End {
