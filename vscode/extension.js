@@ -35,11 +35,9 @@ function scheduleClientRestart(context) {
 }
 
 async function activate(context) {
-	await restartClient(context);
-
 	const stdProvider = {
 		provideTextDocumentContent: uri => {
-			if (!client) {
+			if (!client || !client.isRunning()) {
 				return "";
 			}
 
@@ -57,7 +55,7 @@ async function activate(context) {
 
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration(e => {
-			if (e.affectsConfiguration("lugo")) {
+			if (e.affectsConfiguration("lugo") || e.affectsConfiguration("files.exclude") || e.affectsConfiguration("search.exclude")) {
 				scheduleClientRestart(context);
 			}
 		})
@@ -97,6 +95,8 @@ async function activate(context) {
 			vscode.commands.executeCommand("editor.action.showReferences", uri, pos, locs);
 		})
 	);
+
+	await restartClient(context);
 }
 
 async function startClient(context) {
@@ -203,18 +203,22 @@ function triggerReindex() {
 			cancellable: false,
 		},
 		async () => {
-			await client.sendRequest("lugo/reindex");
-
-			indexing = false;
+			try {
+				await client.sendRequest("lugo/reindex");
+			} finally {
+				indexing = false;
+			}
 		}
 	);
 }
 
 function deactivate() {
-	clearTimeout(debounce);
+	if (debounce) {
+		clearTimeout(debounce);
+	}
 
 	if (!client) {
-		return;
+		return undefined;
 	}
 
 	return client.stop();
