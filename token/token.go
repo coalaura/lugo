@@ -91,14 +91,20 @@ func NewTokenSet(kinds ...Kind) TokenSet {
 	var s TokenSet
 
 	for _, k := range kinds {
-		s[k/64] |= 1 << (k % 64)
+		if i := k / 64; i < 2 {
+			s[i] |= 1 << (k % 64)
+		}
 	}
 
 	return s
 }
 
 func (s TokenSet) Contains(k Kind) bool {
-	return (s[k/64] & (1 << (k % 64))) != 0
+	if i := k / 64; i < 2 {
+		return (s[i] & (1 << (k % 64))) != 0
+	}
+
+	return false
 }
 
 // Text extracts the token's string value from the source without allocating,

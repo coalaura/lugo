@@ -173,11 +173,20 @@ func (t *Tree) Offset(line, col uint32) uint32 {
 // NodeAt finds the narrowest AST node containing the given byte offset in O(log depth) time.
 func (t *Tree) NodeAt(offset uint32) NodeID {
 	curr := t.Root
+
+	if int(curr) >= len(t.Nodes) {
+		return InvalidNode
+	}
+
 	if curr == InvalidNode || offset < t.Nodes[curr].Start || offset > t.Nodes[curr].End {
 		return InvalidNode
 	}
 
 	for {
+		if int(curr) >= len(t.Nodes) {
+			return InvalidNode
+		}
+
 		node := t.Nodes[curr]
 
 		var next NodeID = InvalidNode
@@ -265,13 +274,16 @@ func (t *Tree) Reset(source []byte) {
 	if cap(t.Nodes) < len(source)/10 {
 		t.Nodes = make([]Node, 1, len(source)/10+1024)
 		t.ExtraList = make([]NodeID, 0, len(source)/20+512)
-	} else {
+	} else if len(t.Nodes) > 0 {
 		t.Nodes = t.Nodes[:1]
 		t.ExtraList = t.ExtraList[:0]
 	}
 
 	t.Comments = t.Comments[:0]
-	t.LineOffsets = t.LineOffsets[:1]
+
+	if len(t.LineOffsets) > 0 {
+		t.LineOffsets = t.LineOffsets[:1]
+	}
 
 	t.LineOffsets = computeLineOffsets(source, t.LineOffsets)
 }

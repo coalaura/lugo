@@ -143,8 +143,13 @@ func (r *Resolver) pushScope() int {
 }
 
 func (r *Resolver) popScope(startScope int) {
-	r.scopeStarts = r.scopeStarts[:len(r.scopeStarts)-1]
-	r.scopeStack = r.scopeStack[:startScope]
+	if len(r.scopeStarts) > 0 {
+		r.scopeStarts = r.scopeStarts[:len(r.scopeStarts)-1]
+	}
+
+	if startScope >= 0 && startScope <= len(r.scopeStack) {
+		r.scopeStack = r.scopeStack[:startScope]
+	}
 }
 
 func (r *Resolver) declare(identID ast.NodeID) {
@@ -351,9 +356,20 @@ func (r *Resolver) getTableReceiver(id ast.NodeID) (ast.NodeID, []byte) {
 }
 
 func (r *Resolver) source(id ast.NodeID) []byte {
-	node := r.Tree.Nodes[id]
+	nodes := r.Tree.Nodes
+	idx := int(id)
 
-	return r.Tree.Source[node.Start:node.End]
+	if idx >= 0 && idx < len(nodes) {
+		node := nodes[idx]
+		src := r.Tree.Source
+		start, end := int(node.Start), int(node.End)
+
+		if start >= 0 && start <= end && end <= len(src) {
+			return src[start:end]
+		}
+	}
+
+	return nil
 }
 
 func (r *Resolver) visit(id ast.NodeID) {

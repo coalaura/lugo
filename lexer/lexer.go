@@ -340,7 +340,7 @@ func (l *Lexer) readIdent(start uint32) token.Token {
 }
 
 func (l *Lexer) readNumber(start uint32) token.Token {
-	isHex := false
+	var isHex bool
 
 	if l.source[start] == '0' && (l.ch == 'x' || l.ch == 'X') {
 		isHex = true
