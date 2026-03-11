@@ -4,7 +4,7 @@
     "description": "A high-performance, zero-allocation Lua 5.4 parser and Language Server (LSP).",
     "publisher": "coalaura",
     "icon": "logo.png",
-    "version": "0.7.0",
+    "version": "0.7.1",
     "galleryBanner": {
         "color": "#161928",
         "theme": "dark"
@@ -228,7 +228,7 @@
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
-                        "markdownDescription": "Enable inline `[self]` hints for method definitions using the colon syntax.",
+                        "markdownDescription": "Enable inline `self` hints for method definitions using the colon syntax.",
                         "order": 23
                     },
                     "lugo.features.documentHighlight": {

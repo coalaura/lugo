@@ -160,6 +160,7 @@ You can configure Lugo via your VS Code `settings.json` (also available via the 
 **Editor Features**
 * `lugo.inlayHints.parameterNames`: Enable inline parameter name hints for function and method calls.
 * `lugo.inlayHints.suppressWhenArgumentMatchesName`: Suppress parameter name hints when the argument name exactly matches the parameter name (e.g., avoiding `pSource: pSource`).
+* `lugo.inlayHints.implicitSelf`: Enable inline `self` hints for method definitions using the colon syntax.
 * `lugo.features.documentHighlight`: Enable document highlights for variables and function/method calls.
 * `lugo.features.hoverEvaluation`: Evaluate and display the result of constant expressions on hover (e.g., `1 + 2` -> `3`).
 * `lugo.features.codeLens`: Enable CodeLens annotations (e.g., reference counts) above function definitions.
