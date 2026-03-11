@@ -4114,13 +4114,14 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		for name := range doc.ExtractLuaDocFields(defID) {
 			fieldHash := ast.HashBytes(name)
 
-			buf := make([]byte, 0, len(identBytes)+1+len(name))
+			var sb strings.Builder
 
-			buf = append(buf, identBytes...)
-			buf = append(buf, '.')
-			buf = append(buf, name...)
+			sb.Grow(len(identBytes) + 1 + len(name))
+			sb.Write(identBytes)
+			sb.WriteByte('.')
+			sb.Write(name)
 
-			s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fieldHash}, uri, defID, depth, string(buf))
+			s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fieldHash}, uri, defID, depth, sb.String())
 		}
 
 		// Module Aliasing
@@ -4142,12 +4143,14 @@ func (s *Server) updateDocument(uri string, source []byte) {
 						if bytes.Equal(fd.ReceiverName, localName) {
 							propBytes := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
 
-							buf := make([]byte, 0, len(identBytes)+1+len(propBytes))
-							buf = append(buf, identBytes...)
-							buf = append(buf, '.')
-							buf = append(buf, propBytes...)
+							var sb strings.Builder
 
-							s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(buf))
+							sb.Grow(len(identBytes) + 1 + len(propBytes))
+							sb.Write(identBytes)
+							sb.WriteByte('.')
+							sb.Write(propBytes)
+
+							s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, sb.String())
 						} else if len(fd.ReceiverName) > len(localName) && bytes.HasPrefix(fd.ReceiverName, localName) && fd.ReceiverName[len(localName)] == '.' {
 							suffix := fd.ReceiverName[len(localName)+1:]
 
@@ -4155,14 +4158,16 @@ func (s *Server) updateDocument(uri string, source []byte) {
 
 							propBytes := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
 
-							buf := make([]byte, 0, len(identBytes)+2+len(suffix)+len(propBytes))
-							buf = append(buf, identBytes...)
-							buf = append(buf, '.')
-							buf = append(buf, suffix...)
-							buf = append(buf, '.')
-							buf = append(buf, propBytes...)
+							var sb strings.Builder
 
-							s.setGlobalSymbol(GlobalKey{ReceiverHash: newRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(buf))
+							sb.Grow(len(identBytes) + 2 + len(suffix) + len(propBytes))
+							sb.Write(identBytes)
+							sb.WriteByte('.')
+							sb.Write(suffix)
+							sb.WriteByte('.')
+							sb.Write(propBytes)
+
+							s.setGlobalSymbol(GlobalKey{ReceiverHash: newRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, sb.String())
 						}
 					}
 				}
@@ -4205,12 +4210,14 @@ func (s *Server) updateDocument(uri string, source []byte) {
 				sep = ':'
 			}
 
-			buf := make([]byte, 0, len(globalRecName)+1+len(propBytes))
-			buf = append(buf, globalRecName...)
-			buf = append(buf, sep)
-			buf = append(buf, propBytes...)
+			var sb strings.Builder
 
-			s.setGlobalSymbol(GlobalKey{ReceiverHash: globalRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, string(buf))
+			sb.Grow(len(globalRecName) + 1 + len(propBytes))
+			sb.Write(globalRecName)
+			sb.WriteByte(sep)
+			sb.Write(propBytes)
+
+			s.setGlobalSymbol(GlobalKey{ReceiverHash: globalRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, sb.String())
 		}
 	}
 

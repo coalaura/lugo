@@ -59,6 +59,8 @@ type Resolver struct {
 	LocalDefs       []ast.NodeID
 	ShadowedOuter   []ShadowPair
 	Reassignments   []Reassignment
+
+	nameArena []byte
 }
 
 func New(tree *ast.Tree) *Resolver {
@@ -77,6 +79,7 @@ func New(tree *ast.Tree) *Resolver {
 		scopeStarts:     make([]int, 0, 64),
 		DuplicateLocals: make([]ast.NodeID, 0, 16),
 		Reassignments:   make([]Reassignment, 0, 128),
+		nameArena:       make([]byte, 0, 2048),
 	}
 }
 
@@ -112,6 +115,7 @@ func (r *Resolver) Reset() {
 	r.LocalDefs = r.LocalDefs[:0]
 	r.ShadowedOuter = r.ShadowedOuter[:0]
 	r.Reassignments = r.Reassignments[:0]
+	r.nameArena = r.nameArena[:0]
 }
 
 func (r *Resolver) Resolve(root ast.NodeID) {
@@ -328,19 +332,17 @@ func (r *Resolver) getTableReceiver(id ast.NodeID) (ast.NodeID, []byte) {
 	}
 
 	if pNode.Kind == ast.KindRecordField {
-		keyNode := r.Tree.Nodes[pNode.Left]
-
 		grandParentID := pNode.Parent
 		if grandParentID != ast.InvalidNode && r.Tree.Nodes[grandParentID].Kind == ast.KindTableExpr {
 			parentDef, parentRec := r.getTableReceiver(grandParentID)
 			if len(parentRec) > 0 {
-				res := make([]byte, 0, len(parentRec)+1+int(keyNode.End-keyNode.Start))
+				startIdx := len(r.nameArena)
 
-				res = append(res, parentRec...)
-				res = append(res, '.')
-				res = append(res, r.source(pNode.Left)...)
+				r.nameArena = append(r.nameArena, parentRec...)
+				r.nameArena = append(r.nameArena, '.')
+				r.nameArena = append(r.nameArena, r.source(pNode.Left)...)
 
-				return parentDef, res
+				return parentDef, r.nameArena[startIdx:]
 			}
 		}
 	}

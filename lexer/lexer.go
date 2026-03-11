@@ -61,27 +61,28 @@ func (l *Lexer) Reset(source []byte) {
 }
 
 func (l *Lexer) advance() {
-	if l.read >= uint32(len(l.source)) {
+	read := int(l.read)
+	src := l.source
+
+	if read < len(src) {
+		l.ch = src[read]
+		l.cursor = uint32(read)
+		l.read = uint32(read + 1)
+	} else {
 		l.ch = 0
-
 		l.cursor = l.read
-
-		return
 	}
-
-	l.ch = l.source[l.read]
-
-	l.cursor = l.read
-
-	l.read++
 }
 
 func (l *Lexer) peek() byte {
-	if l.read >= uint32(len(l.source)) {
-		return 0
+	read := int(l.read)
+	src := l.source
+
+	if read < len(src) {
+		return src[read]
 	}
 
-	return l.source[l.read]
+	return 0
 }
 
 func (l *Lexer) Next() token.Token {
@@ -235,9 +236,9 @@ func (l *Lexer) skipWhitespace() {
 	}
 
 	src := l.source
-	read := l.cursor
+	read := int(l.cursor)
 
-	for read < uint32(len(src)) {
+	for read < len(src) {
 		c := src[read]
 
 		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
@@ -247,22 +248,22 @@ func (l *Lexer) skipWhitespace() {
 		}
 	}
 
-	l.cursor = read
+	l.cursor = uint32(read)
 
-	if read < uint32(len(src)) {
+	if read < len(src) {
 		l.ch = src[read]
-		l.read = read + 1
+		l.read = uint32(read + 1)
 	} else {
 		l.ch = 0
-		l.read = read
+		l.read = uint32(read)
 	}
 }
 
 func (l *Lexer) readIdent(start uint32) token.Token {
 	src := l.source
-	read := l.cursor
+	read := int(l.cursor)
 
-	for read < uint32(len(src)) {
+	for read < len(src) {
 		if charProps[src[read]]&propIdent != 0 {
 			read++
 		} else {
@@ -270,65 +271,69 @@ func (l *Lexer) readIdent(start uint32) token.Token {
 		}
 	}
 
-	l.cursor = read
+	l.cursor = uint32(read)
 
-	if read < uint32(len(src)) {
+	if read < len(src) {
 		l.ch = src[read]
-		l.read = read + 1
+		l.read = uint32(read + 1)
 	} else {
 		l.ch = 0
-		l.read = read
+		l.read = uint32(read)
 	}
 
 	// The compiler explicitly optimizes switch string(bytes) to do zero heap allocations.
 	// This is significantly faster than a map hash lookup.
 	kind := token.Ident
 
-	switch string(l.source[start:l.cursor]) {
-	case "and":
-		kind = token.And
-	case "break":
-		kind = token.Break
-	case "do":
-		kind = token.Do
-	case "else":
-		kind = token.Else
-	case "elseif":
-		kind = token.ElseIf
-	case "end":
-		kind = token.End
-	case "false":
-		kind = token.False
-	case "for":
-		kind = token.For
-	case "function":
-		kind = token.Function
-	case "goto":
-		kind = token.Goto
-	case "if":
-		kind = token.If
-	case "in":
-		kind = token.In
-	case "local":
-		kind = token.Local
-	case "nil":
-		kind = token.Nil
-	case "not":
-		kind = token.Not
-	case "or":
-		kind = token.Or
-	case "repeat":
-		kind = token.Repeat
-	case "return":
-		kind = token.Return
-	case "then":
-		kind = token.Then
-	case "true":
-		kind = token.True
-	case "until":
-		kind = token.Until
-	case "while":
-		kind = token.While
+	startInt := int(start)
+
+	if startInt <= read && read <= len(src) {
+		switch string(src[startInt:read]) {
+		case "and":
+			kind = token.And
+		case "break":
+			kind = token.Break
+		case "do":
+			kind = token.Do
+		case "else":
+			kind = token.Else
+		case "elseif":
+			kind = token.ElseIf
+		case "end":
+			kind = token.End
+		case "false":
+			kind = token.False
+		case "for":
+			kind = token.For
+		case "function":
+			kind = token.Function
+		case "goto":
+			kind = token.Goto
+		case "if":
+			kind = token.If
+		case "in":
+			kind = token.In
+		case "local":
+			kind = token.Local
+		case "nil":
+			kind = token.Nil
+		case "not":
+			kind = token.Not
+		case "or":
+			kind = token.Or
+		case "repeat":
+			kind = token.Repeat
+		case "return":
+			kind = token.Return
+		case "then":
+			kind = token.Then
+		case "true":
+			kind = token.True
+		case "until":
+			kind = token.Until
+		case "while":
+			kind = token.While
+		}
 	}
 
 	return token.Token{Kind: kind, Start: start, End: l.cursor}
@@ -370,15 +375,15 @@ func (l *Lexer) readNumber(start uint32) token.Token {
 
 func (l *Lexer) readString(start uint32, quote byte) token.Token {
 	src := l.source
-	read := l.cursor
+	read := int(l.cursor)
 
-	for read < uint32(len(src)) {
+	for read < len(src) {
 		c := src[read]
 
 		if c == '\\' {
 			read++
 
-			if read < uint32(len(src)) {
+			if read < len(src) {
 				read++
 			}
 		} else if c == quote {
@@ -390,14 +395,14 @@ func (l *Lexer) readString(start uint32, quote byte) token.Token {
 		}
 	}
 
-	l.cursor = read
+	l.cursor = uint32(read)
 
-	if read < uint32(len(src)) {
+	if read < len(src) {
 		l.ch = src[read]
-		l.read = read + 1
+		l.read = uint32(read + 1)
 	} else {
 		l.ch = 0
-		l.read = read
+		l.read = uint32(read)
 	}
 
 	return token.Token{Kind: token.String, Start: start, End: l.cursor}

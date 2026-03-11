@@ -127,39 +127,47 @@ func NewTree(source []byte) *Tree {
 
 // Position converts a byte offset to a 0-indexed Line and Column
 func (t *Tree) Position(offset uint32) (line, col uint32) {
-	var (
-		low  int
-		high = len(t.LineOffsets)
-	)
+	lines := t.LineOffsets
+	low, high := 0, len(lines)
 
 	for low < high {
 		mid := int(uint(low+high) >> 1)
 
-		if t.LineOffsets[mid] <= offset {
-			low = mid + 1
+		if uint(mid) < uint(len(lines)) {
+			if lines[mid] <= offset {
+				low = mid + 1
+			} else {
+				high = mid
+			}
 		} else {
-			high = mid
+			break
 		}
 	}
 
 	lineIdx := uint32(low - 1)
 
-	return lineIdx, offset - t.LineOffsets[lineIdx]
+	if uint(lineIdx) < uint(len(lines)) {
+		return lineIdx, offset - lines[lineIdx]
+	}
+
+	return 0, 0
 }
 
 // Offset converts a 0-indexed Line and Column into a byte offset
 func (t *Tree) Offset(line, col uint32) uint32 {
-	if int(line) >= len(t.LineOffsets) {
-		return uint32(len(t.Source))
+	lines := t.LineOffsets
+
+	if uint(line) < uint(len(lines)) {
+		offset := lines[line] + col
+
+		if offset > uint32(len(t.Source)) {
+			return uint32(len(t.Source))
+		}
+
+		return offset
 	}
 
-	offset := t.LineOffsets[line] + col
-
-	if offset > uint32(len(t.Source)) {
-		return uint32(len(t.Source))
-	}
-
-	return offset
+	return uint32(len(t.Source))
 }
 
 // NodeAt finds the narrowest AST node containing the given byte offset in O(log depth) time.
@@ -271,7 +279,7 @@ func (t *Tree) Reset(source []byte) {
 func computeLineOffsets(source []byte, lines []uint32) []uint32 {
 	var offset int
 
-	for {
+	for offset < len(source) {
 		idx := bytes.IndexByte(source[offset:], '\n')
 		if idx == -1 {
 			break

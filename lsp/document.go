@@ -25,6 +25,7 @@ type Document struct {
 	Inferring  []bool
 	IsMeta     bool
 	commentBuf []byte
+	depBuf     []byte
 }
 
 func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {
@@ -426,9 +427,15 @@ func (doc *Document) HasDeprecatedTag(id ast.NodeID) (bool, string) {
 				endIdx = len(rest)
 			}
 
-			msgBytes := cleanLuaCommentBytes(nil, rest[:endIdx])
+			doc.depBuf = doc.depBuf[:0]
+
+			msgBytes := cleanLuaCommentBytes(doc.depBuf, rest[:endIdx])
+
 			msg = string(bytes.TrimSpace(msgBytes))
+
 			found = true
+
+			doc.depBuf = msgBytes
 
 			break
 		}
