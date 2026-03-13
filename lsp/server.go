@@ -105,6 +105,12 @@ type RefKey struct {
 	ID  ast.NodeID
 }
 
+type DeadStoreInfo struct {
+	CanRemoveAll bool
+	Edits        []TextEdit
+	Coverage     []ast.NodeID
+}
+
 type Server struct {
 	Version           string
 	Reader            *bufio.Reader
@@ -552,7 +558,7 @@ func (s *Server) handleMessage(req Request) {
 
 			if targetURI != "" {
 				if doc, ok := s.Documents[targetURI]; ok {
-					fixes := s.getSafeFixesForDocument(doc)
+					fixes := s.getSafeFixesForDocument(doc, nil)
 
 					for _, fix := range fixes {
 						changes[targetURI] = append(changes[targetURI], fix.Edits...)
@@ -564,7 +570,7 @@ func (s *Server) handleMessage(req Request) {
 						continue
 					}
 
-					fixes := s.getSafeFixesForDocument(doc)
+					fixes := s.getSafeFixesForDocument(doc, nil)
 
 					for _, fix := range fixes {
 						changes[uri] = append(changes[uri], fix.Edits...)
@@ -2584,7 +2590,7 @@ func (s *Server) handleMessage(req Request) {
 		}
 
 		if hasUnused && docOk {
-			allFixes := s.getSafeFixesForDocument(doc)
+			allFixes := s.getSafeFixesForDocument(doc, nil)
 
 			var allEdits []TextEdit
 
@@ -2600,28 +2606,33 @@ func (s *Server) handleMessage(req Request) {
 
 				defID := ast.NodeID(defIDFloat)
 
+				var (
+					editsForDef []TextEdit
+					title       string
+				)
+
 				for _, fix := range allFixes {
-					var covers bool
-
 					if slices.Contains(fix.Coverage, defID) {
-						covers = true
-					}
+						editsForDef = append(editsForDef, fix.Edits...)
 
-					if covers {
-						actions = append(actions, CodeAction{
-							Title:       fix.Title,
-							Kind:        "quickfix",
-							Diagnostics: []Diagnostic{diag},
-							IsPreferred: true,
-							Edit: &WorkspaceEdit{
-								Changes: map[string][]TextEdit{
-									uri: fix.Edits,
-								},
+						if title == "" {
+							title = fix.Title
+						}
+					}
+				}
+
+				if len(editsForDef) > 0 {
+					actions = append(actions, CodeAction{
+						Title:       title,
+						Kind:        "quickfix",
+						Diagnostics: []Diagnostic{diag},
+						IsPreferred: true,
+						Edit: &WorkspaceEdit{
+							Changes: map[string][]TextEdit{
+								uri: editsForDef,
 							},
-						})
-
-						break
-					}
+						},
+					})
 				}
 			}
 
@@ -3334,33 +3345,166 @@ func (s *Server) handleMessage(req Request) {
 	}
 }
 
-func (s *Server) getSafeFixesForDocument(doc *Document) []SafeFix {
+func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []SafeFix {
 	var fixes []SafeFix
 
 	if doc.IsMeta {
 		return fixes
 	}
 
-	unusedDefs := make([]bool, len(doc.Tree.Nodes))
+	if actualReads == nil {
+		actualReads = make([]int, len(doc.Tree.Nodes))
 
-	for _, defID := range doc.Resolver.LocalDefs {
-		if doc.Resolver.UsageCount[defID] == 0 {
-			name := doc.Source[doc.Tree.Nodes[defID].Start:doc.Tree.Nodes[defID].End]
-			if len(name) > 0 && name[0] != '_' {
-				unusedDefs[defID] = true
+		for refID, defID := range doc.Resolver.References {
+			if defID != ast.InvalidNode && ast.NodeID(refID) != defID {
+				if s.isActualRead(doc, ast.NodeID(refID), defID) {
+					actualReads[defID]++
+				}
 			}
 		}
 	}
 
+	unusedDefs := make([]bool, len(doc.Tree.Nodes))
+	deadStores := make(map[ast.NodeID]*DeadStoreInfo)
+
+	for _, defID := range doc.Resolver.LocalDefs {
+		if actualReads[defID] == 0 {
+			if s.isImpureVariable(doc, defID) {
+				continue
+			}
+
+			name := doc.Source[doc.Tree.Nodes[defID].Start:doc.Tree.Nodes[defID].End]
+			if len(name) > 0 && name[0] != '_' {
+				unusedDefs[defID] = true
+
+				deadStores[defID] = &DeadStoreInfo{CanRemoveAll: true}
+			}
+		}
+	}
+
+	// PASS 1: Collect dead mutations
+	for i := 1; i < len(doc.Tree.Nodes); i++ {
+		nodeID := ast.NodeID(i)
+		node := doc.Tree.Nodes[nodeID]
+
+		switch node.Kind {
+		case ast.KindAssign:
+			lhsList := doc.Tree.Nodes[node.Left]
+			allUnused := true
+
+			var coverage []ast.NodeID
+
+			for j := uint16(0); j < lhsList.Count; j++ {
+				lhsID := doc.Tree.ExtraList[lhsList.Extra+uint32(j)]
+				defID := s.getRootDef(doc, lhsID)
+
+				if defID == ast.InvalidNode || !unusedDefs[defID] {
+					allUnused = false
+
+					break
+				}
+
+				coverage = append(coverage, defID)
+			}
+
+			if allUnused && lhsList.Count > 0 {
+				rhsSafe := true
+
+				if node.Right != ast.InvalidNode {
+					exprList := doc.Tree.Nodes[node.Right]
+
+					for j := uint16(0); j < exprList.Count; j++ {
+						if !s.isSideEffectFree(doc, doc.Tree.ExtraList[exprList.Extra+uint32(j)]) {
+							rhsSafe = false
+
+							break
+						}
+					}
+				}
+
+				if rhsSafe {
+					edit := TextEdit{
+						Range:   getNodeRange(doc.Tree, nodeID),
+						NewText: "",
+					}
+
+					for _, defID := range coverage {
+						ds := deadStores[defID]
+
+						ds.Edits = append(ds.Edits, edit)
+						ds.Coverage = append(ds.Coverage, nodeID)
+					}
+				} else {
+					for _, defID := range coverage {
+						deadStores[defID].CanRemoveAll = false
+					}
+				}
+			} else {
+				for j := uint16(0); j < lhsList.Count; j++ {
+					lhsID := doc.Tree.ExtraList[lhsList.Extra+uint32(j)]
+
+					defID := s.getRootDef(doc, lhsID)
+					if defID != ast.InvalidNode && unusedDefs[defID] {
+						deadStores[defID].CanRemoveAll = false
+					}
+				}
+			}
+		case ast.KindCallExpr:
+			fnID := node.Left
+			if doc.Tree.Nodes[fnID].Kind == ast.KindMemberExpr {
+				recID := doc.Tree.Nodes[fnID].Left
+				propID := doc.Tree.Nodes[fnID].Right
+				if recID != ast.InvalidNode && propID != ast.InvalidNode {
+					recStr := doc.Source[doc.Tree.Nodes[recID].Start:doc.Tree.Nodes[recID].End]
+					propStr := doc.Source[doc.Tree.Nodes[propID].Start:doc.Tree.Nodes[propID].End]
+
+					if bytes.Equal(recStr, []byte("table")) && (bytes.Equal(propStr, []byte("insert")) || bytes.Equal(propStr, []byte("remove")) || bytes.Equal(propStr, []byte("sort"))) {
+						if node.Count > 0 {
+							firstArgID := doc.Tree.ExtraList[node.Extra]
+							defID := s.getRootDef(doc, firstArgID)
+
+							if defID != ast.InvalidNode && unusedDefs[defID] {
+								argsSafe := true
+
+								for j := uint16(1); j < node.Count; j++ {
+									if !s.isSideEffectFree(doc, doc.Tree.ExtraList[node.Extra+uint32(j)]) {
+										argsSafe = false
+
+										break
+									}
+								}
+
+								if argsSafe {
+									edit := TextEdit{
+										Range:   getNodeRange(doc.Tree, nodeID),
+										NewText: "",
+									}
+
+									ds := deadStores[defID]
+
+									ds.Edits = append(ds.Edits, edit)
+									ds.Coverage = append(ds.Coverage, nodeID)
+								} else {
+									deadStores[defID].CanRemoveAll = false
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// PASS 2: Generate SafeFixes
 	for i := 1; i < len(doc.Tree.Nodes); i++ {
 		nodeID := ast.NodeID(i)
 		node := doc.Tree.Nodes[nodeID]
 
 		switch node.Kind {
 		case ast.KindLocalAssign:
-			s.processListForFixes(doc, node.Left, node.Right, unusedDefs, &fixes, true)
+			s.processListForFixes(doc, node.Left, node.Right, unusedDefs, deadStores, &fixes, true)
 		case ast.KindForIn:
-			s.processListForFixes(doc, node.Left, ast.InvalidNode, unusedDefs, &fixes, false)
+			s.processListForFixes(doc, node.Left, ast.InvalidNode, unusedDefs, deadStores, &fixes, false)
 		case ast.KindLocalFunction:
 			if unusedDefs[node.Left] {
 				fixes = append(fixes, SafeFix{
@@ -3451,7 +3595,7 @@ func (s *Server) getSafeFixesForDocument(doc *Document) []SafeFix {
 	return fixes
 }
 
-func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.NodeID, unused []bool, fixes *[]SafeFix, canRemoveStatement bool) {
+func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.NodeID, unused []bool, deadStores map[ast.NodeID]*DeadStoreInfo, fixes *[]SafeFix, canRemoveStatement bool) {
 	if nameListID == ast.InvalidNode {
 		return
 	}
@@ -3492,12 +3636,38 @@ func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.N
 	if suffixStart < int(nameList.Count) {
 		var coverage []ast.NodeID
 
+		canCleanlyRemove := true
+
 		for i := suffixStart; i < int(nameList.Count); i++ {
 			id := doc.Tree.ExtraList[nameList.Extra+uint32(i)]
 
 			coverage = append(coverage, id)
 
 			unused[id] = false
+
+			if ds := deadStores[id]; ds != nil && !ds.CanRemoveAll {
+				canCleanlyRemove = false
+			}
+		}
+
+		if !canCleanlyRemove {
+			for _, id := range coverage {
+				*fixes = append(*fixes, s.createRenameFix(doc, id))
+			}
+
+			return
+		}
+
+		var (
+			extraEdits    []TextEdit
+			extraCoverage []ast.NodeID
+		)
+
+		for _, id := range coverage {
+			if ds := deadStores[id]; ds != nil {
+				extraEdits = append(extraEdits, ds.Edits...)
+				extraCoverage = append(extraCoverage, ds.Coverage...)
+			}
 		}
 
 		if suffixStart == 0 && canRemoveStatement {
@@ -3518,13 +3688,18 @@ func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.N
 			if canRemove {
 				stmtID := nameList.Parent
 
+				edits := []TextEdit{{
+					Range:   getNodeRange(doc.Tree, stmtID),
+					NewText: "",
+				}}
+
+				edits = append(edits, extraEdits...)
+				coverage = append(coverage, extraCoverage...)
+
 				*fixes = append(*fixes, SafeFix{
 					Coverage: coverage,
-					Edits: []TextEdit{{
-						Range:   getNodeRange(doc.Tree, stmtID),
-						NewText: "",
-					}},
-					Title: "Remove unused assignment",
+					Edits:    edits,
+					Title:    "Remove unused assignment",
 				})
 
 				return
@@ -3582,6 +3757,9 @@ func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.N
 			}}
 
 			edits = append(edits, rhsEdits...)
+			edits = append(edits, extraEdits...)
+
+			coverage = append(coverage, extraCoverage...)
 
 			title := "Remove unused variable"
 
@@ -4431,7 +4609,17 @@ func (s *Server) publishDiagnostics(uri string) {
 
 	// 4. Shadowing & Unused Variables
 	if s.DiagShadowing || s.DiagUnusedLocal || s.DiagUnusedFunction || s.DiagUnusedParameter || s.DiagUnusedLoopVar {
-		fixes := s.getSafeFixesForDocument(doc)
+		actualReads := make([]int, len(doc.Tree.Nodes))
+
+		for refID, defID := range doc.Resolver.References {
+			if defID != ast.InvalidNode && ast.NodeID(refID) != defID {
+				if s.isActualRead(doc, ast.NodeID(refID), defID) {
+					actualReads[defID]++
+				}
+			}
+		}
+
+		fixes := s.getSafeFixesForDocument(doc, actualReads)
 
 		fixMap := make([]string, len(doc.Tree.Nodes))
 
@@ -4455,7 +4643,11 @@ func (s *Server) publishDiagnostics(uri string) {
 
 			r := getNodeRange(doc.Tree, defID)
 
-			if doc.Resolver.UsageCount[defID] == 0 {
+			if actualReads[defID] == 0 {
+				if s.isImpureVariable(doc, defID) {
+					continue
+				}
+
 				category := "local"
 				code := "unused-local"
 
@@ -6094,6 +6286,164 @@ func (s *Server) invertCondition(doc *Document, condID ast.NodeID) string {
 	return "not (" + condStr + ")"
 }
 
+func (s *Server) getRootDef(doc *Document, exprID ast.NodeID) ast.NodeID {
+	curr := exprID
+	for curr != ast.InvalidNode {
+		node := doc.Tree.Nodes[curr]
+		if node.Kind == ast.KindIdent {
+			return doc.Resolver.References[curr]
+		} else if node.Kind == ast.KindMemberExpr || node.Kind == ast.KindIndexExpr {
+			curr = node.Left
+		} else {
+			break
+		}
+	}
+
+	return ast.InvalidNode
+}
+
+func (s *Server) isImpureVariable(doc *Document, defID ast.NodeID) bool {
+	pID := doc.Tree.Nodes[defID].Parent
+	if pID == ast.InvalidNode {
+		return true
+	}
+
+	pNode := doc.Tree.Nodes[pID]
+	switch pNode.Kind {
+	case ast.KindFunctionExpr, ast.KindFunctionStmt, ast.KindLocalFunction:
+		return true
+	case ast.KindForIn, ast.KindForNum:
+		return true
+	case ast.KindNameList:
+		gpID := pNode.Parent
+		if gpID != ast.InvalidNode {
+			gpNode := doc.Tree.Nodes[gpID]
+			if gpNode.Kind == ast.KindForIn || gpNode.Kind == ast.KindForNum {
+				return true
+			}
+		}
+	}
+
+	for _, reassignment := range doc.Resolver.Reassignments {
+		if reassignment.DefID == defID {
+			if reassignment.ValID == ast.InvalidNode || !s.isPureValue(doc, reassignment.ValID) {
+				return true
+			}
+		}
+	}
+
+	valID := doc.getAssignedValue(defID)
+	if valID != ast.InvalidNode {
+		if !s.isPureValue(doc, valID) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (s *Server) isPureValue(doc *Document, valID ast.NodeID) bool {
+	if valID == ast.InvalidNode {
+		return true
+	}
+	node := doc.Tree.Nodes[valID]
+	switch node.Kind {
+	case ast.KindTableExpr, ast.KindString, ast.KindNumber, ast.KindTrue, ast.KindFalse, ast.KindNil, ast.KindFunctionExpr:
+		return true
+	case ast.KindBinaryExpr, ast.KindUnaryExpr, ast.KindParenExpr:
+		return s.isSideEffectFree(doc, valID)
+	}
+	return false
+}
+
+func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID) bool {
+	curr := refID
+
+	for curr != ast.InvalidNode {
+		parentID := doc.Tree.Nodes[curr].Parent
+		if parentID == ast.InvalidNode {
+			return true
+		}
+
+		pNode := doc.Tree.Nodes[parentID]
+
+		switch pNode.Kind {
+		case ast.KindMemberExpr, ast.KindMethodName, ast.KindIndexExpr:
+			if pNode.Left == curr {
+				if isLHSOfAssignment(doc, parentID) {
+					if s.isImpureVariable(doc, defID) {
+						return true
+					}
+					return false
+				}
+				curr = parentID
+				continue
+			}
+			return true
+
+		case ast.KindLocalAssign, ast.KindAssign:
+			if pNode.Left == curr {
+				return false
+			}
+			if pNode.Right == curr {
+				lhsList := doc.Tree.Nodes[pNode.Left]
+				if lhsList.Count == 1 {
+					lhsExprID := doc.Tree.ExtraList[lhsList.Extra]
+					if s.getRootDef(doc, lhsExprID) == defID {
+						if s.isImpureVariable(doc, defID) {
+							return true
+						}
+						return false
+					}
+				}
+			}
+			return true
+
+		case ast.KindExprList, ast.KindNameList:
+			if pNode.Kind == ast.KindExprList {
+				gpID := pNode.Parent
+				if gpID != ast.InvalidNode {
+					gpNode := doc.Tree.Nodes[gpID]
+					if (gpNode.Kind == ast.KindAssign || gpNode.Kind == ast.KindLocalAssign) && gpNode.Left == parentID {
+						return false
+					}
+
+					if gpNode.Kind == ast.KindCallExpr && gpNode.Extra == uint32(parentID) {
+						fnID := gpNode.Left
+						if doc.Tree.Nodes[fnID].Kind == ast.KindMemberExpr {
+							recID := doc.Tree.Nodes[fnID].Left
+							propID := doc.Tree.Nodes[fnID].Right
+							if recID != ast.InvalidNode && propID != ast.InvalidNode {
+								recStr := doc.Source[doc.Tree.Nodes[recID].Start:doc.Tree.Nodes[recID].End]
+								propStr := doc.Source[doc.Tree.Nodes[propID].Start:doc.Tree.Nodes[propID].End]
+
+								if bytes.Equal(recStr, []byte("table")) && (bytes.Equal(propStr, []byte("insert")) || bytes.Equal(propStr, []byte("remove")) || bytes.Equal(propStr, []byte("sort"))) {
+									if doc.Tree.ExtraList[gpNode.Extra] == curr {
+										if s.isImpureVariable(doc, defID) {
+											return true
+										}
+										return false
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			curr = parentID
+			continue
+
+		case ast.KindParenExpr, ast.KindBinaryExpr, ast.KindUnaryExpr:
+			curr = parentID
+			continue
+
+		default:
+			return true
+		}
+	}
+	return true
+}
+
 func reindentNodeText(doc *Document, id ast.NodeID, targetIndent string) string {
 	node := doc.Tree.Nodes[id]
 	if node.Start >= node.End {
@@ -6471,4 +6821,23 @@ func mapsEqualStringBool(a, b map[string]bool) bool {
 	}
 
 	return true
+}
+
+func isLHSOfAssignment(doc *Document, nodeID ast.NodeID) bool {
+	pID := doc.Tree.Nodes[nodeID].Parent
+	if pID == ast.InvalidNode {
+		return false
+	}
+
+	pNode := doc.Tree.Nodes[pID]
+	if pNode.Kind == ast.KindExprList {
+		gpID := pNode.Parent
+		if gpID != ast.InvalidNode {
+			gpNode := doc.Tree.Nodes[gpID]
+			if (gpNode.Kind == ast.KindAssign || gpNode.Kind == ast.KindLocalAssign) && gpNode.Left == pID {
+				return true
+			}
+		}
+	}
+	return false
 }
