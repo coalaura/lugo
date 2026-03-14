@@ -6385,7 +6385,7 @@ func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID)
 		case ast.KindMemberExpr, ast.KindMethodName, ast.KindIndexExpr:
 			if pNode.Left == curr {
 				if isLHSOfAssignment(doc, parentID) {
-					return false
+					return true
 				}
 
 				curr = parentID
@@ -6416,24 +6416,6 @@ func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID)
 					gpNode := doc.Tree.Nodes[gpID]
 					if (gpNode.Kind == ast.KindAssign || gpNode.Kind == ast.KindLocalAssign) && gpNode.Left == parentID {
 						return false
-					}
-
-					if gpNode.Kind == ast.KindCallExpr && gpNode.Extra == uint32(parentID) {
-						fnID := gpNode.Left
-						if doc.Tree.Nodes[fnID].Kind == ast.KindMemberExpr {
-							recID := doc.Tree.Nodes[fnID].Left
-							propID := doc.Tree.Nodes[fnID].Right
-							if recID != ast.InvalidNode && propID != ast.InvalidNode {
-								recStr := doc.Source[doc.Tree.Nodes[recID].Start:doc.Tree.Nodes[recID].End]
-								propStr := doc.Source[doc.Tree.Nodes[propID].Start:doc.Tree.Nodes[propID].End]
-
-								if bytes.Equal(recStr, []byte("table")) && (bytes.Equal(propStr, []byte("insert")) || bytes.Equal(propStr, []byte("remove")) || bytes.Equal(propStr, []byte("sort"))) {
-									if doc.Tree.ExtraList[gpNode.Extra] == curr {
-										return false
-									}
-								}
-							}
-						}
 					}
 				}
 			}
