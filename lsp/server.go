@@ -2557,7 +2557,7 @@ func (s *Server) handleMessage(req Request) {
 								Changes: map[string][]TextEdit{
 									uri: {
 										{
-											Range:   getNodeRange(doc.Tree, stmtID),
+											Range:   s.getStatementRemovalRange(doc, stmtID),
 											NewText: "",
 										},
 									},
@@ -2578,7 +2578,7 @@ func (s *Server) handleMessage(req Request) {
 							Changes: map[string][]TextEdit{
 								uri: {
 									{
-										Range:   getNodeRange(doc.Tree, doStmtID),
+										Range:   s.getStatementRemovalRange(doc, doStmtID),
 										NewText: "",
 									},
 								},
@@ -3369,7 +3369,7 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 
 	for _, defID := range doc.Resolver.LocalDefs {
 		if actualReads[defID] == 0 {
-			if s.isImpureVariable(doc, defID) {
+			if ast.Attr(doc.Tree.Nodes[defID].Extra) == ast.AttrClose {
 				continue
 			}
 
@@ -3424,7 +3424,7 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 
 				if rhsSafe {
 					edit := TextEdit{
-						Range:   getNodeRange(doc.Tree, nodeID),
+						Range:   s.getStatementRemovalRange(doc, nodeID),
 						NewText: "",
 					}
 
@@ -3433,6 +3433,37 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 
 						ds.Edits = append(ds.Edits, edit)
 						ds.Coverage = append(ds.Coverage, nodeID)
+					}
+				} else if node.Right != ast.InvalidNode {
+					exprList := doc.Tree.Nodes[node.Right]
+
+					if exprList.Count == 1 {
+						exprID := doc.Tree.ExtraList[exprList.Extra]
+						exprNode := doc.Tree.Nodes[exprID]
+
+						if exprNode.Kind == ast.KindCallExpr || exprNode.Kind == ast.KindMethodCall {
+							callText := doc.Source[exprNode.Start:exprNode.End]
+
+							edit := TextEdit{
+								Range:   getNodeRange(doc.Tree, nodeID),
+								NewText: string(callText),
+							}
+
+							for _, defID := range coverage {
+								ds := deadStores[defID]
+
+								ds.Edits = append(ds.Edits, edit)
+								ds.Coverage = append(ds.Coverage, nodeID)
+							}
+						} else {
+							for _, defID := range coverage {
+								deadStores[defID].CanRemoveAll = false
+							}
+						}
+					} else {
+						for _, defID := range coverage {
+							deadStores[defID].CanRemoveAll = false
+						}
 					}
 				} else {
 					for _, defID := range coverage {
@@ -3476,7 +3507,7 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 
 								if argsSafe {
 									edit := TextEdit{
-										Range:   getNodeRange(doc.Tree, nodeID),
+										Range:   s.getStatementRemovalRange(doc, nodeID),
 										NewText: "",
 									}
 
@@ -3510,7 +3541,7 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 				fixes = append(fixes, SafeFix{
 					Coverage: []ast.NodeID{node.Left},
 					Edits: []TextEdit{{
-						Range:   getNodeRange(doc.Tree, nodeID),
+						Range:   s.getStatementRemovalRange(doc, nodeID),
 						NewText: "",
 					}},
 					Title: "Remove unused local function",
@@ -3576,7 +3607,7 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 					fixes = append(fixes, SafeFix{
 						Coverage: []ast.NodeID{stmtID},
 						Edits: []TextEdit{{
-							Range:   getRange(doc.Tree, doc.Tree.Nodes[stmtID].Start, doc.Tree.Nodes[lastStmtID].End),
+							Range:   s.expandRemovalRange(doc, doc.Tree.Nodes[stmtID].Start, doc.Tree.Nodes[lastStmtID].End),
 							NewText: "",
 						}},
 						Title: "Remove unreachable code",
@@ -3689,7 +3720,7 @@ func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.N
 				stmtID := nameList.Parent
 
 				edits := []TextEdit{{
-					Range:   getNodeRange(doc.Tree, stmtID),
+					Range:   s.getStatementRemovalRange(doc, stmtID),
 					NewText: "",
 				}}
 
@@ -3703,6 +3734,34 @@ func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.N
 				})
 
 				return
+			} else if exprListID != ast.InvalidNode {
+				exprList := doc.Tree.Nodes[exprListID]
+
+				if exprList.Count == 1 {
+					exprID := doc.Tree.ExtraList[exprList.Extra]
+					exprNode := doc.Tree.Nodes[exprID]
+
+					if exprNode.Kind == ast.KindCallExpr || exprNode.Kind == ast.KindMethodCall {
+						stmtID := nameList.Parent
+						callText := doc.Source[exprNode.Start:exprNode.End]
+
+						edits := []TextEdit{{
+							Range:   getNodeRange(doc.Tree, stmtID),
+							NewText: string(callText),
+						}}
+
+						edits = append(edits, extraEdits...)
+						coverage = append(coverage, extraCoverage...)
+
+						*fixes = append(*fixes, SafeFix{
+							Coverage: coverage,
+							Edits:    edits,
+							Title:    "Remove unused assignment (keep function call)",
+						})
+
+						return
+					}
+				}
 			}
 		}
 
@@ -4644,7 +4703,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			r := getNodeRange(doc.Tree, defID)
 
 			if actualReads[defID] == 0 {
-				if s.isImpureVariable(doc, defID) {
+				if ast.Attr(doc.Tree.Nodes[defID].Extra) == ast.AttrClose {
 					continue
 				}
 
@@ -6288,72 +6347,27 @@ func (s *Server) invertCondition(doc *Document, condID ast.NodeID) string {
 
 func (s *Server) getRootDef(doc *Document, exprID ast.NodeID) ast.NodeID {
 	curr := exprID
+
 	for curr != ast.InvalidNode {
+		var breakOut bool
+
 		node := doc.Tree.Nodes[curr]
-		if node.Kind == ast.KindIdent {
+
+		switch node.Kind {
+		case ast.KindIdent:
 			return doc.Resolver.References[curr]
-		} else if node.Kind == ast.KindMemberExpr || node.Kind == ast.KindIndexExpr {
+		case ast.KindMemberExpr, ast.KindIndexExpr:
 			curr = node.Left
-		} else {
+		default:
+			breakOut = true
+		}
+
+		if breakOut {
 			break
 		}
 	}
 
 	return ast.InvalidNode
-}
-
-func (s *Server) isImpureVariable(doc *Document, defID ast.NodeID) bool {
-	pID := doc.Tree.Nodes[defID].Parent
-	if pID == ast.InvalidNode {
-		return true
-	}
-
-	pNode := doc.Tree.Nodes[pID]
-	switch pNode.Kind {
-	case ast.KindFunctionExpr, ast.KindFunctionStmt, ast.KindLocalFunction:
-		return true
-	case ast.KindForIn, ast.KindForNum:
-		return true
-	case ast.KindNameList:
-		gpID := pNode.Parent
-		if gpID != ast.InvalidNode {
-			gpNode := doc.Tree.Nodes[gpID]
-			if gpNode.Kind == ast.KindForIn || gpNode.Kind == ast.KindForNum {
-				return true
-			}
-		}
-	}
-
-	for _, reassignment := range doc.Resolver.Reassignments {
-		if reassignment.DefID == defID {
-			if reassignment.ValID == ast.InvalidNode || !s.isPureValue(doc, reassignment.ValID) {
-				return true
-			}
-		}
-	}
-
-	valID := doc.getAssignedValue(defID)
-	if valID != ast.InvalidNode {
-		if !s.isPureValue(doc, valID) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (s *Server) isPureValue(doc *Document, valID ast.NodeID) bool {
-	if valID == ast.InvalidNode {
-		return true
-	}
-	node := doc.Tree.Nodes[valID]
-	switch node.Kind {
-	case ast.KindTableExpr, ast.KindString, ast.KindNumber, ast.KindTrue, ast.KindFalse, ast.KindNil, ast.KindFunctionExpr:
-		return true
-	case ast.KindBinaryExpr, ast.KindUnaryExpr, ast.KindParenExpr:
-		return s.isSideEffectFree(doc, valID)
-	}
-	return false
 }
 
 func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID) bool {
@@ -6371,16 +6385,15 @@ func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID)
 		case ast.KindMemberExpr, ast.KindMethodName, ast.KindIndexExpr:
 			if pNode.Left == curr {
 				if isLHSOfAssignment(doc, parentID) {
-					if s.isImpureVariable(doc, defID) {
-						return true
-					}
 					return false
 				}
+
 				curr = parentID
+
 				continue
 			}
-			return true
 
+			return true
 		case ast.KindLocalAssign, ast.KindAssign:
 			if pNode.Left == curr {
 				return false
@@ -6390,15 +6403,12 @@ func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID)
 				if lhsList.Count == 1 {
 					lhsExprID := doc.Tree.ExtraList[lhsList.Extra]
 					if s.getRootDef(doc, lhsExprID) == defID {
-						if s.isImpureVariable(doc, defID) {
-							return true
-						}
 						return false
 					}
 				}
 			}
-			return true
 
+			return true
 		case ast.KindExprList, ast.KindNameList:
 			if pNode.Kind == ast.KindExprList {
 				gpID := pNode.Parent
@@ -6419,9 +6429,6 @@ func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID)
 
 								if bytes.Equal(recStr, []byte("table")) && (bytes.Equal(propStr, []byte("insert")) || bytes.Equal(propStr, []byte("remove")) || bytes.Equal(propStr, []byte("sort"))) {
 									if doc.Tree.ExtraList[gpNode.Extra] == curr {
-										if s.isImpureVariable(doc, defID) {
-											return true
-										}
 										return false
 									}
 								}
@@ -6430,18 +6437,125 @@ func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID)
 					}
 				}
 			}
-			curr = parentID
-			continue
 
+			curr = parentID
+
+			continue
 		case ast.KindParenExpr, ast.KindBinaryExpr, ast.KindUnaryExpr:
 			curr = parentID
-			continue
 
+			continue
 		default:
 			return true
 		}
 	}
+
 	return true
+}
+
+func (s *Server) expandRemovalRange(doc *Document, start, end uint32) Range {
+	// Consume leading spaces/tabs on the same line
+	for start > 0 {
+		c := doc.Source[start-1]
+
+		if c == ' ' || c == '\t' {
+			start--
+		} else {
+			break
+		}
+	}
+
+	// Consume optional trailing semicolon
+	for end < uint32(len(doc.Source)) {
+		c := doc.Source[end]
+
+		if c == ' ' || c == '\t' {
+			end++
+		} else if c == ';' {
+			end++
+
+			break
+		} else {
+			break
+		}
+	}
+
+	// Consume trailing spaces/tabs and exactly ONE newline
+	var hadNewline bool
+
+	for end < uint32(len(doc.Source)) {
+		c := doc.Source[end]
+
+		if c == ' ' || c == '\t' || c == '\r' {
+			end++
+		} else if c == '\n' {
+			end++
+
+			hadNewline = true
+
+			break
+		} else {
+			break
+		}
+	}
+
+	if hadNewline {
+		prevLineEmpty := start == 0
+
+		if !prevLineEmpty && doc.Source[start-1] == '\n' {
+			i := start - 1
+			if i > 0 && doc.Source[i-1] == '\r' {
+				i--
+			}
+
+			isEmpty := true
+
+			for i > 0 {
+				c := doc.Source[i-1]
+
+				if c == ' ' || c == '\t' {
+					i--
+				} else if c == '\n' {
+					break
+				} else {
+					isEmpty = false
+
+					break
+				}
+			}
+
+			prevLineEmpty = isEmpty || i == 0
+		}
+
+		// Consume one extra trailing empty line, to prevent leaving behind double blank lines.
+		if prevLineEmpty {
+			tempEnd := end
+
+			for tempEnd < uint32(len(doc.Source)) {
+				c := doc.Source[tempEnd]
+
+				if c == ' ' || c == '\t' || c == '\r' {
+					tempEnd++
+				} else if c == '\n' {
+					tempEnd++
+
+					end = tempEnd
+
+					break
+				} else {
+					break
+				}
+			}
+		}
+	}
+
+	return getRange(doc.Tree, start, end)
+}
+
+func (s *Server) getStatementRemovalRange(doc *Document, nodeID ast.NodeID) Range {
+	node := doc.Tree.Nodes[nodeID]
+
+	return s.expandRemovalRange(doc, node.Start, node.End)
 }
 
 func reindentNodeText(doc *Document, id ast.NodeID, targetIndent string) string {
