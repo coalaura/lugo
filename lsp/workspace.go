@@ -470,6 +470,9 @@ func (s *Server) updateDocument(uri string, source []byte) {
 	}
 
 	p := s.sharedParser
+
+	p.MaxErrors = s.MaxParseErrors
+
 	p.Reset(source, tree)
 
 	rootID := p.Parse()

@@ -78,17 +78,18 @@ type Server struct {
 
 func NewServer(version string) *Server {
 	return &Server{
-		Version:      version,
-		Reader:       bufio.NewReader(os.Stdin),
-		Writer:       os.Stdout,
-		Documents:    make(map[string]*Document),
-		GlobalIndex:  make(map[GlobalKey]GlobalSymbol),
-		OpenFiles:    make(map[string]bool),
-		semTokensBuf: make([]SemanticToken, 0, 4096),
-		semDataBuf:   make([]uint32, 0, 4096*5),
-		sharedParser: parser.New(nil, ast.NewTree(nil), 50),
-		diagBuf:      make([]Diagnostic, 0, 1024),
-		IsIndexing:   true,
+		Version:        version,
+		Reader:         bufio.NewReader(os.Stdin),
+		Writer:         os.Stdout,
+		Documents:      make(map[string]*Document),
+		GlobalIndex:    make(map[GlobalKey]GlobalSymbol),
+		OpenFiles:      make(map[string]bool),
+		semTokensBuf:   make([]SemanticToken, 0, 4096),
+		semDataBuf:     make([]uint32, 0, 4096*5),
+		MaxParseErrors: 50,
+		sharedParser:   parser.New(nil, ast.NewTree(nil), 50),
+		diagBuf:        make([]Diagnostic, 0, 1024),
+		IsIndexing:     true,
 	}
 }
 
