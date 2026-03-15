@@ -4,16 +4,16 @@ import "encoding/json"
 
 type Request struct {
 	RPC    string          `json:"jsonrpc"`
-	ID     int             `json:"id"`
 	Method string          `json:"method"`
 	Params json.RawMessage `json:"params,omitempty"`
+	ID     int             `json:"id"`
 }
 
 type Response struct {
 	RPC    string `json:"jsonrpc"`
-	ID     int    `json:"id"`
 	Result any    `json:"result"`
 	Error  any    `json:"error,omitempty"`
+	ID     int    `json:"id"`
 }
 
 type Notification struct {
@@ -22,9 +22,70 @@ type Notification struct {
 	Params json.RawMessage `json:"params,omitempty"`
 }
 
+type OutgoingRequest struct {
+	RPC    string `json:"jsonrpc"`
+	Method string `json:"method"`
+	Params any    `json:"params,omitempty"`
+	ID     int    `json:"id"`
+}
+
+type OutgoingNotification struct {
+	RPC    string `json:"jsonrpc"`
+	Method string `json:"method"`
+	Params any    `json:"params,omitempty"`
+}
+
+type ResponseError struct {
+	Message string `json:"message"`
+	Code    int    `json:"code"`
+}
+
+type Position struct {
+	Line      uint32 `json:"line"`
+	Character uint32 `json:"character"`
+}
+
+type Range struct {
+	Start Position `json:"start"`
+	End   Position `json:"end"`
+}
+
+type Location struct {
+	URI   string `json:"uri"`
+	Range Range  `json:"range"`
+}
+
+type TextEdit struct {
+	NewText string `json:"newText"`
+	Range   Range  `json:"range"`
+}
+
+type WorkspaceEdit struct {
+	Changes map[string][]TextEdit `json:"changes"`
+}
+
+type Command struct {
+	Title     string `json:"title"`
+	Command   string `json:"command"`
+	Arguments []any  `json:"arguments,omitempty"`
+}
+
+type MarkupContent struct {
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
+}
+
 type InitializeParams struct {
 	RootURI               string                `json:"rootUri"`
 	InitializationOptions InitializationOptions `json:"initializationOptions"`
+}
+
+type InitializeResult struct {
+	Capabilities ServerCapabilities `json:"capabilities"`
+}
+
+type ExecuteCommandOptions struct {
+	Commands []string `json:"commands"`
 }
 
 type InitializationOptions struct {
@@ -50,52 +111,56 @@ type InitializationOptions struct {
 	DiagSelfAssignment       bool `json:"diagSelfAssignment"`
 	DiagEmptyBlock           bool `json:"diagEmptyBlock"`
 	DiagTypeCheck            bool `json:"diagTypeCheck"`
-
-	InlayParamHints    bool `json:"inlayParamHints"`
-	InlaySuppressMatch bool `json:"inlaySuppressMatch"`
-	InlayImplicitSelf  bool `json:"inlayImplicitSelf"`
-
-	FeatureDocHighlight bool `json:"featureDocHighlight"`
-	FeatureHoverEval    bool `json:"featureHoverEval"`
-	FeatureCodeLens     bool `json:"featureCodeLens"`
-	FeatureFormatting   bool `json:"featureFormatting"`
-	FormatOpinionated   bool `json:"formatOpinionated"`
-}
-
-type InitializeResult struct {
-	Capabilities ServerCapabilities `json:"capabilities"`
+	InlayParamHints          bool `json:"inlayParamHints"`
+	InlaySuppressMatch       bool `json:"inlaySuppressMatch"`
+	InlayImplicitSelf        bool `json:"inlayImplicitSelf"`
+	FeatureDocHighlight      bool `json:"featureDocHighlight"`
+	FeatureHoverEval         bool `json:"featureHoverEval"`
+	FeatureCodeLens          bool `json:"featureCodeLens"`
+	FeatureFormatting        bool `json:"featureFormatting"`
+	FormatOpinionated        bool `json:"formatOpinionated"`
 }
 
 type ServerCapabilities struct {
-	TextDocumentSync           int                    `json:"textDocumentSync"`
-	DefinitionProvider         bool                   `json:"definitionProvider"`
-	HoverProvider              bool                   `json:"hoverProvider"`
-	RenameProvider             any                    `json:"renameProvider"`
-	ReferencesProvider         bool                   `json:"referencesProvider"`
-	DocumentSymbolProvider     bool                   `json:"documentSymbolProvider"`
-	WorkspaceSymbolProvider    bool                   `json:"workspaceSymbolProvider"`
-	InlayHintProvider          bool                   `json:"inlayHintProvider"`
-	CodeActionProvider         any                    `json:"codeActionProvider"`
-	FoldingRangeProvider       bool                   `json:"foldingRangeProvider"`
-	LinkedEditingRangeProvider bool                   `json:"linkedEditingRangeProvider"`
-	CallHierarchyProvider      bool                   `json:"callHierarchyProvider"`
-	DocumentHighlightProvider  bool                   `json:"documentHighlightProvider,omitempty"`
-	DocumentFormattingProvider bool                   `json:"documentFormattingProvider,omitempty"`
 	CodeLensProvider           *CodeLensOptions       `json:"codeLensProvider,omitempty"`
 	SignatureHelpProvider      *SignatureHelpOptions  `json:"signatureHelpProvider,omitempty"`
 	CompletionProvider         *CompletionOptions     `json:"completionProvider,omitempty"`
 	SemanticTokensProvider     *SemanticTokensOptions `json:"semanticTokensProvider,omitempty"`
 	ExecuteCommandProvider     *ExecuteCommandOptions `json:"executeCommandProvider,omitempty"`
-}
-
-type ExecuteCommandOptions struct {
-	Commands []string `json:"commands"`
+	RenameProvider             any                    `json:"renameProvider"`
+	CodeActionProvider         any                    `json:"codeActionProvider"`
+	TextDocumentSync           int                    `json:"textDocumentSync"`
+	DefinitionProvider         bool                   `json:"definitionProvider"`
+	HoverProvider              bool                   `json:"hoverProvider"`
+	ReferencesProvider         bool                   `json:"referencesProvider"`
+	DocumentSymbolProvider     bool                   `json:"documentSymbolProvider"`
+	WorkspaceSymbolProvider    bool                   `json:"workspaceSymbolProvider"`
+	InlayHintProvider          bool                   `json:"inlayHintProvider"`
+	FoldingRangeProvider       bool                   `json:"foldingRangeProvider"`
+	LinkedEditingRangeProvider bool                   `json:"linkedEditingRangeProvider"`
+	CallHierarchyProvider      bool                   `json:"callHierarchyProvider"`
+	DocumentHighlightProvider  bool                   `json:"documentHighlightProvider,omitempty"`
+	DocumentFormattingProvider bool                   `json:"documentFormattingProvider,omitempty"`
 }
 
 type TextDocumentItem struct {
 	URI     string `json:"uri"`
-	Version int    `json:"version"`
 	Text    string `json:"text"`
+	Version int    `json:"version"`
+}
+
+type TextDocumentIdentifier struct {
+	URI string `json:"uri"`
+}
+
+type VersionedTextDocumentIdentifier struct {
+	URI     string `json:"uri"`
+	Version int    `json:"version"`
+}
+
+type TextDocumentPositionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
 }
 
 type DidOpenTextDocumentParams struct {
@@ -115,50 +180,27 @@ type DidChangeTextDocumentParams struct {
 	ContentChanges []TextDocumentContentChangeEvent `json:"contentChanges"`
 }
 
-type VersionedTextDocumentIdentifier struct {
-	URI     string `json:"uri"`
-	Version int    `json:"version"`
-}
-
 type TextDocumentContentChangeEvent struct {
 	Text string `json:"text"`
 }
 
-type TextDocumentIdentifier struct {
-	URI string `json:"uri"`
+type DidChangeWatchedFilesParams struct {
+	Changes []FileEvent `json:"changes"`
 }
 
-type Position struct {
-	Line      uint32 `json:"line"`
-	Character uint32 `json:"character"`
+type FileEvent struct {
+	URI  string `json:"uri"`
+	Type int    `json:"type"`
 }
 
-type Range struct {
-	Start Position `json:"start"`
-	End   Position `json:"end"`
+type ExecuteCommandParams struct {
+	Command   string `json:"command"`
+	Arguments []any  `json:"arguments,omitempty"`
 }
 
-type Location struct {
-	URI   string `json:"uri"`
-	Range Range  `json:"range"`
-}
-
-type TextDocumentPositionParams struct {
-	TextDocument TextDocumentIdentifier `json:"textDocument"`
-	Position     Position               `json:"position"`
-}
-
-type OutgoingRequest struct {
-	RPC    string `json:"jsonrpc"`
-	ID     int    `json:"id"`
-	Method string `json:"method"`
-	Params any    `json:"params,omitempty"`
-}
-
-type OutgoingNotification struct {
-	RPC    string `json:"jsonrpc"`
-	Method string `json:"method"`
-	Params any    `json:"params,omitempty"`
+type ApplyWorkspaceEditParams struct {
+	Label string        `json:"label,omitempty"`
+	Edit  WorkspaceEdit `json:"edit"`
 }
 
 type DiagnosticSeverity int
@@ -178,18 +220,18 @@ const (
 )
 
 type Diagnostic struct {
-	Range              Range                          `json:"range"`
-	Severity           DiagnosticSeverity             `json:"severity,omitempty"`
-	Code               string                         `json:"code,omitempty"`
 	Message            string                         `json:"message"`
+	Code               string                         `json:"code,omitempty"`
 	Tags               []DiagnosticTag                `json:"tags,omitempty"`
 	RelatedInformation []DiagnosticRelatedInformation `json:"relatedInformation,omitempty"`
 	Data               any                            `json:"data,omitempty"`
+	Range              Range                          `json:"range"`
+	Severity           DiagnosticSeverity             `json:"severity,omitempty"`
 }
 
 type DiagnosticRelatedInformation struct {
-	Location Location `json:"location"`
 	Message  string   `json:"message"`
+	Location Location `json:"location"`
 }
 
 type PublishDiagnosticsParams struct {
@@ -200,11 +242,6 @@ type PublishDiagnosticsParams struct {
 type Hover struct {
 	Contents MarkupContent `json:"contents"`
 	Range    *Range        `json:"range,omitempty"`
-}
-
-type MarkupContent struct {
-	Kind  string `json:"kind"`
-	Value string `json:"value"`
 }
 
 type CompletionOptions struct {
@@ -231,86 +268,18 @@ const (
 	CompletionItemTagDeprecated CompletionItemTag = 1
 )
 
+type CompletionList struct {
+	Items        []CompletionItem `json:"items"`
+	IsIncomplete bool             `json:"isIncomplete"`
+}
+
 type CompletionItem struct {
 	Label         string              `json:"label"`
-	Kind          CompletionItemKind  `json:"kind"`
 	Detail        string              `json:"detail,omitempty"`
-	Documentation *MarkupContent      `json:"documentation,omitempty"`
 	SortText      string              `json:"sortText,omitempty"`
+	Documentation *MarkupContent      `json:"documentation,omitempty"`
 	Tags          []CompletionItemTag `json:"tags,omitempty"`
-}
-
-type CompletionList struct {
-	IsIncomplete bool             `json:"isIncomplete"`
-	Items        []CompletionItem `json:"items"`
-}
-
-type RenameParams struct {
-	TextDocument TextDocumentIdentifier `json:"textDocument"`
-	Position     Position               `json:"position"`
-	NewName      string                 `json:"newName"`
-}
-
-type WorkspaceEdit struct {
-	Changes map[string][]TextEdit `json:"changes"`
-}
-
-type TextEdit struct {
-	Range   Range  `json:"range"`
-	NewText string `json:"newText"`
-}
-
-type ReferenceParams struct {
-	TextDocument TextDocumentIdentifier `json:"textDocument"`
-	Position     Position               `json:"position"`
-	Context      ReferenceContext       `json:"context"`
-}
-
-type ReferenceContext struct {
-	IncludeDeclaration bool `json:"includeDeclaration"`
-}
-
-type DocumentSymbolParams struct {
-	TextDocument TextDocumentIdentifier `json:"textDocument"`
-}
-
-type WorkspaceSymbolParams struct {
-	Query string `json:"query"`
-}
-
-type SymbolInformation struct {
-	Name          string     `json:"name"`
-	Kind          SymbolKind `json:"kind"`
-	Location      Location   `json:"location"`
-	ContainerName string     `json:"containerName,omitempty"`
-}
-
-type SymbolKind int
-
-const (
-	SymbolKindFile     SymbolKind = 1
-	SymbolKindClass    SymbolKind = 5 // class for tables
-	SymbolKindMethod   SymbolKind = 6
-	SymbolKindField    SymbolKind = 8
-	SymbolKindFunction SymbolKind = 12
-	SymbolKindVariable SymbolKind = 13
-)
-
-type DocumentSymbol struct {
-	Name           string           `json:"name"`
-	Detail         string           `json:"detail,omitempty"`
-	Kind           SymbolKind       `json:"kind"`
-	Range          Range            `json:"range"`
-	SelectionRange Range            `json:"selectionRange"`
-	Children       []DocumentSymbol `json:"children,omitempty"`
-}
-
-type ReadStdParams struct {
-	URI string `json:"uri"`
-}
-
-type ReadStdResult struct {
-	Content string `json:"content"`
+	Kind          CompletionItemKind  `json:"kind"`
 }
 
 type SignatureHelpOptions struct {
@@ -352,18 +321,18 @@ const (
 )
 
 type InlayHint struct {
-	Position     Position      `json:"position"`
 	Label        string        `json:"label"`
-	Kind         InlayHintKind `json:"kind,omitempty"`
 	Tooltip      string        `json:"tooltip,omitempty"`
+	Position     Position      `json:"position"`
+	Kind         InlayHintKind `json:"kind,omitempty"`
 	PaddingLeft  bool          `json:"paddingLeft,omitempty"`
 	PaddingRight bool          `json:"paddingRight,omitempty"`
 }
 
 type CodeActionParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
-	Range        Range                  `json:"range"`
 	Context      CodeActionContext      `json:"context"`
+	Range        Range                  `json:"range"`
 }
 
 type CodeActionContext struct {
@@ -375,8 +344,8 @@ type CodeAction struct {
 	Kind        string         `json:"kind,omitempty"`
 	Diagnostics []Diagnostic   `json:"diagnostics,omitempty"`
 	Edit        *WorkspaceEdit `json:"edit,omitempty"`
-	IsPreferred bool           `json:"isPreferred,omitempty"`
 	Data        any            `json:"data,omitempty"`
+	IsPreferred bool           `json:"isPreferred,omitempty"`
 }
 
 type CodeLensOptions struct {
@@ -388,100 +357,15 @@ type CodeLensParams struct {
 }
 
 type CodeLens struct {
-	Range   Range    `json:"range"`
 	Command *Command `json:"command,omitempty"`
 	Data    any      `json:"data,omitempty"`
+	Range   Range    `json:"range"`
 }
 
-type Command struct {
-	Title     string `json:"title"`
-	Command   string `json:"command"`
-	Arguments []any  `json:"arguments,omitempty"`
-}
-
-type SemanticTokensOptions struct {
-	Legend SemanticTokensLegend `json:"legend"`
-	Full   bool                 `json:"full"`
-}
-
-type SemanticTokensLegend struct {
-	TokenTypes     []string `json:"tokenTypes"`
-	TokenModifiers []string `json:"tokenModifiers"`
-}
-
-type SymbolTag int
-
-const (
-	SymbolTagDeprecated SymbolTag = 1
-)
-
-type CallHierarchyPrepareParams struct {
+type RenameParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	NewName      string                 `json:"newName"`
 	Position     Position               `json:"position"`
-}
-
-type CallHierarchyItem struct {
-	Name           string      `json:"name"`
-	Kind           SymbolKind  `json:"kind"`
-	Tags           []SymbolTag `json:"tags,omitempty"`
-	Detail         string      `json:"detail,omitempty"`
-	URI            string      `json:"uri"`
-	Range          Range       `json:"range"`
-	SelectionRange Range       `json:"selectionRange"`
-	Data           any         `json:"data,omitempty"`
-}
-
-type CallHierarchyIncomingCallsParams struct {
-	Item CallHierarchyItem `json:"item"`
-}
-
-type CallHierarchyIncomingCall struct {
-	From       CallHierarchyItem `json:"from"`
-	FromRanges []Range           `json:"fromRanges"`
-}
-
-type CallHierarchyOutgoingCallsParams struct {
-	Item CallHierarchyItem `json:"item"`
-}
-
-type CallHierarchyOutgoingCall struct {
-	To         CallHierarchyItem `json:"to"`
-	FromRanges []Range           `json:"fromRanges"`
-}
-
-type SemanticTokensParams struct {
-	TextDocument TextDocumentIdentifier `json:"textDocument"`
-}
-
-type SemanticTokens struct {
-	Data []uint32 `json:"data"`
-}
-
-type FoldingRangeParams struct {
-	TextDocument TextDocumentIdentifier `json:"textDocument"`
-}
-
-type FoldingRange struct {
-	StartLine      uint32 `json:"startLine"`
-	StartCharacter uint32 `json:"startCharacter,omitempty"`
-	EndLine        uint32 `json:"endLine"`
-	EndCharacter   uint32 `json:"endCharacter,omitempty"`
-	Kind           string `json:"kind,omitempty"`
-}
-
-type ExecuteCommandParams struct {
-	Command   string `json:"command"`
-	Arguments []any  `json:"arguments,omitempty"`
-}
-
-type ApplyWorkspaceEditParams struct {
-	Label string        `json:"label,omitempty"`
-	Edit  WorkspaceEdit `json:"edit"`
-}
-
-type ResponseError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
 }
 
 type PrepareRenameParams struct {
@@ -490,18 +374,59 @@ type PrepareRenameParams struct {
 }
 
 type PrepareRenameResult struct {
-	Range       Range  `json:"range"`
 	Placeholder string `json:"placeholder"`
+	Range       Range  `json:"range"`
 }
 
-type LinkedEditingRangeParams struct {
+type SymbolKind int
+
+const (
+	SymbolKindFile     SymbolKind = 1
+	SymbolKindClass    SymbolKind = 5 // class for tables
+	SymbolKindMethod   SymbolKind = 6
+	SymbolKindField    SymbolKind = 8
+	SymbolKindFunction SymbolKind = 12
+	SymbolKindVariable SymbolKind = 13
+)
+
+type SymbolTag int
+
+const (
+	SymbolTagDeprecated SymbolTag = 1
+)
+
+type SymbolInformation struct {
+	Name          string     `json:"name"`
+	ContainerName string     `json:"containerName,omitempty"`
+	Location      Location   `json:"location"`
+	Kind          SymbolKind `json:"kind"`
+}
+
+type DocumentSymbol struct {
+	Name           string           `json:"name"`
+	Detail         string           `json:"detail,omitempty"`
+	Children       []DocumentSymbol `json:"children,omitempty"`
+	Range          Range            `json:"range"`
+	SelectionRange Range            `json:"selectionRange"`
+	Kind           SymbolKind       `json:"kind"`
+}
+
+type DocumentSymbolParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+type WorkspaceSymbolParams struct {
+	Query string `json:"query"`
+}
+
+type ReferenceParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Context      ReferenceContext       `json:"context"`
 	Position     Position               `json:"position"`
 }
 
-type LinkedEditingRanges struct {
-	Ranges      []Range `json:"ranges"`
-	WordPattern string  `json:"wordPattern,omitempty"`
+type ReferenceContext struct {
+	IncludeDeclaration bool `json:"includeDeclaration"`
 }
 
 type DocumentHighlightParams struct {
@@ -522,13 +447,56 @@ type DocumentHighlight struct {
 	Kind  DocumentHighlightKind `json:"kind,omitempty"`
 }
 
-type DidChangeWatchedFilesParams struct {
-	Changes []FileEvent `json:"changes"`
+type SemanticTokensOptions struct {
+	Legend SemanticTokensLegend `json:"legend"`
+	Full   bool                 `json:"full"`
 }
 
-type FileEvent struct {
-	URI  string `json:"uri"`
-	Type int    `json:"type"`
+type SemanticTokensLegend struct {
+	TokenTypes     []string `json:"tokenTypes"`
+	TokenModifiers []string `json:"tokenModifiers"`
+}
+
+type SemanticTokensParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+type SemanticTokens struct {
+	Data []uint32 `json:"data"`
+}
+
+type CallHierarchyPrepareParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type CallHierarchyItem struct {
+	Name           string      `json:"name"`
+	Detail         string      `json:"detail,omitempty"`
+	URI            string      `json:"uri"`
+	Data           any         `json:"data,omitempty"`
+	Tags           []SymbolTag `json:"tags,omitempty"`
+	Range          Range       `json:"range"`
+	SelectionRange Range       `json:"selectionRange"`
+	Kind           SymbolKind  `json:"kind"`
+}
+
+type CallHierarchyIncomingCallsParams struct {
+	Item CallHierarchyItem `json:"item"`
+}
+
+type CallHierarchyIncomingCall struct {
+	From       CallHierarchyItem `json:"from"`
+	FromRanges []Range           `json:"fromRanges"`
+}
+
+type CallHierarchyOutgoingCallsParams struct {
+	Item CallHierarchyItem `json:"item"`
+}
+
+type CallHierarchyOutgoingCall struct {
+	To         CallHierarchyItem `json:"to"`
+	FromRanges []Range           `json:"fromRanges"`
 }
 
 type DocumentFormattingParams struct {
@@ -539,4 +507,34 @@ type DocumentFormattingParams struct {
 type FormattingOptions struct {
 	TabSize      int  `json:"tabSize"`
 	InsertSpaces bool `json:"insertSpaces"`
+}
+
+type FoldingRangeParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+type FoldingRange struct {
+	Kind           string `json:"kind,omitempty"`
+	StartLine      uint32 `json:"startLine"`
+	StartCharacter uint32 `json:"startCharacter,omitempty"`
+	EndLine        uint32 `json:"endLine"`
+	EndCharacter   uint32 `json:"endCharacter,omitempty"`
+}
+
+type LinkedEditingRangeParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type LinkedEditingRanges struct {
+	WordPattern string  `json:"wordPattern,omitempty"`
+	Ranges      []Range `json:"ranges"`
+}
+
+type ReadStdParams struct {
+	URI string `json:"uri"`
+}
+
+type ReadStdResult struct {
+	Content string `json:"content"`
 }

@@ -64,6 +64,7 @@ type LuaDocGeneric struct {
 
 type LuaDoc struct {
 	Description   string
+	DeprecatedMsg string
 	Class         *LuaDocClass
 	Type          *LuaDocType
 	Alias         *LuaDocAlias
@@ -74,7 +75,6 @@ type LuaDoc struct {
 	Overloads     []string
 	See           []string
 	IsDeprecated  bool
-	DeprecatedMsg string
 }
 
 // findTypeEnd safely scans past complex types with spaces like 'fun(a: string): number'

@@ -7,10 +7,10 @@ import (
 )
 
 type FieldDef struct {
-	ReceiverDef  ast.NodeID // Valid if local table
-	ReceiverHash uint64     // Valid if global table
 	ReceiverName []byte
+	ReceiverHash uint64
 	PropHash     uint64
+	ReceiverDef  ast.NodeID
 	NodeID       ast.NodeID
 }
 

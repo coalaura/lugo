@@ -13,19 +13,18 @@ import (
 
 type Document struct {
 	Server             *Server
-	URI                string
-	Source             []byte
 	Tree               *ast.Tree
 	Resolver           *semantic.Resolver
+	URI                string
+	Source             []byte
 	Errors             []parser.ParseError
+	TypeCache          []TypeSet
+	Inferring          []bool
+	commentBuf         []byte
+	depBuf             []byte
 	ExportedGlobals    map[GlobalKey]ast.NodeID
 	ExportedGlobalDefs map[ast.NodeID]GlobalKey
-
-	TypeCache  []TypeSet
-	Inferring  []bool
-	IsMeta     bool
-	commentBuf []byte
-	depBuf     []byte
+	IsMeta             bool
 }
 
 func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {

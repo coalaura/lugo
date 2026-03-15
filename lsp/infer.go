@@ -25,10 +25,10 @@ const (
 
 // TypeSet efficiently represents union types as bitmasks and custom names.
 type TypeSet struct {
-	Basics     BasicType
 	CustomName string
-	DeclNode   ast.NodeID
 	DeclURI    string
+	DeclNode   ast.NodeID
+	Basics     BasicType
 }
 
 func ParseTypeString(tStr string) TypeSet {
