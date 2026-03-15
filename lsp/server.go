@@ -19,33 +19,40 @@ import (
 const MaxWorkspaceResults = 100
 
 type Server struct {
-	Version           string
-	Reader            *bufio.Reader
-	Writer            io.Writer
-	Log               *plain.Plain
-	Documents         map[string]*Document
+	Version string
+	Reader  *bufio.Reader
+	Writer  io.Writer
+	Log     *plain.Plain
+
+	// Workspace State
+	RootURI       string
+	lowerRootPath string
+	IsIndexing    bool
+	Documents     map[string]*Document
+	OpenFiles     map[string]bool
+	activeURIs    map[string]bool
+	visitedDirs   map[string]bool
+
+	// Global Index & Resolution
 	GlobalIndex       map[GlobalKey]GlobalSymbol
 	KnownGlobals      map[string]bool
-	OpenFiles         map[string]bool
-	RootURI           string
-	lowerRootPath     string
+	KnownGlobalGlobs  []string
 	LibraryPaths      []string
 	lowerLibraryPaths []string
-	KnownGlobalGlobs  []string
-	IsIndexing        bool
+	IgnoreGlobs       []string
+	compiledIgnores   []IgnorePattern
 
-	activeURIs  map[string]bool
-	visitedDirs map[string]bool
-
-	IgnoreGlobs     []string
-	compiledIgnores []IgnorePattern
-
+	// Shared Buffers & Parsers
+	sharedParser *parser.Parser
+	diagBuf      []Diagnostic
 	semTokensBuf []SemanticToken
 	semDataBuf   []uint32
 
-	sharedParser *parser.Parser
-	diagBuf      []Diagnostic
+	// Configuration
 
+	MaxParseErrors int
+
+	// Diagnostics
 	DiagUndefinedGlobals     bool
 	DiagImplicitGlobals      bool
 	DiagUnusedLocal          bool
@@ -63,12 +70,12 @@ type Server struct {
 	DiagEmptyBlock           bool
 	DiagTypeCheck            bool
 
-	MaxParseErrors int
-
+	// Inlay Hints
 	InlayParamHints    bool
 	InlaySuppressMatch bool
 	InlayImplicitSelf  bool
 
+	// Features
 	FeatureDocHighlight bool
 	FeatureHoverEval    bool
 	FeatureCodeLens     bool
@@ -78,18 +85,26 @@ type Server struct {
 
 func NewServer(version string) *Server {
 	return &Server{
-		Version:        version,
-		Reader:         bufio.NewReader(os.Stdin),
-		Writer:         os.Stdout,
-		Documents:      make(map[string]*Document),
-		GlobalIndex:    make(map[GlobalKey]GlobalSymbol),
-		OpenFiles:      make(map[string]bool),
-		semTokensBuf:   make([]SemanticToken, 0, 4096),
-		semDataBuf:     make([]uint32, 0, 4096*5),
+		Version: version,
+		Reader:  bufio.NewReader(os.Stdin),
+		Writer:  os.Stdout,
+
+		// Workspace State
+		Documents:  make(map[string]*Document),
+		OpenFiles:  make(map[string]bool),
+		IsIndexing: true,
+
+		// Global Index
+		GlobalIndex: make(map[GlobalKey]GlobalSymbol),
+
+		// Shared Buffers
+		sharedParser: parser.New(nil, ast.NewTree(nil), 50),
+		diagBuf:      make([]Diagnostic, 0, 1024),
+		semTokensBuf: make([]SemanticToken, 0, 4096),
+		semDataBuf:   make([]uint32, 0, 4096*5),
+
+		// Configuration Defaults
 		MaxParseErrors: 50,
-		sharedParser:   parser.New(nil, ast.NewTree(nil), 50),
-		diagBuf:        make([]Diagnostic, 0, 1024),
-		IsIndexing:     true,
 	}
 }
 
