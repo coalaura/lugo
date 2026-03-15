@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"encoding/json"
 	"iter"
 	"path/filepath"
 	"strings"
@@ -58,6 +59,318 @@ type SymbolContext struct {
 	RecDefID    ast.NodeID
 	IsProp      bool
 	IsGlobal    bool
+}
+
+func (s *Server) handleDefinition(req Request) {
+	var params TextDocumentPositionParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	uri := s.normalizeURI(params.TextDocument.URI)
+
+	doc, ok := s.Documents[uri]
+	if !ok {
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+		return
+	}
+
+	offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
+	ctx := s.resolveSymbolAt(uri, offset)
+
+	if ctx != nil && ctx.TargetDefID != ast.InvalidNode {
+		loc := Location{
+			URI:   ctx.TargetURI,
+			Range: getNodeRange(ctx.TargetDoc.Tree, ctx.TargetDefID),
+		}
+
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []Location{loc}})
+
+		return
+	}
+
+	WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+}
+
+func (s *Server) handleReferences(req Request) {
+	var params ReferenceParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	uri := s.normalizeURI(params.TextDocument.URI)
+
+	doc, ok := s.Documents[uri]
+	if !ok {
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+		return
+	}
+
+	offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
+	ctx := s.resolveSymbolAt(uri, offset)
+
+	if ctx == nil {
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []Location{}})
+
+		return
+	}
+
+	locations := s.getReferences(ctx, params.Context.IncludeDeclaration)
+
+	WriteMessage(s.Writer, Response{
+		RPC:    "2.0",
+		ID:     req.ID,
+		Result: locations,
+	})
+}
+
+func (s *Server) handleDocumentSymbol(req Request) {
+	var params DocumentSymbolParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	uri := s.normalizeURI(params.TextDocument.URI)
+
+	doc, ok := s.Documents[uri]
+	if !ok {
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+		return
+	}
+
+	var walkTable func(tableID ast.NodeID) []DocumentSymbol
+
+	walkTable = func(tableID ast.NodeID) []DocumentSymbol {
+		node := doc.Tree.Nodes[tableID]
+
+		var syms []DocumentSymbol
+
+		for i := uint16(0); i < node.Count; i++ {
+			fieldID := doc.Tree.ExtraList[node.Extra+uint32(i)]
+			fieldNode := doc.Tree.Nodes[fieldID]
+
+			if fieldNode.Kind == ast.KindRecordField {
+				keyNode := doc.Tree.Nodes[fieldNode.Left]
+				valNode := doc.Tree.Nodes[fieldNode.Right]
+
+				name := ast.String(doc.Source[keyNode.Start:keyNode.End])
+				if name == "" {
+					name = "<error>"
+				}
+
+				kind := SymbolKindField
+
+				var children []DocumentSymbol
+
+				switch valNode.Kind {
+				case ast.KindFunctionExpr:
+					kind = SymbolKindMethod
+				case ast.KindTableExpr:
+					kind = SymbolKindClass
+
+					children = walkTable(fieldNode.Right)
+				}
+
+				syms = append(syms, DocumentSymbol{
+					Name:           name,
+					Kind:           kind,
+					Range:          getNodeRange(doc.Tree, fieldID),
+					SelectionRange: getNodeRange(doc.Tree, fieldNode.Left),
+					Children:       children,
+				})
+			}
+		}
+
+		return syms
+	}
+
+	var walk func(nodeID ast.NodeID) []DocumentSymbol
+
+	walk = func(nodeID ast.NodeID) []DocumentSymbol {
+		if nodeID == ast.InvalidNode {
+			return nil
+		}
+
+		node := doc.Tree.Nodes[nodeID]
+
+		var syms []DocumentSymbol
+
+		switch node.Kind {
+		case ast.KindFile:
+			return walk(node.Left)
+		case ast.KindBlock:
+			for i := uint16(0); i < node.Count; i++ {
+				syms = append(syms, walk(doc.Tree.ExtraList[node.Extra+uint32(i)])...)
+			}
+		case ast.KindLocalFunction, ast.KindFunctionStmt:
+			nameNode := doc.Tree.Nodes[node.Left]
+
+			name := ast.String(doc.Source[nameNode.Start:nameNode.End])
+			if name == "" {
+				name = "<error>"
+			}
+
+			kind := SymbolKindFunction
+
+			if nameNode.Kind == ast.KindMethodName {
+				kind = SymbolKindMethod
+			}
+
+			syms = append(syms, DocumentSymbol{
+				Name:           name,
+				Kind:           kind,
+				Range:          getNodeRange(doc.Tree, nodeID),
+				SelectionRange: getNodeRange(doc.Tree, node.Left),
+			})
+		case ast.KindLocalAssign, ast.KindAssign:
+			lhsList := doc.Tree.Nodes[node.Left]
+			rhsList := node.Right
+
+			if rhsList != ast.InvalidNode {
+				rhsNode := doc.Tree.Nodes[rhsList]
+
+				for i := uint16(0); i < lhsList.Count && i < rhsNode.Count; i++ {
+					lID := doc.Tree.ExtraList[lhsList.Extra+uint32(i)]
+					lNode := doc.Tree.Nodes[lID]
+
+					var (
+						rID   ast.NodeID = ast.InvalidNode
+						rNode ast.Node
+					)
+
+					if i < rhsNode.Count {
+						rID = doc.Tree.ExtraList[rhsNode.Extra+uint32(i)]
+						rNode = doc.Tree.Nodes[rID]
+					}
+
+					name := ast.String(doc.Source[lNode.Start:lNode.End])
+					if name == "" {
+						name = "<error>"
+					}
+
+					if rNode.Kind == ast.KindFunctionExpr {
+						syms = append(syms, DocumentSymbol{
+							Name:           name,
+							Kind:           SymbolKindFunction,
+							Range:          getNodeRange(doc.Tree, nodeID),
+							SelectionRange: getNodeRange(doc.Tree, lID),
+						})
+					} else if rNode.Kind == ast.KindTableExpr {
+						syms = append(syms, DocumentSymbol{
+							Name:           name,
+							Kind:           SymbolKindClass,
+							Range:          getNodeRange(doc.Tree, nodeID),
+							SelectionRange: getNodeRange(doc.Tree, lID),
+							Children:       walkTable(rID),
+						})
+					} else if node.Kind == ast.KindLocalAssign {
+						syms = append(syms, DocumentSymbol{
+							Name:           name,
+							Kind:           SymbolKindVariable,
+							Range:          getNodeRange(doc.Tree, lID),
+							SelectionRange: getNodeRange(doc.Tree, lID),
+						})
+					}
+				}
+			}
+		}
+
+		return syms
+	}
+
+	symbols := walk(doc.Tree.Root)
+
+	if symbols == nil {
+		symbols = []DocumentSymbol{}
+	}
+
+	WriteMessage(s.Writer, Response{
+		RPC:    "2.0",
+		ID:     req.ID,
+		Result: symbols,
+	})
+}
+
+func (s *Server) handleWorkspaceSymbol(req Request) {
+	var params WorkspaceSymbolParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	queryLower := []byte(strings.ToLower(params.Query))
+
+	var (
+		results []SymbolInformation
+		count   int
+	)
+
+	for key, sym := range s.GlobalIndex {
+		if !containsFold([]byte(sym.Name), queryLower) {
+			continue
+		}
+
+		doc, ok := s.Documents[sym.URI]
+		if !ok {
+			continue
+		}
+
+		kind := SymbolKindVariable
+
+		valID := doc.getAssignedValue(sym.NodeID)
+
+		if valID != ast.InvalidNode {
+			valKind := doc.Tree.Nodes[valID].Kind
+			if valKind == ast.KindFunctionExpr {
+				if key.ReceiverHash != 0 {
+					kind = SymbolKindMethod
+				} else {
+					kind = SymbolKindFunction
+				}
+			} else if valKind == ast.KindTableExpr {
+				kind = SymbolKindClass
+			} else if key.ReceiverHash != 0 {
+				kind = SymbolKindField
+			}
+		} else if key.ReceiverHash != 0 {
+			kind = SymbolKindField
+		}
+
+		results = append(results, SymbolInformation{
+			Name: sym.Name,
+			Kind: kind,
+			Location: Location{
+				URI:   sym.URI,
+				Range: getNodeRange(doc.Tree, sym.NodeID),
+			},
+		})
+
+		count++
+
+		if count >= MaxWorkspaceResults {
+			break
+		}
+	}
+
+	if results == nil {
+		results = []SymbolInformation{}
+	}
+
+	WriteMessage(s.Writer, Response{
+		RPC:    "2.0",
+		ID:     req.ID,
+		Result: results,
+	})
 }
 
 func (s *Server) resolveSymbolAt(uri string, offset uint32) *SymbolContext {

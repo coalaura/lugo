@@ -2,6 +2,9 @@ package lsp
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/coalaura/lugo/ast"
@@ -18,6 +21,884 @@ type DeadStoreInfo struct {
 	CanRemoveAll bool
 	Edits        []TextEdit
 	Coverage     []ast.NodeID
+}
+
+func (s *Server) handleCodeAction(req Request) {
+	var params CodeActionParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	var (
+		actions   []CodeAction
+		hasUnused bool
+	)
+
+	uri := s.normalizeURI(params.TextDocument.URI)
+
+	doc, docOk := s.Documents[uri]
+	if !docOk {
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []CodeAction{}})
+
+		return
+	}
+
+	for _, diag := range params.Context.Diagnostics {
+		switch diag.Code {
+		case "unused-local", "unused-parameter", "unused-loop-var", "unused-vararg", "unused-function", "unreachable-code", "ambiguous-return":
+			hasUnused = true
+		case "undefined-global":
+			if suggestion, ok := diag.Data.(string); ok && suggestion != "" {
+				actions = append(actions, CodeAction{
+					Title:       fmt.Sprintf("Change to '%s'", suggestion),
+					Kind:        "quickfix",
+					Diagnostics: []Diagnostic{diag},
+					IsPreferred: true,
+					Edit: &WorkspaceEdit{
+						Changes: map[string][]TextEdit{
+							uri: {
+								{
+									Range:   diag.Range,
+									NewText: suggestion,
+								},
+							},
+						},
+					},
+				})
+			}
+		case "implicit-global":
+			actions = append(actions, CodeAction{
+				Title:       "Prefix variable with 'local'",
+				Kind:        "quickfix",
+				Diagnostics: []Diagnostic{diag},
+				IsPreferred: true,
+				Edit: &WorkspaceEdit{
+					Changes: map[string][]TextEdit{
+						uri: {
+							{
+								Range: Range{
+									Start: diag.Range.Start,
+									End:   diag.Range.Start,
+								},
+								NewText: "local ",
+							},
+						},
+					},
+				},
+			})
+		case "self-assignment":
+			if stmtIDFloat, ok := diag.Data.(float64); ok {
+				stmtID := ast.NodeID(stmtIDFloat)
+				stmtNode := doc.Tree.Nodes[stmtID]
+
+				// Only provide a clean fix if it's a single assignment
+				if doc.Tree.Nodes[stmtNode.Left].Count == 1 {
+					actions = append(actions, CodeAction{
+						Title:       "Remove self-assignment",
+						Kind:        "quickfix",
+						Diagnostics: []Diagnostic{diag},
+						IsPreferred: true,
+						Edit: &WorkspaceEdit{
+							Changes: map[string][]TextEdit{
+								uri: {
+									{
+										Range:   s.getStatementRemovalRange(doc, stmtID),
+										NewText: "",
+									},
+								},
+							},
+						},
+					})
+				}
+			}
+		case "empty-block":
+			if doStmtIDFloat, ok := diag.Data.(float64); ok {
+				doStmtID := ast.NodeID(doStmtIDFloat)
+				actions = append(actions, CodeAction{
+					Title:       "Remove empty 'do' block",
+					Kind:        "quickfix",
+					Diagnostics: []Diagnostic{diag},
+					IsPreferred: true,
+					Edit: &WorkspaceEdit{
+						Changes: map[string][]TextEdit{
+							uri: {
+								{
+									Range:   s.getStatementRemovalRange(doc, doStmtID),
+									NewText: "",
+								},
+							},
+						},
+					},
+				})
+			}
+		}
+	}
+
+	if hasUnused && docOk {
+		allFixes := s.getSafeFixesForDocument(doc, nil)
+
+		var allEdits []TextEdit
+
+		for _, diag := range params.Context.Diagnostics {
+			if diag.Code != "unused-local" && diag.Code != "unused-parameter" && diag.Code != "unused-loop-var" && diag.Code != "unused-vararg" && diag.Code != "unused-function" && diag.Code != "unreachable-code" && diag.Code != "ambiguous-return" {
+				continue
+			}
+
+			defIDFloat, ok := diag.Data.(float64)
+			if !ok {
+				continue
+			}
+
+			defID := ast.NodeID(defIDFloat)
+
+			var (
+				editsForDef []TextEdit
+				title       string
+			)
+
+			for _, fix := range allFixes {
+				if slices.Contains(fix.Coverage, defID) {
+					editsForDef = append(editsForDef, fix.Edits...)
+
+					if title == "" {
+						title = fix.Title
+					}
+				}
+			}
+
+			if len(editsForDef) > 0 {
+				actions = append(actions, CodeAction{
+					Title:       title,
+					Kind:        "quickfix",
+					Diagnostics: []Diagnostic{diag},
+					IsPreferred: true,
+					Edit: &WorkspaceEdit{
+						Changes: map[string][]TextEdit{
+							uri: editsForDef,
+						},
+					},
+				})
+			}
+		}
+
+		for _, fix := range allFixes {
+			allEdits = append(allEdits, fix.Edits...)
+		}
+
+		if len(allEdits) > 0 {
+			actions = append(actions, CodeAction{
+				Title: "Apply all safe fixes in file",
+				Kind:  "source.fixAll",
+				Edit: &WorkspaceEdit{
+					Changes: map[string][]TextEdit{
+						uri: allEdits,
+					},
+				},
+			})
+		}
+	}
+
+	var (
+		targetIf          ast.NodeID = ast.InvalidNode
+		targetCond        ast.NodeID = ast.InvalidNode
+		condTitle         string
+		targetTableInsert ast.NodeID = ast.InvalidNode
+		targetMethod      ast.NodeID = ast.InvalidNode
+		targetNestedIf    ast.NodeID = ast.InvalidNode
+		nestedIfTitle     string
+	)
+
+	cursorLine := params.Range.Start.Line
+
+	for i := 1; i < len(doc.Tree.Nodes); i++ {
+		node := doc.Tree.Nodes[i]
+		if node.Kind == ast.KindIf || node.Kind == ast.KindElseIf || node.Kind == ast.KindWhile {
+			sLine, _ := doc.Tree.Position(node.Start)
+			if sLine == cursorLine {
+				switch node.Kind {
+				case ast.KindIf:
+					targetIf = ast.NodeID(i)
+					condTitle = "Invert 'if' condition"
+				case ast.KindElseIf:
+					condTitle = "Invert 'elseif' condition"
+				case ast.KindWhile:
+					condTitle = "Invert 'while' condition"
+				}
+
+				targetCond = node.Left
+
+				break
+			}
+		}
+	}
+
+	offset := doc.Tree.Offset(params.Range.Start.Line, params.Range.Start.Character)
+	curr := doc.Tree.NodeAt(offset)
+
+	for curr != ast.InvalidNode {
+		node := doc.Tree.Nodes[curr]
+
+		// 1. Convert Method Signature
+		if node.Kind == ast.KindFunctionStmt && targetMethod == ast.InvalidNode {
+			if int(node.Right) < len(doc.Tree.Nodes) {
+				funcExprNode := doc.Tree.Nodes[node.Right]
+				if int(funcExprNode.Right) < len(doc.Tree.Nodes) {
+					blockNode := doc.Tree.Nodes[funcExprNode.Right]
+					if offset <= blockNode.Start {
+						if int(node.Left) < len(doc.Tree.Nodes) {
+							nameNode := doc.Tree.Nodes[node.Left]
+							if nameNode.Kind == ast.KindMethodName || nameNode.Kind == ast.KindMemberExpr {
+								targetMethod = curr
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 2. Optimize table.insert
+		if node.Kind == ast.KindCallExpr && targetTableInsert == ast.InvalidNode && node.Count == 2 {
+			if int(node.Left) < len(doc.Tree.Nodes) {
+				leftNode := doc.Tree.Nodes[node.Left]
+				if leftNode.Kind == ast.KindMemberExpr && int(leftNode.Left) < len(doc.Tree.Nodes) && int(leftNode.Right) < len(doc.Tree.Nodes) {
+					recNode := doc.Tree.Nodes[leftNode.Left]
+					propNode := doc.Tree.Nodes[leftNode.Right]
+
+					if recNode.Start <= recNode.End && recNode.End <= uint32(len(doc.Source)) &&
+						propNode.Start <= propNode.End && propNode.End <= uint32(len(doc.Source)) {
+
+						recName := doc.Source[recNode.Start:recNode.End]
+						propName := doc.Source[propNode.Start:propNode.End]
+
+						if bytes.Equal(recName, []byte("table")) && bytes.Equal(propName, []byte("insert")) {
+							targetTableInsert = curr
+						}
+					}
+				}
+			}
+		}
+
+		// 3. Merge Nested If
+		if node.Kind == ast.KindIf && targetNestedIf == ast.InvalidNode {
+			var hasElse bool
+
+			for i := uint16(0); i < node.Count; i++ {
+				if node.Extra+uint32(i) < uint32(len(doc.Tree.ExtraList)) {
+					childID := doc.Tree.ExtraList[node.Extra+uint32(i)]
+					if int(childID) < len(doc.Tree.Nodes) {
+						if doc.Tree.Nodes[childID].Kind == ast.KindElseIf || doc.Tree.Nodes[childID].Kind == ast.KindElse {
+							hasElse = true
+
+							break
+						}
+					}
+				}
+			}
+
+			if !hasElse {
+				if int(node.Right) < len(doc.Tree.Nodes) {
+					blockNode := doc.Tree.Nodes[node.Right]
+					if blockNode.Count == 1 && blockNode.Extra < uint32(len(doc.Tree.ExtraList)) {
+						innerStmtID := doc.Tree.ExtraList[blockNode.Extra]
+						if int(innerStmtID) < len(doc.Tree.Nodes) {
+							innerStmt := doc.Tree.Nodes[innerStmtID]
+							if innerStmt.Kind == ast.KindIf {
+								var innerHasElse bool
+
+								for i := uint16(0); i < innerStmt.Count; i++ {
+									if innerStmt.Extra+uint32(i) < uint32(len(doc.Tree.ExtraList)) {
+										childID := doc.Tree.ExtraList[innerStmt.Extra+uint32(i)]
+										if int(childID) < len(doc.Tree.Nodes) {
+											if doc.Tree.Nodes[childID].Kind == ast.KindElseIf || doc.Tree.Nodes[childID].Kind == ast.KindElse {
+												innerHasElse = true
+
+												break
+											}
+										}
+									}
+								}
+
+								if !innerHasElse {
+									targetNestedIf = curr
+									nestedIfTitle = "Merge nested 'if' statements"
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		curr = node.Parent
+	}
+
+	// 1. Condition Inverter
+	if targetCond != ast.InvalidNode {
+		actions = append(actions, CodeAction{
+			Title:       condTitle,
+			Kind:        "refactor.rewrite",
+			IsPreferred: false,
+			Data: map[string]any{
+				"type":   "invertCondition",
+				"uri":    uri,
+				"nodeId": float64(targetCond),
+			},
+		})
+	}
+
+	// 2. Recursive Early-Return Converter
+	if targetIf != ast.InvalidNode {
+		ifNode := doc.Tree.Nodes[targetIf]
+
+		var hasElseIf bool
+
+		for i := uint16(0); i < ifNode.Count; i++ {
+			child := doc.Tree.Nodes[doc.Tree.ExtraList[ifNode.Extra+uint32(i)]]
+			if child.Kind == ast.KindElseIf {
+				hasElseIf = true
+
+				break
+			}
+		}
+
+		_, isSafe := s.checkSafetyAndBudget(doc, targetIf, 3)
+
+		if !hasElseIf && isSafe {
+			actions = append(actions, CodeAction{
+				Title:       "Convert to early returns (recursive)",
+				Kind:        "refactor.rewrite",
+				IsPreferred: false,
+				Data: map[string]any{
+					"type":   "earlyReturn",
+					"uri":    uri,
+					"nodeId": float64(targetIf),
+				},
+			})
+		}
+	}
+
+	// 3. Optimize table.insert
+	if targetTableInsert != ast.InvalidNode {
+		actions = append(actions, CodeAction{
+			Title:       "Optimize 'table.insert' to 't[#t+1]'",
+			Kind:        "refactor.rewrite",
+			IsPreferred: true,
+			Data: map[string]any{
+				"type":   "optimizeTableInsert",
+				"uri":    uri,
+				"nodeId": float64(targetTableInsert),
+			},
+		})
+	}
+
+	// 4. Convert Method Signature
+	if targetMethod != ast.InvalidNode {
+		methodNode := doc.Tree.Nodes[targetMethod]
+		nameNode := doc.Tree.Nodes[methodNode.Left]
+
+		title := "Convert to dot notation (.method)"
+
+		if nameNode.Kind == ast.KindMemberExpr {
+			title = "Convert to colon notation (:method)"
+		}
+
+		actions = append(actions, CodeAction{
+			Title:       title,
+			Kind:        "refactor.rewrite",
+			IsPreferred: false,
+			Data: map[string]any{
+				"type":   "convertMethodSig",
+				"uri":    uri,
+				"nodeId": float64(targetMethod),
+			},
+		})
+	}
+
+	// 5. Merge Nested If
+	if targetNestedIf != ast.InvalidNode {
+		actions = append(actions, CodeAction{
+			Title:       nestedIfTitle,
+			Kind:        "refactor.rewrite",
+			IsPreferred: false,
+			Data: map[string]any{
+				"type":   "mergeNestedIf",
+				"uri":    uri,
+				"nodeId": float64(targetNestedIf),
+			},
+		})
+	}
+
+	if actions == nil {
+		actions = []CodeAction{}
+	}
+
+	WriteMessage(s.Writer, Response{
+		RPC:    "2.0",
+		ID:     req.ID,
+		Result: actions,
+	})
+}
+
+func (s *Server) handleCodeActionResolve(req Request) {
+	var action CodeAction
+
+	err := json.Unmarshal(req.Params, &action)
+	if err != nil {
+		return
+	}
+
+	if data, ok := action.Data.(map[string]any); ok {
+		actionType, _ := data["type"].(string)
+		uri, _ := data["uri"].(string)
+		nodeIDFloat, _ := data["nodeId"].(float64)
+
+		nodeID := ast.NodeID(nodeIDFloat)
+
+		if doc, ok := s.Documents[uri]; ok && nodeID != ast.InvalidNode && int(nodeID) < len(doc.Tree.Nodes) {
+			if actionType == "invertCondition" {
+				invertedCond := s.invertCondition(doc, nodeID)
+				action.Edit = &WorkspaceEdit{
+					Changes: map[string][]TextEdit{
+						uri: {{
+							Range:   getNodeRange(doc.Tree, nodeID),
+							NewText: invertedCond,
+						}},
+					},
+				}
+			} else if actionType == "earlyReturn" {
+				ifNode := doc.Tree.Nodes[nodeID]
+				ifLine, _ := doc.Tree.Position(ifNode.Start)
+
+				var lineStart uint32
+
+				if int(ifLine) < len(doc.Tree.LineOffsets) {
+					lineStart = doc.Tree.LineOffsets[ifLine]
+				}
+
+				var indentBytes []byte
+
+				for i := lineStart; i < ifNode.Start && i < uint32(len(doc.Source)); i++ {
+					if doc.Source[i] == ' ' || doc.Source[i] == '\t' {
+						indentBytes = append(indentBytes, doc.Source[i])
+					} else {
+						break
+					}
+				}
+
+				indent := string(indentBytes)
+
+				outText := s.formatStatement(doc, nodeID, indent, 3)
+
+				action.Edit = &WorkspaceEdit{
+					Changes: map[string][]TextEdit{
+						uri: {{
+							Range:   getNodeRange(doc.Tree, nodeID),
+							NewText: trimTrailingWhitespace(outText),
+						}},
+					},
+				}
+			} else if actionType == "optimizeTableInsert" {
+				callNode := doc.Tree.Nodes[nodeID]
+				if callNode.Count >= 2 && callNode.Extra+1 < uint32(len(doc.Tree.ExtraList)) {
+					arg1ID := doc.Tree.ExtraList[callNode.Extra]
+					arg2ID := doc.Tree.ExtraList[callNode.Extra+1]
+
+					if int(arg1ID) < len(doc.Tree.Nodes) && int(arg2ID) < len(doc.Tree.Nodes) {
+						arg1Node := doc.Tree.Nodes[arg1ID]
+						arg2Node := doc.Tree.Nodes[arg2ID]
+
+						if arg1Node.Start <= arg1Node.End && arg1Node.End <= uint32(len(doc.Source)) &&
+							arg2Node.Start <= arg2Node.End && arg2Node.End <= uint32(len(doc.Source)) {
+
+							arg1 := ast.String(doc.Source[arg1Node.Start:arg1Node.End])
+							arg2 := ast.String(doc.Source[arg2Node.Start:arg2Node.End])
+
+							newText := fmt.Sprintf("%s[#%s+1] = %s", arg1, arg1, arg2)
+
+							action.Edit = &WorkspaceEdit{
+								Changes: map[string][]TextEdit{
+									uri: {{
+										Range:   getNodeRange(doc.Tree, nodeID),
+										NewText: newText,
+									}},
+								},
+							}
+						}
+					}
+				}
+			} else if actionType == "convertMethodSig" {
+				funcNode := doc.Tree.Nodes[nodeID]
+				if int(funcNode.Left) < len(doc.Tree.Nodes) {
+					nameNode := doc.Tree.Nodes[funcNode.Left]
+
+					if int(nameNode.Left) < len(doc.Tree.Nodes) && int(nameNode.Right) < len(doc.Tree.Nodes) {
+						leftNode := doc.Tree.Nodes[nameNode.Left]
+						rightNode := doc.Tree.Nodes[nameNode.Right]
+
+						if leftNode.Start <= leftNode.End && leftNode.End <= uint32(len(doc.Source)) &&
+							rightNode.Start <= rightNode.End && rightNode.End <= uint32(len(doc.Source)) {
+
+							leftStr := ast.String(doc.Source[leftNode.Start:leftNode.End])
+							rightStr := ast.String(doc.Source[rightNode.Start:rightNode.End])
+
+							var newText string
+
+							if nameNode.Kind == ast.KindMethodName {
+								newText = leftStr + "." + rightStr
+							} else {
+								newText = leftStr + ":" + rightStr
+							}
+
+							action.Edit = &WorkspaceEdit{
+								Changes: map[string][]TextEdit{
+									uri: {{
+										Range:   getNodeRange(doc.Tree, funcNode.Left),
+										NewText: newText,
+									}},
+								},
+							}
+						}
+					}
+				}
+			} else if actionType == "mergeNestedIf" {
+				ifNode := doc.Tree.Nodes[nodeID]
+				if int(ifNode.Right) < len(doc.Tree.Nodes) {
+					blockNode := doc.Tree.Nodes[ifNode.Right]
+
+					if blockNode.Count > 0 && blockNode.Extra < uint32(len(doc.Tree.ExtraList)) {
+						innerIfID := doc.Tree.ExtraList[blockNode.Extra]
+
+						if int(innerIfID) < len(doc.Tree.Nodes) {
+							innerIfNode := doc.Tree.Nodes[innerIfID]
+
+							wrapCond := func(condID ast.NodeID) string {
+								if int(condID) >= len(doc.Tree.Nodes) {
+									return ""
+								}
+
+								condNode := doc.Tree.Nodes[condID]
+								if condNode.Start > condNode.End || condNode.End > uint32(len(doc.Source)) {
+									return ""
+								}
+
+								condStr := ast.String(doc.Source[condNode.Start:condNode.End])
+
+								if condNode.Kind == ast.KindBinaryExpr && token.Kind(condNode.Extra) == token.Or {
+									return "(" + condStr + ")"
+								}
+
+								return condStr
+							}
+
+							newCond := wrapCond(ifNode.Left) + " and " + wrapCond(innerIfNode.Left)
+
+							ifLine, _ := doc.Tree.Position(ifNode.Start)
+
+							var lineStart uint32
+
+							if int(ifLine) < len(doc.Tree.LineOffsets) {
+								lineStart = doc.Tree.LineOffsets[ifLine]
+							}
+
+							var indentBytes []byte
+
+							for i := lineStart; i < ifNode.Start && i < uint32(len(doc.Source)); i++ {
+								if doc.Source[i] == ' ' || doc.Source[i] == '\t' {
+									indentBytes = append(indentBytes, doc.Source[i])
+								} else {
+									break
+								}
+							}
+
+							indent := string(indentBytes)
+
+							innerIndent := indent + "\t"
+							if bytes.Contains(indentBytes, []byte("    ")) {
+								innerIndent = indent + "    "
+							} else if bytes.Contains(indentBytes, []byte("  ")) {
+								innerIndent = indent + "  "
+							}
+
+							var newText strings.Builder
+
+							newText.WriteString("if ")
+							newText.WriteString(newCond)
+							newText.WriteString(" then\n")
+
+							innerBody := s.flattenBlock(doc, innerIfNode.Right, innerIndent, 999)
+							if innerBody != "" {
+								newText.WriteString(innerIndent)
+								newText.WriteString(innerBody)
+								newText.WriteString("\n")
+							}
+
+							newText.WriteString(indent)
+							newText.WriteString("end")
+
+							action.Edit = &WorkspaceEdit{
+								Changes: map[string][]TextEdit{
+									uri: {{
+										Range:   getNodeRange(doc.Tree, nodeID),
+										NewText: trimTrailingWhitespace(newText.String()),
+									}},
+								},
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	WriteMessage(s.Writer, Response{
+		RPC:    "2.0",
+		ID:     req.ID,
+		Result: action,
+	})
+}
+
+func (s *Server) handleExecuteCommand(req Request) {
+	var params ExecuteCommandParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	if params.Command == "lugo.applySafeFixes" {
+		var targetURI string
+
+		if len(params.Arguments) > 0 {
+			if uriStr, ok := params.Arguments[0].(string); ok && uriStr != "" {
+				targetURI = s.normalizeURI(uriStr)
+			}
+		}
+
+		changes := make(map[string][]TextEdit)
+
+		if targetURI != "" {
+			if doc, ok := s.Documents[targetURI]; ok {
+				fixes := s.getSafeFixesForDocument(doc, nil)
+
+				for _, fix := range fixes {
+					changes[targetURI] = append(changes[targetURI], fix.Edits...)
+				}
+			}
+		} else {
+			for uri, doc := range s.Documents {
+				if !s.isWorkspaceURI(uri) {
+					continue
+				}
+
+				fixes := s.getSafeFixesForDocument(doc, nil)
+
+				for _, fix := range fixes {
+					changes[uri] = append(changes[uri], fix.Edits...)
+				}
+			}
+		}
+
+		if len(changes) > 0 {
+			WriteMessage(s.Writer, OutgoingRequest{
+				RPC:    "2.0",
+				ID:     99999, // Fire and forget request ID
+				Method: "workspace/applyEdit",
+				Params: ApplyWorkspaceEditParams{
+					Label: "Apply safe fixes",
+					Edit:  WorkspaceEdit{Changes: changes},
+				},
+			})
+		}
+
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+	}
+}
+
+func (s *Server) handlePrepareRename(req Request) {
+	var params PrepareRenameParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	uri := s.normalizeURI(params.TextDocument.URI)
+
+	doc, ok := s.Documents[uri]
+	if !ok {
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+		return
+	}
+
+	offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
+
+	ctx := s.resolveSymbolAt(uri, offset)
+	if ctx == nil {
+		WriteMessage(s.Writer, Response{
+			RPC: "2.0",
+			ID:  req.ID,
+			Error: ResponseError{
+				Code:    -32602,
+				Message: "Cannot rename this element.",
+			},
+		})
+
+		return
+	}
+
+	WriteMessage(s.Writer, Response{
+		RPC: "2.0",
+		ID:  req.ID,
+		Result: PrepareRenameResult{
+			Range:       getNodeRange(doc.Tree, ctx.IdentNodeID),
+			Placeholder: ctx.IdentName,
+		},
+	})
+}
+
+func (s *Server) handleRename(req Request) {
+	var params RenameParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	uri := s.normalizeURI(params.TextDocument.URI)
+
+	doc, ok := s.Documents[uri]
+	if !ok {
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+		return
+	}
+
+	offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
+	ctx := s.resolveSymbolAt(uri, offset)
+
+	if ctx == nil {
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+		return
+	}
+
+	changes := make(map[string][]TextEdit)
+	seen := make(map[RefKey]bool)
+
+	addEdit := func(dDoc *Document, dUri string, nodeID ast.NodeID) {
+		rk := RefKey{URI: dUri, ID: nodeID}
+
+		if seen[rk] {
+			return
+		}
+
+		seen[rk] = true
+
+		changes[dUri] = append(changes[dUri], TextEdit{
+			Range:   getNodeRange(dDoc.Tree, nodeID),
+			NewText: params.NewName,
+		})
+	}
+
+	if ctx.TargetDefID != ast.InvalidNode {
+		for i, def := range ctx.TargetDoc.Resolver.References {
+			if def == ctx.TargetDefID {
+				addEdit(ctx.TargetDoc, ctx.TargetURI, ast.NodeID(i))
+			}
+		}
+	}
+
+	if ctx.IsGlobal {
+		for dUri, dDoc := range s.Documents {
+			if ctx.GKey.ReceiverHash == 0 {
+				for _, id := range dDoc.Resolver.GlobalDefs {
+					node := dDoc.Tree.Nodes[id]
+
+					if ast.HashBytes(dDoc.Source[node.Start:node.End]) == ctx.GKey.PropHash {
+						addEdit(dDoc, dUri, id)
+					}
+				}
+
+				for _, id := range dDoc.Resolver.GlobalRefs {
+					node := dDoc.Tree.Nodes[id]
+
+					if ast.HashBytes(dDoc.Source[node.Start:node.End]) == ctx.GKey.PropHash {
+						if dDoc.Resolver.References[id] == ast.InvalidNode {
+							addEdit(dDoc, dUri, id)
+						}
+					}
+				}
+			} else {
+				for _, fd := range dDoc.Resolver.FieldDefs {
+					if fd.ReceiverHash == ctx.GKey.ReceiverHash && fd.PropHash == ctx.GKey.PropHash {
+						addEdit(dDoc, dUri, fd.NodeID)
+					}
+				}
+
+				for _, pf := range dDoc.Resolver.PendingFields {
+					if pf.ReceiverHash == ctx.GKey.ReceiverHash && pf.PropHash == ctx.GKey.PropHash {
+						if dDoc.Resolver.References[pf.PropNodeID] == ast.InvalidNode {
+							addEdit(dDoc, dUri, pf.PropNodeID)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	WriteMessage(s.Writer, Response{
+		RPC: "2.0",
+		ID:  req.ID,
+		Result: WorkspaceEdit{
+			Changes: changes,
+		},
+	})
+}
+
+func (s *Server) handleLinkedEditingRange(req Request) {
+	var params LinkedEditingRangeParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	uri := s.normalizeURI(params.TextDocument.URI)
+
+	doc, ok := s.Documents[uri]
+	if !ok {
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+		return
+	}
+
+	offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
+
+	ctx := s.resolveSymbolAt(uri, offset)
+	if ctx == nil || ctx.IsGlobal || ctx.TargetDoc == nil || ctx.TargetDoc != doc || ctx.TargetDefID == ast.InvalidNode {
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+		return
+	}
+
+	var ranges []Range
+
+	for i, def := range doc.Resolver.References {
+		if def == ctx.TargetDefID {
+			ranges = append(ranges, getNodeRange(doc.Tree, ast.NodeID(i)))
+		}
+	}
+
+	WriteMessage(s.Writer, Response{
+		RPC: "2.0",
+		ID:  req.ID,
+		Result: LinkedEditingRanges{
+			Ranges: ranges,
+		},
+	})
 }
 
 func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []SafeFix {

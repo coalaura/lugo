@@ -2,6 +2,8 @@ package lsp
 
 import (
 	"bytes"
+	"encoding/json"
+	"time"
 
 	"github.com/coalaura/lugo/lexer"
 	"github.com/coalaura/lugo/token"
@@ -46,6 +48,63 @@ func NewFormatter(indentSize int, useTabs bool, opinionated bool) *Formatter {
 		UseTabs:     useTabs,
 		Opinionated: opinionated,
 	}
+}
+
+func (s *Server) handleFormatting(req Request) {
+	if !s.FeatureFormatting {
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+		return
+	}
+
+	var params DocumentFormattingParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	uri := s.normalizeURI(params.TextDocument.URI)
+
+	doc, ok := s.Documents[uri]
+	if !ok {
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+		return
+	}
+
+	start := time.Now()
+
+	formatter := NewFormatter(params.Options.TabSize, !params.Options.InsertSpaces, s.FormatOpinionated)
+	formatted := formatter.Format(doc.Source)
+
+	took := time.Since(start)
+
+	s.Log.Printf("Formatted document in %s\n", took)
+
+	if bytes.Equal(doc.Source, formatted) {
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+		return
+	}
+
+	endLine, endCol := doc.Tree.Position(uint32(len(doc.Source)))
+
+	changes := []TextEdit{
+		{
+			Range: Range{
+				Start: Position{Line: 0, Character: 0},
+				End:   Position{Line: endLine, Character: endCol},
+			},
+			NewText: string(formatted),
+		},
+	}
+
+	WriteMessage(s.Writer, Response{
+		RPC:    "2.0",
+		ID:     req.ID,
+		Result: changes,
+	})
 }
 
 // Format iterates over the source's token stream and elegantly fixes whitespace.

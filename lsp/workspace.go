@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"bytes"
+	"encoding/json"
 	"io/fs"
 	"net/url"
 	"os"
@@ -21,6 +22,167 @@ type IgnorePattern struct {
 	HasPrefix     string
 	ContainsPath  string
 	SuffixPath    string
+}
+
+func (s *Server) handleDidOpen(req Request) {
+	var params DidOpenTextDocumentParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	uri := s.normalizeURI(params.TextDocument.URI)
+
+	if s.isIgnoredURI(uri) {
+		return
+	}
+
+	s.OpenFiles[uri] = true
+
+	s.updateDocument(uri, []byte(params.TextDocument.Text))
+
+	s.publishDiagnostics(uri)
+
+	s.Log.Debugf("Opened document: %s\n", uri)
+}
+
+func (s *Server) handleDidChange(req Request) {
+	var params DidChangeTextDocumentParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	uri := s.normalizeURI(params.TextDocument.URI)
+
+	if s.isIgnoredURI(uri) {
+		if _, ok := s.Documents[uri]; ok {
+			s.clearDocument(uri)
+		}
+
+		return
+	}
+
+	if len(params.ContentChanges) > 0 {
+		s.updateDocument(uri, []byte(params.ContentChanges[0].Text))
+
+		s.publishDiagnostics(uri)
+
+		s.Log.Debugf("Updated document: %s\n", uri)
+	}
+}
+
+func (s *Server) handleDidClose(req Request) {
+	var params DidCloseTextDocumentParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	uri := s.normalizeURI(params.TextDocument.URI)
+
+	delete(s.OpenFiles, uri)
+
+	path := s.uriToPath(uri)
+	if path != "" {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			s.clearDocument(uri)
+		}
+	}
+
+	s.Log.Debugf("Closed document: %s\n", uri)
+}
+
+func (s *Server) handleDidChangeConfiguration(req Request) {
+	var params DidChangeConfigurationParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	needsReindex, needsRepublish := s.applyInitializationOptions(params.Settings)
+
+	if needsReindex {
+		s.refreshWorkspace()
+	} else if needsRepublish {
+		s.publishWorkspaceDiagnostics()
+	}
+}
+
+func (s *Server) handleDidChangeWatchedFiles(req Request) {
+	var params DidChangeWatchedFilesParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	for _, change := range params.Changes {
+		uri := s.normalizeURI(change.URI)
+
+		if s.isIgnoredURI(uri) {
+			continue
+		}
+
+		switch change.Type {
+		case 1, 2: // Created, Changed
+			if !s.OpenFiles[uri] {
+				path := s.uriToPath(uri)
+
+				if b, err := os.ReadFile(path); err == nil {
+					s.updateDocument(uri, b)
+
+					if s.isWorkspaceURI(uri) {
+						s.publishDiagnostics(uri)
+					}
+				}
+			}
+		case 3: // Deleted
+			s.clearDocument(uri)
+		}
+	}
+}
+
+func (s *Server) handleReindex(req Request) {
+	s.refreshWorkspace()
+
+	WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: "ok"})
+}
+
+func (s *Server) handleReadStd(req Request) {
+	var params ReadStdParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	var content string
+
+	filename := params.URI
+
+	if strings.HasPrefix(filename, "std:///") {
+		filename = filename[7:]
+	} else if strings.HasPrefix(filename, "std:/") {
+		filename = filename[5:]
+	} else if strings.HasPrefix(filename, "std://") {
+		filename = filename[6:]
+	}
+
+	b, err := stdlibFS.ReadFile("stdlib/" + filename)
+	if err == nil {
+		content = ast.String(b)
+	}
+
+	WriteMessage(s.Writer, Response{
+		RPC:    "2.0",
+		ID:     req.ID,
+		Result: ReadStdResult{Content: content},
+	})
 }
 
 func (s *Server) refreshWorkspace() {
