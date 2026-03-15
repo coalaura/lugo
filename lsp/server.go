@@ -33,84 +33,6 @@ var luaKeywords = []string{
 
 const MaxWorkspaceResults = 100
 
-type GlobalSymbol struct {
-	URI    string
-	NodeID ast.NodeID
-	Depth  int
-	Name   string
-}
-
-type GlobalKey struct {
-	ReceiverHash uint64 // 0 if it's a root global
-	PropHash     uint64
-}
-
-type GlobalReference struct {
-	Doc    *Document
-	URI    string
-	NodeID ast.NodeID
-}
-
-type CallerKey struct {
-	URI string
-	Def ast.NodeID
-}
-
-type TargetKey struct {
-	URI string
-	Def ast.NodeID
-}
-
-type SymbolContext struct {
-	TargetDoc   *Document
-	IdentName   string
-	DisplayName string
-	TargetURI   string
-	GKey        GlobalKey
-	IdentNodeID ast.NodeID
-	TargetDefID ast.NodeID
-	RecDefID    ast.NodeID
-	IsProp      bool
-	IsGlobal    bool
-}
-
-type SemanticToken struct {
-	Start     uint32
-	End       uint32
-	TokenType uint32
-	Modifiers uint32
-}
-
-type IgnorePattern struct {
-	MatchFallback string
-	HasSuffix     string
-	HasPrefix     string
-	ContainsPath  string
-	SuffixPath    string
-}
-
-type SafeFix struct {
-	Coverage []ast.NodeID
-	Edits    []TextEdit
-	Title    string
-}
-
-type DepInfo struct {
-	IsDep bool
-	Msg   string
-}
-
-type RefKey struct {
-	URI string
-	ID  ast.NodeID
-}
-
-type DeadStoreInfo struct {
-	CanRemoveAll bool
-	Edits        []TextEdit
-	Coverage     []ast.NodeID
-}
-
 type Server struct {
 	Version           string
 	Reader            *bufio.Reader
@@ -169,6 +91,84 @@ type Server struct {
 	FormatOpinionated   bool
 }
 
+type CallerKey struct {
+	URI string
+	Def ast.NodeID
+}
+
+type GlobalKey struct {
+	ReceiverHash uint64 // 0 if it's a root global
+	PropHash     uint64
+}
+
+type RefKey struct {
+	URI string
+	ID  ast.NodeID
+}
+
+type TargetKey struct {
+	URI string
+	Def ast.NodeID
+}
+
+type GlobalReference struct {
+	Doc    *Document
+	URI    string
+	NodeID ast.NodeID
+}
+
+type GlobalSymbol struct {
+	URI    string
+	NodeID ast.NodeID
+	Depth  int
+	Name   string
+}
+
+type SemanticToken struct {
+	Start     uint32
+	End       uint32
+	TokenType uint32
+	Modifiers uint32
+}
+
+type SymbolContext struct {
+	TargetDoc   *Document
+	IdentName   string
+	DisplayName string
+	TargetURI   string
+	GKey        GlobalKey
+	IdentNodeID ast.NodeID
+	TargetDefID ast.NodeID
+	RecDefID    ast.NodeID
+	IsProp      bool
+	IsGlobal    bool
+}
+
+type DeadStoreInfo struct {
+	CanRemoveAll bool
+	Edits        []TextEdit
+	Coverage     []ast.NodeID
+}
+
+type DepInfo struct {
+	IsDep bool
+	Msg   string
+}
+
+type IgnorePattern struct {
+	MatchFallback string
+	HasSuffix     string
+	HasPrefix     string
+	ContainsPath  string
+	SuffixPath    string
+}
+
+type SafeFix struct {
+	Coverage []ast.NodeID
+	Edits    []TextEdit
+	Title    string
+}
+
 func NewServer(version string) *Server {
 	return &Server{
 		Version:      version,
@@ -222,61 +222,6 @@ func (s *Server) Start() error {
 	return nil
 }
 
-func (s *Server) setLibraryPaths(paths []string) bool {
-	if slices.Equal(s.LibraryPaths, paths) {
-		return false
-	}
-
-	s.LibraryPaths = slices.Clone(paths)
-	s.lowerLibraryPaths = s.lowerLibraryPaths[:0]
-
-	for _, lib := range s.LibraryPaths {
-		s.lowerLibraryPaths = append(s.lowerLibraryPaths, strings.ToLower(filepath.Clean(filepath.FromSlash(lib))))
-	}
-
-	return true
-}
-
-func (s *Server) setIgnoreGlobs(globs []string) bool {
-	if slices.Equal(s.IgnoreGlobs, globs) {
-		return false
-	}
-
-	s.IgnoreGlobs = slices.Clone(globs)
-	s.compileIgnorePatterns()
-
-	return true
-}
-
-func (s *Server) setKnownGlobals(globals []string) bool {
-	var (
-		newKnownGlobals     map[string]bool
-		newKnownGlobalGlobs []string
-	)
-
-	if len(globals) > 0 {
-		newKnownGlobals = make(map[string]bool, len(globals))
-		newKnownGlobalGlobs = make([]string, 0, len(globals))
-
-		for _, g := range globals {
-			if strings.ContainsAny(g, "*?") {
-				newKnownGlobalGlobs = append(newKnownGlobalGlobs, g)
-			} else {
-				newKnownGlobals[g] = true
-			}
-		}
-	}
-
-	if mapsEqualStringBool(s.KnownGlobals, newKnownGlobals) && slices.Equal(s.KnownGlobalGlobs, newKnownGlobalGlobs) {
-		return false
-	}
-
-	s.KnownGlobals = newKnownGlobals
-	s.KnownGlobalGlobs = newKnownGlobalGlobs
-
-	return true
-}
-
 func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsReindex bool, needsRepublish bool) {
 	if s.setLibraryPaths(opts.LibraryPaths) {
 		needsReindex = true
@@ -322,6 +267,61 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 	return needsReindex, needsRepublish
 }
 
+func (s *Server) setIgnoreGlobs(globs []string) bool {
+	if slices.Equal(s.IgnoreGlobs, globs) {
+		return false
+	}
+
+	s.IgnoreGlobs = slices.Clone(globs)
+	s.compileIgnorePatterns()
+
+	return true
+}
+
+func (s *Server) setKnownGlobals(globals []string) bool {
+	var (
+		newKnownGlobals     map[string]bool
+		newKnownGlobalGlobs []string
+	)
+
+	if len(globals) > 0 {
+		newKnownGlobals = make(map[string]bool, len(globals))
+		newKnownGlobalGlobs = make([]string, 0, len(globals))
+
+		for _, g := range globals {
+			if strings.ContainsAny(g, "*?") {
+				newKnownGlobalGlobs = append(newKnownGlobalGlobs, g)
+			} else {
+				newKnownGlobals[g] = true
+			}
+		}
+	}
+
+	if mapsEqualStringBool(s.KnownGlobals, newKnownGlobals) && slices.Equal(s.KnownGlobalGlobs, newKnownGlobalGlobs) {
+		return false
+	}
+
+	s.KnownGlobals = newKnownGlobals
+	s.KnownGlobalGlobs = newKnownGlobalGlobs
+
+	return true
+}
+
+func (s *Server) setLibraryPaths(paths []string) bool {
+	if slices.Equal(s.LibraryPaths, paths) {
+		return false
+	}
+
+	s.LibraryPaths = slices.Clone(paths)
+	s.lowerLibraryPaths = s.lowerLibraryPaths[:0]
+
+	for _, lib := range s.LibraryPaths {
+		s.lowerLibraryPaths = append(s.lowerLibraryPaths, strings.ToLower(filepath.Clean(filepath.FromSlash(lib))))
+	}
+
+	return true
+}
+
 func (s *Server) handleMessage(req Request) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -349,15 +349,6 @@ func (s *Server) handleMessage(req Request) {
 	s.Log.Debugf("Received method: %s\n", req.Method)
 
 	switch req.Method {
-	case "shutdown":
-		err := WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-		if err != nil {
-			s.Log.Errorf("WriteMessage error (shutdown): %v\n", err)
-		}
-	case "exit":
-		s.Log.Println("Received exit notification, terminating.")
-
-		os.Exit(0)
 	case "initialize":
 		var params InitializeParams
 
@@ -415,6 +406,15 @@ func (s *Server) handleMessage(req Request) {
 		if err != nil {
 			s.Log.Errorf("WriteMessage error: %v\n", err)
 		}
+	case "shutdown":
+		err := WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+		if err != nil {
+			s.Log.Errorf("WriteMessage error (shutdown): %v\n", err)
+		}
+	case "exit":
+		s.Log.Println("Received exit notification, terminating.")
+
+		os.Exit(0)
 	case "workspace/didChangeConfiguration":
 		var params DidChangeConfigurationParams
 
@@ -430,81 +430,6 @@ func (s *Server) handleMessage(req Request) {
 		} else if needsRepublish {
 			s.publishWorkspaceDiagnostics()
 		}
-	case "lugo/readStd":
-		var params ReadStdParams
-
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			return
-		}
-
-		var content string
-
-		filename := params.URI
-
-		if strings.HasPrefix(filename, "std:///") {
-			filename = filename[7:]
-		} else if strings.HasPrefix(filename, "std:/") {
-			filename = filename[5:]
-		} else if strings.HasPrefix(filename, "std://") {
-			filename = filename[6:]
-		}
-
-		b, err := stdlibFS.ReadFile("stdlib/" + filename)
-		if err == nil {
-			content = ast.String(b)
-		}
-
-		WriteMessage(s.Writer, Response{
-			RPC:    "2.0",
-			ID:     req.ID,
-			Result: ReadStdResult{Content: content},
-		})
-	case "lugo/reindex":
-		s.refreshWorkspace()
-
-		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: "ok"})
-	case "textDocument/didOpen":
-		var params DidOpenTextDocumentParams
-
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			return
-		}
-
-		uri := s.normalizeURI(params.TextDocument.URI)
-
-		if s.isIgnoredURI(uri) {
-			return
-		}
-
-		s.OpenFiles[uri] = true
-
-		s.updateDocument(uri, []byte(params.TextDocument.Text))
-
-		s.publishDiagnostics(uri)
-
-		s.Log.Debugf("Opened document: %s\n", uri)
-	case "textDocument/didClose":
-		var params DidCloseTextDocumentParams
-
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			return
-		}
-
-		uri := s.normalizeURI(params.TextDocument.URI)
-
-		delete(s.OpenFiles, uri)
-
-		path := s.uriToPath(uri)
-		if path != "" {
-			if _, err := os.Stat(path); os.IsNotExist(err) {
-				s.clearDocument(uri)
-			}
-		}
-
-		s.Log.Debugf("Closed document: %s\n", uri)
 	case "workspace/didChangeWatchedFiles":
 		var params DidChangeWatchedFilesParams
 
@@ -592,6 +517,132 @@ func (s *Server) handleMessage(req Request) {
 
 			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
 		}
+	case "workspace/symbol":
+		var params WorkspaceSymbolParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		queryLower := []byte(strings.ToLower(params.Query))
+
+		var (
+			results []SymbolInformation
+			count   int
+		)
+
+		for key, sym := range s.GlobalIndex {
+			if !containsFold([]byte(sym.Name), queryLower) {
+				continue
+			}
+
+			doc, ok := s.Documents[sym.URI]
+			if !ok {
+				continue
+			}
+
+			kind := SymbolKindVariable
+
+			valID := doc.getAssignedValue(sym.NodeID)
+
+			if valID != ast.InvalidNode {
+				valKind := doc.Tree.Nodes[valID].Kind
+				if valKind == ast.KindFunctionExpr {
+					if key.ReceiverHash != 0 {
+						kind = SymbolKindMethod
+					} else {
+						kind = SymbolKindFunction
+					}
+				} else if valKind == ast.KindTableExpr {
+					kind = SymbolKindClass
+				} else if key.ReceiverHash != 0 {
+					kind = SymbolKindField
+				}
+			} else if key.ReceiverHash != 0 {
+				kind = SymbolKindField
+			}
+
+			results = append(results, SymbolInformation{
+				Name: sym.Name,
+				Kind: kind,
+				Location: Location{
+					URI:   sym.URI,
+					Range: getNodeRange(doc.Tree, sym.NodeID),
+				},
+			})
+
+			count++
+
+			if count >= MaxWorkspaceResults {
+				break
+			}
+		}
+
+		if results == nil {
+			results = []SymbolInformation{}
+		}
+
+		WriteMessage(s.Writer, Response{
+			RPC:    "2.0",
+			ID:     req.ID,
+			Result: results,
+		})
+	case "lugo/reindex":
+		s.refreshWorkspace()
+
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: "ok"})
+	case "lugo/readStd":
+		var params ReadStdParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		var content string
+
+		filename := params.URI
+
+		if strings.HasPrefix(filename, "std:///") {
+			filename = filename[7:]
+		} else if strings.HasPrefix(filename, "std:/") {
+			filename = filename[5:]
+		} else if strings.HasPrefix(filename, "std://") {
+			filename = filename[6:]
+		}
+
+		b, err := stdlibFS.ReadFile("stdlib/" + filename)
+		if err == nil {
+			content = ast.String(b)
+		}
+
+		WriteMessage(s.Writer, Response{
+			RPC:    "2.0",
+			ID:     req.ID,
+			Result: ReadStdResult{Content: content},
+		})
+	case "textDocument/didOpen":
+		var params DidOpenTextDocumentParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		if s.isIgnoredURI(uri) {
+			return
+		}
+
+		s.OpenFiles[uri] = true
+
+		s.updateDocument(uri, []byte(params.TextDocument.Text))
+
+		s.publishDiagnostics(uri)
+
+		s.Log.Debugf("Opened document: %s\n", uri)
 	case "textDocument/didChange":
 		var params DidChangeTextDocumentParams
 
@@ -617,6 +668,258 @@ func (s *Server) handleMessage(req Request) {
 
 			s.Log.Debugf("Updated document: %s\n", uri)
 		}
+	case "textDocument/didClose":
+		var params DidCloseTextDocumentParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		delete(s.OpenFiles, uri)
+
+		path := s.uriToPath(uri)
+		if path != "" {
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				s.clearDocument(uri)
+			}
+		}
+
+		s.Log.Debugf("Closed document: %s\n", uri)
+	case "textDocument/completion":
+		var params CompletionParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
+
+		items := make([]CompletionItem, 0, 64)
+		seen := make(map[string]bool)
+
+		addCompletion := func(label string, kind CompletionItemKind, detail string, isDep bool, sortText string) {
+			if label == "" || seen[label] {
+				return
+			}
+
+			seen[label] = true
+
+			var tags []CompletionItemTag
+
+			if isDep {
+				tags = append(tags, CompletionItemTagDeprecated)
+			}
+
+			items = append(items, CompletionItem{
+				Label:    label,
+				Kind:     kind,
+				Detail:   detail,
+				SortText: sortText,
+				Tags:     tags,
+			})
+		}
+
+		var (
+			recName  []byte
+			isMember bool
+		)
+
+		i := int(offset) - 1
+
+		for i >= 0 {
+			c := doc.Source[i]
+
+			isIdentChar := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
+
+			if !isIdentChar {
+				break
+			}
+
+			i--
+		}
+
+		for i >= 0 {
+			c := doc.Source[i]
+
+			if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+				i--
+			} else {
+				break
+			}
+		}
+
+		if i >= 0 && (doc.Source[i] == '.' || doc.Source[i] == ':') {
+			isMember = true
+
+			i--
+
+			for i >= 0 {
+				c := doc.Source[i]
+
+				if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+					i--
+				} else {
+					break
+				}
+			}
+
+			endId := i + 1
+
+			for i >= 0 {
+				c := doc.Source[i]
+
+				isIdentChar := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.'
+
+				if !isIdentChar {
+					break
+				}
+
+				i--
+			}
+
+			startId := i + 1
+
+			if startId < endId {
+				recName = doc.Source[startId:endId]
+			}
+		}
+
+		s.Log.Printf("Completion requested at offset %d. isMember=%v, recName=%s\n", offset, isMember, ast.String(recName))
+
+		if isMember && len(recName) > 0 {
+			recHash := ast.HashBytes(recName)
+
+			var recDef ast.NodeID = ast.InvalidNode
+
+			doc.GetLocalsAt(offset, func(name []byte, defID ast.NodeID) bool {
+				if bytes.Equal(name, recName) {
+					recDef = defID
+
+					return false
+				}
+
+				return true
+			})
+
+			for _, fd := range doc.Resolver.FieldDefs {
+				if (recDef != ast.InvalidNode && fd.ReceiverDef == recDef) || (recDef == ast.InvalidNode && fd.ReceiverHash == recHash) {
+					node := doc.Tree.Nodes[fd.NodeID]
+
+					kind := FieldCompletion
+
+					valID := doc.getAssignedValue(fd.NodeID)
+					if valID != ast.InvalidNode && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+						kind = FunctionCompletion
+					}
+
+					isDep, _ := doc.HasDeprecatedTag(fd.NodeID)
+
+					addCompletion(ast.String(doc.Source[node.Start:node.End]), kind, "field", isDep, "1")
+				}
+			}
+
+			validRecs := make(map[uint64]bool)
+
+			currRec := recHash
+
+			for i := 0; i < 10 && currRec != 0; i++ {
+				validRecs[currRec] = true
+
+				currRec = s.getGlobalAlias(currRec)
+			}
+
+			for key, sym := range s.GlobalIndex {
+				if validRecs[key.ReceiverHash] && key.PropHash != 0 {
+					if symDoc, ok := s.Documents[sym.URI]; ok {
+						node := symDoc.Tree.Nodes[sym.NodeID]
+
+						kind := FieldCompletion
+
+						valID := symDoc.getAssignedValue(sym.NodeID)
+						if valID != ast.InvalidNode && symDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+							kind = FunctionCompletion
+						}
+
+						isDep, _ := symDoc.HasDeprecatedTag(sym.NodeID)
+
+						sortGroup := "2"
+						if sym.URI == uri {
+							sortGroup = "1"
+						}
+
+						addCompletion(ast.String(symDoc.Source[node.Start:node.End]), kind, "field", isDep, sortGroup)
+					}
+				}
+			}
+		} else {
+			doc.GetLocalsAt(offset, func(name []byte, defID ast.NodeID) bool {
+				isDep, _ := doc.HasDeprecatedTag(defID)
+
+				kind := VariableCompletion
+
+				valID := doc.getAssignedValue(defID)
+				if valID != ast.InvalidNode && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+					kind = FunctionCompletion
+				}
+
+				addCompletion(ast.String(name), kind, "local", isDep, "0")
+
+				return true
+			})
+
+			for key, sym := range s.GlobalIndex {
+				if key.ReceiverHash == 0 && key.PropHash != 0 {
+					if symDoc, ok := s.Documents[sym.URI]; ok {
+						node := symDoc.Tree.Nodes[sym.NodeID]
+
+						if node.Kind == ast.KindIdent || node.Kind == ast.KindMethodName {
+							kind := VariableCompletion
+
+							valID := symDoc.getAssignedValue(sym.NodeID)
+
+							if valID != ast.InvalidNode && symDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+								kind = FunctionCompletion
+							}
+
+							isDep, _ := symDoc.HasDeprecatedTag(sym.NodeID)
+
+							sortGroup := "2"
+							if sym.URI == uri {
+								sortGroup = "1"
+							}
+
+							addCompletion(ast.String(symDoc.Source[node.Start:node.End]), kind, "global", isDep, sortGroup)
+						}
+					}
+				}
+			}
+
+			for _, kw := range luaKeywords {
+				addCompletion(kw, KeywordCompletion, "keyword", false, "3")
+			}
+		}
+
+		WriteMessage(s.Writer, Response{
+			RPC: "2.0",
+			ID:  req.ID,
+			Result: CompletionList{
+				IsIncomplete: false,
+				Items:        items,
+			},
+		})
 	case "textDocument/definition":
 		var params TextDocumentPositionParams
 
@@ -649,6 +952,301 @@ func (s *Server) handleMessage(req Request) {
 		}
 
 		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+	case "textDocument/documentHighlight":
+		var params DocumentHighlightParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		if !s.FeatureDocHighlight {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
+
+		ctx := s.resolveSymbolAt(uri, offset)
+		if ctx == nil {
+			curr := doc.Tree.NodeAt(offset)
+
+			for curr != ast.InvalidNode {
+				node := doc.Tree.Nodes[curr]
+
+				if node.Kind == ast.KindCallExpr || node.Kind == ast.KindMethodCall {
+					var funcIdentID ast.NodeID
+
+					if node.Kind == ast.KindMethodCall {
+						funcIdentID = node.Right
+					} else {
+						funcIdentID = node.Left
+						if doc.Tree.Nodes[funcIdentID].Kind == ast.KindMemberExpr {
+							funcIdentID = doc.Tree.Nodes[funcIdentID].Right
+						}
+					}
+
+					if funcIdentID != ast.InvalidNode && doc.Tree.Nodes[funcIdentID].Kind == ast.KindIdent {
+						ctx = s.resolveSymbolNode(uri, doc, funcIdentID)
+					}
+
+					break
+				}
+
+				curr = node.Parent
+			}
+		}
+
+		if ctx == nil {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []DocumentHighlight{}})
+
+			return
+		}
+
+		highlights := s.getDocumentHighlights(uri, doc, ctx)
+
+		WriteMessage(s.Writer, Response{
+			RPC:    "2.0",
+			ID:     req.ID,
+			Result: highlights,
+		})
+	case "textDocument/documentSymbol":
+		var params DocumentSymbolParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		var walkTable func(tableID ast.NodeID) []DocumentSymbol
+
+		walkTable = func(tableID ast.NodeID) []DocumentSymbol {
+			node := doc.Tree.Nodes[tableID]
+
+			var syms []DocumentSymbol
+
+			for i := uint16(0); i < node.Count; i++ {
+				fieldID := doc.Tree.ExtraList[node.Extra+uint32(i)]
+				fieldNode := doc.Tree.Nodes[fieldID]
+
+				if fieldNode.Kind == ast.KindRecordField {
+					keyNode := doc.Tree.Nodes[fieldNode.Left]
+					valNode := doc.Tree.Nodes[fieldNode.Right]
+
+					name := ast.String(doc.Source[keyNode.Start:keyNode.End])
+					if name == "" {
+						name = "<error>"
+					}
+
+					kind := SymbolKindField
+
+					var children []DocumentSymbol
+
+					switch valNode.Kind {
+					case ast.KindFunctionExpr:
+						kind = SymbolKindMethod
+					case ast.KindTableExpr:
+						kind = SymbolKindClass
+
+						children = walkTable(fieldNode.Right)
+					}
+
+					syms = append(syms, DocumentSymbol{
+						Name:           name,
+						Kind:           kind,
+						Range:          getNodeRange(doc.Tree, fieldID),
+						SelectionRange: getNodeRange(doc.Tree, fieldNode.Left),
+						Children:       children,
+					})
+				}
+			}
+
+			return syms
+		}
+
+		var walk func(nodeID ast.NodeID) []DocumentSymbol
+
+		walk = func(nodeID ast.NodeID) []DocumentSymbol {
+			if nodeID == ast.InvalidNode {
+				return nil
+			}
+
+			node := doc.Tree.Nodes[nodeID]
+
+			var syms []DocumentSymbol
+
+			switch node.Kind {
+			case ast.KindFile:
+				return walk(node.Left)
+			case ast.KindBlock:
+				for i := uint16(0); i < node.Count; i++ {
+					syms = append(syms, walk(doc.Tree.ExtraList[node.Extra+uint32(i)])...)
+				}
+			case ast.KindLocalFunction, ast.KindFunctionStmt:
+				nameNode := doc.Tree.Nodes[node.Left]
+
+				name := ast.String(doc.Source[nameNode.Start:nameNode.End])
+				if name == "" {
+					name = "<error>"
+				}
+
+				kind := SymbolKindFunction
+
+				if nameNode.Kind == ast.KindMethodName {
+					kind = SymbolKindMethod
+				}
+
+				syms = append(syms, DocumentSymbol{
+					Name:           name,
+					Kind:           kind,
+					Range:          getNodeRange(doc.Tree, nodeID),
+					SelectionRange: getNodeRange(doc.Tree, node.Left),
+				})
+			case ast.KindLocalAssign, ast.KindAssign:
+				lhsList := doc.Tree.Nodes[node.Left]
+				rhsList := node.Right
+
+				if rhsList != ast.InvalidNode {
+					rhsNode := doc.Tree.Nodes[rhsList]
+
+					for i := uint16(0); i < lhsList.Count && i < rhsNode.Count; i++ {
+						lID := doc.Tree.ExtraList[lhsList.Extra+uint32(i)]
+						lNode := doc.Tree.Nodes[lID]
+
+						var (
+							rID   ast.NodeID = ast.InvalidNode
+							rNode ast.Node
+						)
+
+						if i < rhsNode.Count {
+							rID = doc.Tree.ExtraList[rhsNode.Extra+uint32(i)]
+							rNode = doc.Tree.Nodes[rID]
+						}
+
+						name := ast.String(doc.Source[lNode.Start:lNode.End])
+						if name == "" {
+							name = "<error>"
+						}
+
+						if rNode.Kind == ast.KindFunctionExpr {
+							syms = append(syms, DocumentSymbol{
+								Name:           name,
+								Kind:           SymbolKindFunction,
+								Range:          getNodeRange(doc.Tree, nodeID),
+								SelectionRange: getNodeRange(doc.Tree, lID),
+							})
+						} else if rNode.Kind == ast.KindTableExpr {
+							syms = append(syms, DocumentSymbol{
+								Name:           name,
+								Kind:           SymbolKindClass,
+								Range:          getNodeRange(doc.Tree, nodeID),
+								SelectionRange: getNodeRange(doc.Tree, lID),
+								Children:       walkTable(rID),
+							})
+						} else if node.Kind == ast.KindLocalAssign {
+							syms = append(syms, DocumentSymbol{
+								Name:           name,
+								Kind:           SymbolKindVariable,
+								Range:          getNodeRange(doc.Tree, lID),
+								SelectionRange: getNodeRange(doc.Tree, lID),
+							})
+						}
+					}
+				}
+			}
+
+			return syms
+		}
+
+		symbols := walk(doc.Tree.Root)
+
+		if symbols == nil {
+			symbols = []DocumentSymbol{}
+		}
+
+		WriteMessage(s.Writer, Response{
+			RPC:    "2.0",
+			ID:     req.ID,
+			Result: symbols,
+		})
+	case "textDocument/foldingRange":
+		var params FoldingRangeParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		ranges := make([]FoldingRange, 0, 64)
+
+		for i := 1; i < len(doc.Tree.Nodes); i++ {
+			node := doc.Tree.Nodes[i]
+
+			switch node.Kind {
+			case ast.KindFunctionExpr, ast.KindTableExpr, ast.KindDo, ast.KindWhile, ast.KindRepeat, ast.KindIf, ast.KindElseIf, ast.KindElse, ast.KindForNum, ast.KindForIn, ast.KindString:
+				sLine, sCol := doc.Tree.Position(node.Start)
+				eLine, eCol := doc.Tree.Position(node.End)
+
+				// Only fold if it spans multiple lines
+				if sLine < eLine {
+					ranges = append(ranges, FoldingRange{
+						StartLine:      sLine,
+						StartCharacter: sCol,
+						EndLine:        eLine,
+						EndCharacter:   eCol,
+					})
+				}
+			}
+		}
+
+		for _, c := range doc.Tree.Comments {
+			sLine, sCol := doc.Tree.Position(c.Start)
+			eLine, eCol := doc.Tree.Position(c.End)
+
+			if sLine < eLine {
+				ranges = append(ranges, FoldingRange{
+					StartLine:      sLine,
+					StartCharacter: sCol,
+					EndLine:        eLine,
+					EndCharacter:   eCol,
+					Kind:           "comment",
+				})
+			}
+		}
+
+		WriteMessage(s.Writer, Response{
+			RPC:    "2.0",
+			ID:     req.ID,
+			Result: ranges,
+		})
 	case "textDocument/hover":
 		var params TextDocumentPositionParams
 
@@ -1015,6 +1613,218 @@ func (s *Server) handleMessage(req Request) {
 		}
 
 		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: result})
+	case "textDocument/inlayHint":
+		var params InlayHintParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
+
+		if !s.InlayParamHints && !s.InlayImplicitSelf {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []InlayHint{}})
+
+			return
+		}
+
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []InlayHint{}})
+
+			return
+		}
+
+		startOffset := doc.Tree.Offset(params.Range.Start.Line, params.Range.Start.Character)
+		endOffset := doc.Tree.Offset(params.Range.End.Line, params.Range.End.Character)
+
+		var hints []InlayHint
+
+		for i := 1; i < len(doc.Tree.Nodes); i++ {
+			node := doc.Tree.Nodes[i]
+
+			if node.Start > endOffset || node.End < startOffset {
+				continue
+			}
+
+			// 1. Implicit 'self' hint for method definitions
+			if s.InlayImplicitSelf && node.Kind == ast.KindFunctionStmt {
+				if int(node.Left) < len(doc.Tree.Nodes) && doc.Tree.Nodes[node.Left].Kind == ast.KindMethodName {
+					nameNode := doc.Tree.Nodes[node.Left]
+
+					var funcNode ast.Node
+
+					if int(node.Right) < len(doc.Tree.Nodes) {
+						funcNode = doc.Tree.Nodes[node.Right]
+					}
+
+					var parenOff uint32
+
+					if nameNode.End != 0xFFFFFFFF && nameNode.End <= uint32(len(doc.Source)) {
+						for j := nameNode.End; j < uint32(len(doc.Source)); j++ {
+							if doc.Source[j] == '(' {
+								parenOff = j + 1
+
+								break
+							}
+						}
+					}
+
+					if parenOff > 0 {
+						var label string
+
+						if funcNode.Count > 0 {
+							label = "self, "
+						} else {
+							label = "self"
+						}
+
+						sLine, sCol := doc.Tree.Position(parenOff)
+
+						hints = append(hints, InlayHint{
+							Position: Position{Line: sLine, Character: sCol},
+							Label:    label,
+							Kind:     ParameterHint,
+							Tooltip:  "Implicit 'self' parameter from colon syntax",
+						})
+					}
+				}
+
+				continue
+			}
+
+			// 2. Parameter name hints for function calls
+			if !s.InlayParamHints {
+				continue
+			}
+
+			if node.Kind != ast.KindCallExpr && node.Kind != ast.KindMethodCall {
+				continue
+			}
+
+			if node.Count == 0 {
+				continue
+			}
+
+			var funcIdentID ast.NodeID
+
+			if node.Kind == ast.KindMethodCall {
+				funcIdentID = node.Right
+			} else {
+				funcIdentID = node.Left
+				if int(funcIdentID) < len(doc.Tree.Nodes) && doc.Tree.Nodes[funcIdentID].Kind == ast.KindMemberExpr {
+					funcIdentID = doc.Tree.Nodes[funcIdentID].Right
+				}
+			}
+
+			if int(funcIdentID) >= len(doc.Tree.Nodes) || doc.Tree.Nodes[funcIdentID].Kind != ast.KindIdent {
+				continue
+			}
+
+			ctx := s.resolveSymbolAt(uri, doc.Tree.Nodes[funcIdentID].Start)
+			if ctx == nil || ctx.TargetDoc == nil || ctx.TargetDefID == ast.InvalidNode {
+				continue
+			}
+
+			valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
+			if valID == ast.InvalidNode || int(valID) >= len(ctx.TargetDoc.Tree.Nodes) || ctx.TargetDoc.Tree.Nodes[valID].Kind != ast.KindFunctionExpr {
+				continue
+			}
+
+			hasImplicitSelfCall := node.Kind == ast.KindMethodCall
+
+			var hasImplicitSelfDef bool
+
+			pDefID := ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Parent
+			if pDefID != ast.InvalidNode && int(pDefID) < len(ctx.TargetDoc.Tree.Nodes) && ctx.TargetDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
+				hasImplicitSelfDef = true
+			}
+
+			paramOffset := 0
+			if hasImplicitSelfCall && !hasImplicitSelfDef {
+				paramOffset = 1 // e.g., table:func(arg) -> function table.func(self, arg)
+			} else if !hasImplicitSelfCall && hasImplicitSelfDef {
+				paramOffset = -1 // e.g., table.func(table, arg) -> function table:func(arg)
+			}
+
+			funcNode := ctx.TargetDoc.Tree.Nodes[valID]
+
+			for j := uint16(0); j < node.Count; j++ {
+				paramIdx := int(j) + paramOffset
+
+				if paramIdx < 0 || paramIdx >= int(funcNode.Count) {
+					continue
+				}
+
+				// SAFE GUARD: ExtraList and Node indexing for arguments
+				if node.Extra+uint32(j) >= uint32(len(doc.Tree.ExtraList)) {
+					continue
+				}
+
+				argID := doc.Tree.ExtraList[node.Extra+uint32(j)]
+				if argID == ast.InvalidNode || int(argID) >= len(doc.Tree.Nodes) {
+					continue
+				}
+
+				argNode := doc.Tree.Nodes[argID]
+
+				if funcNode.Extra+uint32(paramIdx) >= uint32(len(ctx.TargetDoc.Tree.ExtraList)) {
+					continue
+				}
+
+				pID := ctx.TargetDoc.Tree.ExtraList[funcNode.Extra+uint32(paramIdx)]
+				if pID == ast.InvalidNode || int(pID) >= len(ctx.TargetDoc.Tree.Nodes) {
+					continue
+				}
+
+				pNode := ctx.TargetDoc.Tree.Nodes[pID]
+				if pNode.Kind == ast.KindVararg {
+					continue
+				}
+
+				if pNode.Start > pNode.End || pNode.End > uint32(len(ctx.TargetDoc.Source)) {
+					continue
+				}
+
+				pName := ctx.TargetDoc.Source[pNode.Start:pNode.End]
+
+				if bytes.Equal(pName, []byte("self")) {
+					continue
+				}
+
+				if s.InlaySuppressMatch && argNode.Kind == ast.KindIdent {
+					if argNode.Start <= argNode.End && argNode.End <= uint32(len(doc.Source)) {
+						argName := doc.Source[argNode.Start:argNode.End]
+						if bytes.Equal(pName, argName) {
+							continue
+						}
+					}
+				}
+
+				if argNode.Start == 0xFFFFFFFF {
+					continue
+				}
+
+				sLine, sCol := doc.Tree.Position(argNode.Start)
+				hints = append(hints, InlayHint{
+					Position:     Position{Line: sLine, Character: sCol},
+					Label:        ast.String(pName) + ":",
+					Kind:         ParameterHint,
+					PaddingRight: true,
+				})
+			}
+		}
+
+		if hints == nil {
+			hints = []InlayHint{}
+		}
+
+		WriteMessage(s.Writer, Response{
+			RPC:    "2.0",
+			ID:     req.ID,
+			Result: hints,
+		})
 	case "textDocument/references":
 		var params ReferenceParams
 
@@ -1048,82 +1858,8 @@ func (s *Server) handleMessage(req Request) {
 			ID:     req.ID,
 			Result: locations,
 		})
-	case "textDocument/documentHighlight":
-		var params DocumentHighlightParams
-
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			return
-		}
-
-		if !s.FeatureDocHighlight {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
-			return
-		}
-
-		uri := s.normalizeURI(params.TextDocument.URI)
-
-		doc, ok := s.Documents[uri]
-		if !ok {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
-			return
-		}
-
-		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
-
-		ctx := s.resolveSymbolAt(uri, offset)
-		if ctx == nil {
-			curr := doc.Tree.NodeAt(offset)
-
-			for curr != ast.InvalidNode {
-				node := doc.Tree.Nodes[curr]
-
-				if node.Kind == ast.KindCallExpr || node.Kind == ast.KindMethodCall {
-					var funcIdentID ast.NodeID
-
-					if node.Kind == ast.KindMethodCall {
-						funcIdentID = node.Right
-					} else {
-						funcIdentID = node.Left
-						if doc.Tree.Nodes[funcIdentID].Kind == ast.KindMemberExpr {
-							funcIdentID = doc.Tree.Nodes[funcIdentID].Right
-						}
-					}
-
-					if funcIdentID != ast.InvalidNode && doc.Tree.Nodes[funcIdentID].Kind == ast.KindIdent {
-						ctx = s.resolveSymbolNode(uri, doc, funcIdentID)
-					}
-
-					break
-				}
-
-				curr = node.Parent
-			}
-		}
-
-		if ctx == nil {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []DocumentHighlight{}})
-
-			return
-		}
-
-		highlights := s.getDocumentHighlights(uri, doc, ctx)
-
-		WriteMessage(s.Writer, Response{
-			RPC:    "2.0",
-			ID:     req.ID,
-			Result: highlights,
-		})
-	case "textDocument/codeLens":
-		if !s.FeatureCodeLens {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
-			return
-		}
-
-		var params CodeLensParams
+	case "textDocument/semanticTokens/full":
+		var params SemanticTokensParams
 
 		err := json.Unmarshal(req.Params, &params)
 		if err != nil {
@@ -1139,663 +1875,378 @@ func (s *Server) handleMessage(req Request) {
 			return
 		}
 
-		var lenses []CodeLens
+		s.semTokensBuf = s.semTokensBuf[:0]
 
 		for i := 1; i < len(doc.Tree.Nodes); i++ {
 			node := doc.Tree.Nodes[i]
 
-			if node.Kind == ast.KindLocalFunction || node.Kind == ast.KindFunctionStmt {
-				identNodeID := node.Left
+			if node.Kind != ast.KindIdent {
+				continue
+			}
 
-				for {
-					if identNodeID == ast.InvalidNode || int(identNodeID) >= len(doc.Tree.Nodes) {
-						break
-					}
+			identBytes := doc.Source[node.Start:node.End]
 
-					n := doc.Tree.Nodes[identNodeID]
+			var (
+				tokenType uint32 = 0 // 0: variable
+				modifiers uint32 = 0
+			)
 
-					if n.Kind == ast.KindMethodName || n.Kind == ast.KindMemberExpr {
-						identNodeID = n.Right
-					} else {
-						break
-					}
+			defID := doc.Resolver.References[i]
+			isDecl := ast.NodeID(i) == defID
+
+			if isDecl {
+				modifiers |= 1 << 0 // declaration
+			}
+
+			if defID == ast.InvalidNode {
+				if s.isKnownGlobal(identBytes) {
+					modifiers |= 1 << 3 // defaultLibrary
 				}
-
-				if identNodeID == ast.InvalidNode || int(identNodeID) >= len(doc.Tree.Nodes) || doc.Tree.Nodes[identNodeID].Kind != ast.KindIdent {
-					continue
-				}
-
-				lenses = append(lenses, CodeLens{
-					Range: getNodeRange(doc.Tree, identNodeID),
-					Data: map[string]any{
-						"uri":    uri,
-						"nodeId": float64(identNodeID),
-					},
-				})
-			}
-		}
-
-		if lenses == nil {
-			lenses = []CodeLens{}
-		}
-
-		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: lenses})
-	case "codeLens/resolve":
-		var codeLens CodeLens
-
-		err := json.Unmarshal(req.Params, &codeLens)
-		if err != nil {
-			return
-		}
-
-		data, ok := codeLens.Data.(map[string]any)
-		if !ok {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: codeLens})
-
-			return
-		}
-
-		uri, _ := data["uri"].(string)
-		nodeIDFloat, _ := data["nodeId"].(float64)
-		nodeID := ast.NodeID(nodeIDFloat)
-
-		doc, ok := s.Documents[uri]
-		if !ok || nodeID == ast.InvalidNode || int(nodeID) >= len(doc.Tree.Nodes) {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: codeLens})
-
-			return
-		}
-
-		identNode := doc.Tree.Nodes[nodeID]
-
-		ctx := s.resolveSymbolAt(uri, identNode.Start)
-		if ctx == nil {
-			codeLens.Command = &Command{Title: "0 references", Command: ""}
-
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: codeLens})
-
-			return
-		}
-
-		locations := s.getReferences(ctx, false)
-		count := len(locations)
-
-		var title string
-
-		if count == 1 {
-			title = "1 reference"
-		} else {
-			title = fmt.Sprintf("%d references", count)
-		}
-
-		var (
-			cmd  string
-			args []any
-		)
-
-		if count > 0 {
-			cmd = "lugo.showReferences"
-			args = []any{uri, codeLens.Range.Start, locations}
-		}
-
-		codeLens.Command = &Command{
-			Title:     title,
-			Command:   cmd,
-			Arguments: args,
-		}
-
-		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: codeLens})
-	case "textDocument/completion":
-		var params CompletionParams
-
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			return
-		}
-
-		uri := s.normalizeURI(params.TextDocument.URI)
-
-		doc, ok := s.Documents[uri]
-		if !ok {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
-			return
-		}
-
-		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
-
-		items := make([]CompletionItem, 0, 64)
-		seen := make(map[string]bool)
-
-		addCompletion := func(label string, kind CompletionItemKind, detail string, isDep bool, sortText string) {
-			if label == "" || seen[label] {
-				return
-			}
-
-			seen[label] = true
-
-			var tags []CompletionItemTag
-
-			if isDep {
-				tags = append(tags, CompletionItemTagDeprecated)
-			}
-
-			items = append(items, CompletionItem{
-				Label:    label,
-				Kind:     kind,
-				Detail:   detail,
-				SortText: sortText,
-				Tags:     tags,
-			})
-		}
-
-		var (
-			recName  []byte
-			isMember bool
-		)
-
-		i := int(offset) - 1
-
-		for i >= 0 {
-			c := doc.Source[i]
-
-			isIdentChar := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
-
-			if !isIdentChar {
-				break
-			}
-
-			i--
-		}
-
-		for i >= 0 {
-			c := doc.Source[i]
-
-			if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-				i--
 			} else {
-				break
-			}
-		}
-
-		if i >= 0 && (doc.Source[i] == '.' || doc.Source[i] == ':') {
-			isMember = true
-
-			i--
-
-			for i >= 0 {
-				c := doc.Source[i]
-
-				if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-					i--
-				} else {
-					break
-				}
-			}
-
-			endId := i + 1
-
-			for i >= 0 {
-				c := doc.Source[i]
-
-				isIdentChar := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.'
-
-				if !isIdentChar {
-					break
-				}
-
-				i--
-			}
-
-			startId := i + 1
-
-			if startId < endId {
-				recName = doc.Source[startId:endId]
-			}
-		}
-
-		s.Log.Printf("Completion requested at offset %d. isMember=%v, recName=%s\n", offset, isMember, ast.String(recName))
-
-		if isMember && len(recName) > 0 {
-			recHash := ast.HashBytes(recName)
-
-			var recDef ast.NodeID = ast.InvalidNode
-
-			doc.GetLocalsAt(offset, func(name []byte, defID ast.NodeID) bool {
-				if bytes.Equal(name, recName) {
-					recDef = defID
-
-					return false
-				}
-
-				return true
-			})
-
-			for _, fd := range doc.Resolver.FieldDefs {
-				if (recDef != ast.InvalidNode && fd.ReceiverDef == recDef) || (recDef == ast.InvalidNode && fd.ReceiverHash == recHash) {
-					node := doc.Tree.Nodes[fd.NodeID]
-
-					kind := FieldCompletion
-
-					valID := doc.getAssignedValue(fd.NodeID)
-					if valID != ast.InvalidNode && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
-						kind = FunctionCompletion
+				pNode := doc.Tree.Nodes[defID]
+				if pNode.Parent != ast.InvalidNode {
+					parentOfDef := doc.Tree.Nodes[pNode.Parent]
+					if parentOfDef.Kind == ast.KindFunctionExpr || parentOfDef.Kind == ast.KindFunctionStmt {
+						if parentOfDef.Left != defID && parentOfDef.Right != defID {
+							tokenType = 2 // parameter
+						}
 					}
-
-					isDep, _ := doc.HasDeprecatedTag(fd.NodeID)
-
-					addCompletion(ast.String(doc.Source[node.Start:node.End]), kind, "field", isDep, "1")
 				}
-			}
 
-			validRecs := make(map[uint64]bool)
-
-			currRec := recHash
-
-			for i := 0; i < 10 && currRec != 0; i++ {
-				validRecs[currRec] = true
-
-				currRec = s.getGlobalAlias(currRec)
-			}
-
-			for key, sym := range s.GlobalIndex {
-				if validRecs[key.ReceiverHash] && key.PropHash != 0 {
-					if symDoc, ok := s.Documents[sym.URI]; ok {
-						node := symDoc.Tree.Nodes[sym.NodeID]
-
-						kind := FieldCompletion
-
-						valID := symDoc.getAssignedValue(sym.NodeID)
-						if valID != ast.InvalidNode && symDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
-							kind = FunctionCompletion
-						}
-
-						isDep, _ := symDoc.HasDeprecatedTag(sym.NodeID)
-
-						sortGroup := "2"
-						if sym.URI == uri {
-							sortGroup = "1"
-						}
-
-						addCompletion(ast.String(symDoc.Source[node.Start:node.End]), kind, "field", isDep, sortGroup)
+				if ast.Attr(doc.Tree.Nodes[defID].Extra) != ast.AttrNone {
+					parentOfDef := doc.Tree.Nodes[doc.Tree.Nodes[defID].Parent]
+					if parentOfDef.Kind == ast.KindNameList {
+						modifiers |= 1 << 1 // readonly
 					}
 				}
 			}
-		} else {
-			doc.GetLocalsAt(offset, func(name []byte, defID ast.NodeID) bool {
+
+			parentID := node.Parent
+			if parentID != ast.InvalidNode {
+				pNode := doc.Tree.Nodes[parentID]
+
+				if pNode.Kind == ast.KindMemberExpr && pNode.Right == ast.NodeID(i) {
+					tokenType = 1 // property
+				} else if pNode.Kind == ast.KindMethodCall && pNode.Right == ast.NodeID(i) {
+					tokenType = 4 // method
+				} else if pNode.Kind == ast.KindMethodName && pNode.Right == ast.NodeID(i) {
+					tokenType = 4 // method
+				} else if pNode.Kind == ast.KindRecordField && pNode.Left == ast.NodeID(i) {
+					tokenType = 1 // property
+				}
+			}
+
+			if tokenType == 0 || tokenType == 1 {
+				targetDoc := doc
+				targetDef := defID
+
+				if defID == ast.InvalidNode {
+					hash := ast.HashBytes(identBytes)
+					recHash := uint64(0)
+
+					if tokenType == 1 && parentID != ast.InvalidNode {
+						pNode := doc.Tree.Nodes[parentID]
+						recID := pNode.Left
+						recBytes := doc.Source[doc.Tree.Nodes[recID].Start:doc.Tree.Nodes[recID].End]
+						recHash = ast.HashBytes(recBytes)
+					}
+
+					if sym, ok := s.getGlobalSymbol(recHash, hash); ok {
+						if gDoc, ok := s.Documents[sym.URI]; ok {
+							targetDoc = gDoc
+							targetDef = sym.NodeID
+						}
+					}
+				}
+
+				if targetDef != ast.InvalidNode {
+					valID := targetDoc.getAssignedValue(targetDef)
+					if valID != ast.InvalidNode {
+						vNode := targetDoc.Tree.Nodes[valID]
+						switch vNode.Kind {
+						case ast.KindFunctionExpr:
+							if tokenType == 1 {
+								tokenType = 4 // method
+							} else {
+								tokenType = 3 // function
+							}
+						case ast.KindTableExpr:
+							tokenType = 5 // class
+						}
+					} else {
+						pID := targetDoc.Tree.Nodes[targetDef].Parent
+						if pID != ast.InvalidNode {
+							pNode := targetDoc.Tree.Nodes[pID]
+							if pNode.Kind == ast.KindFunctionStmt || pNode.Kind == ast.KindLocalFunction {
+								if tokenType == 1 {
+									tokenType = 4 // method
+								} else {
+									tokenType = 3 // function
+								}
+							}
+						}
+					}
+				}
+			}
+
+			if defID != ast.InvalidNode {
 				isDep, _ := doc.HasDeprecatedTag(defID)
-
-				kind := VariableCompletion
-
-				valID := doc.getAssignedValue(defID)
-				if valID != ast.InvalidNode && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
-					kind = FunctionCompletion
+				if isDep {
+					modifiers |= 1 << 2 // deprecated
 				}
+			}
 
-				addCompletion(ast.String(name), kind, "local", isDep, "0")
-
-				return true
+			s.semTokensBuf = append(s.semTokensBuf, SemanticToken{
+				Start:     node.Start,
+				End:       node.End,
+				TokenType: tokenType,
+				Modifiers: modifiers,
 			})
-
-			for key, sym := range s.GlobalIndex {
-				if key.ReceiverHash == 0 && key.PropHash != 0 {
-					if symDoc, ok := s.Documents[sym.URI]; ok {
-						node := symDoc.Tree.Nodes[sym.NodeID]
-
-						if node.Kind == ast.KindIdent || node.Kind == ast.KindMethodName {
-							kind := VariableCompletion
-
-							valID := symDoc.getAssignedValue(sym.NodeID)
-
-							if valID != ast.InvalidNode && symDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
-								kind = FunctionCompletion
-							}
-
-							isDep, _ := symDoc.HasDeprecatedTag(sym.NodeID)
-
-							sortGroup := "2"
-							if sym.URI == uri {
-								sortGroup = "1"
-							}
-
-							addCompletion(ast.String(symDoc.Source[node.Start:node.End]), kind, "global", isDep, sortGroup)
-						}
-					}
-				}
-			}
-
-			for _, kw := range luaKeywords {
-				addCompletion(kw, KeywordCompletion, "keyword", false, "3")
-			}
 		}
 
-		WriteMessage(s.Writer, Response{
-			RPC: "2.0",
-			ID:  req.ID,
-			Result: CompletionList{
-				IsIncomplete: false,
-				Items:        items,
-			},
+		slices.SortFunc(s.semTokensBuf, func(a, b SemanticToken) int {
+			return cmp.Compare(a.Start, b.Start)
 		})
-	case "textDocument/documentSymbol":
-		var params DocumentSymbolParams
 
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			return
-		}
-
-		uri := s.normalizeURI(params.TextDocument.URI)
-
-		doc, ok := s.Documents[uri]
-		if !ok {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
-			return
-		}
-
-		var walkTable func(tableID ast.NodeID) []DocumentSymbol
-
-		walkTable = func(tableID ast.NodeID) []DocumentSymbol {
-			node := doc.Tree.Nodes[tableID]
-
-			var syms []DocumentSymbol
-
-			for i := uint16(0); i < node.Count; i++ {
-				fieldID := doc.Tree.ExtraList[node.Extra+uint32(i)]
-				fieldNode := doc.Tree.Nodes[fieldID]
-
-				if fieldNode.Kind == ast.KindRecordField {
-					keyNode := doc.Tree.Nodes[fieldNode.Left]
-					valNode := doc.Tree.Nodes[fieldNode.Right]
-
-					name := ast.String(doc.Source[keyNode.Start:keyNode.End])
-					if name == "" {
-						name = "<error>"
-					}
-
-					kind := SymbolKindField
-
-					var children []DocumentSymbol
-
-					switch valNode.Kind {
-					case ast.KindFunctionExpr:
-						kind = SymbolKindMethod
-					case ast.KindTableExpr:
-						kind = SymbolKindClass
-
-						children = walkTable(fieldNode.Right)
-					}
-
-					syms = append(syms, DocumentSymbol{
-						Name:           name,
-						Kind:           kind,
-						Range:          getNodeRange(doc.Tree, fieldID),
-						SelectionRange: getNodeRange(doc.Tree, fieldNode.Left),
-						Children:       children,
-					})
-				}
-			}
-
-			return syms
-		}
-
-		var walk func(nodeID ast.NodeID) []DocumentSymbol
-
-		walk = func(nodeID ast.NodeID) []DocumentSymbol {
-			if nodeID == ast.InvalidNode {
-				return nil
-			}
-
-			node := doc.Tree.Nodes[nodeID]
-
-			var syms []DocumentSymbol
-
-			switch node.Kind {
-			case ast.KindFile:
-				return walk(node.Left)
-			case ast.KindBlock:
-				for i := uint16(0); i < node.Count; i++ {
-					syms = append(syms, walk(doc.Tree.ExtraList[node.Extra+uint32(i)])...)
-				}
-			case ast.KindLocalFunction, ast.KindFunctionStmt:
-				nameNode := doc.Tree.Nodes[node.Left]
-
-				name := ast.String(doc.Source[nameNode.Start:nameNode.End])
-				if name == "" {
-					name = "<error>"
-				}
-
-				kind := SymbolKindFunction
-
-				if nameNode.Kind == ast.KindMethodName {
-					kind = SymbolKindMethod
-				}
-
-				syms = append(syms, DocumentSymbol{
-					Name:           name,
-					Kind:           kind,
-					Range:          getNodeRange(doc.Tree, nodeID),
-					SelectionRange: getNodeRange(doc.Tree, node.Left),
-				})
-			case ast.KindLocalAssign, ast.KindAssign:
-				lhsList := doc.Tree.Nodes[node.Left]
-				rhsList := node.Right
-
-				if rhsList != ast.InvalidNode {
-					rhsNode := doc.Tree.Nodes[rhsList]
-
-					for i := uint16(0); i < lhsList.Count && i < rhsNode.Count; i++ {
-						lID := doc.Tree.ExtraList[lhsList.Extra+uint32(i)]
-						lNode := doc.Tree.Nodes[lID]
-
-						var (
-							rID   ast.NodeID = ast.InvalidNode
-							rNode ast.Node
-						)
-
-						if i < rhsNode.Count {
-							rID = doc.Tree.ExtraList[rhsNode.Extra+uint32(i)]
-							rNode = doc.Tree.Nodes[rID]
-						}
-
-						name := ast.String(doc.Source[lNode.Start:lNode.End])
-						if name == "" {
-							name = "<error>"
-						}
-
-						if rNode.Kind == ast.KindFunctionExpr {
-							syms = append(syms, DocumentSymbol{
-								Name:           name,
-								Kind:           SymbolKindFunction,
-								Range:          getNodeRange(doc.Tree, nodeID),
-								SelectionRange: getNodeRange(doc.Tree, lID),
-							})
-						} else if rNode.Kind == ast.KindTableExpr {
-							syms = append(syms, DocumentSymbol{
-								Name:           name,
-								Kind:           SymbolKindClass,
-								Range:          getNodeRange(doc.Tree, nodeID),
-								SelectionRange: getNodeRange(doc.Tree, lID),
-								Children:       walkTable(rID),
-							})
-						} else if node.Kind == ast.KindLocalAssign {
-							syms = append(syms, DocumentSymbol{
-								Name:           name,
-								Kind:           SymbolKindVariable,
-								Range:          getNodeRange(doc.Tree, lID),
-								SelectionRange: getNodeRange(doc.Tree, lID),
-							})
-						}
-					}
-				}
-			}
-
-			return syms
-		}
-
-		symbols := walk(doc.Tree.Root)
-
-		if symbols == nil {
-			symbols = []DocumentSymbol{}
-		}
-
-		WriteMessage(s.Writer, Response{
-			RPC:    "2.0",
-			ID:     req.ID,
-			Result: symbols,
-		})
-	case "workspace/symbol":
-		var params WorkspaceSymbolParams
-
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			return
-		}
-
-		queryLower := []byte(strings.ToLower(params.Query))
+		s.semDataBuf = s.semDataBuf[:0]
 
 		var (
-			results []SymbolInformation
-			count   int
+			prevLine uint32
+			prevCol  uint32
+			lineIdx  uint32
 		)
 
-		for key, sym := range s.GlobalIndex {
-			if !containsFold([]byte(sym.Name), queryLower) {
-				continue
+		lineOffsets := doc.Tree.LineOffsets
+		numLines := uint32(len(lineOffsets))
+
+		for _, t := range s.semTokensBuf {
+			for lineIdx+1 < numLines && lineOffsets[lineIdx+1] <= t.Start {
+				lineIdx++
 			}
 
-			doc, ok := s.Documents[sym.URI]
-			if !ok {
-				continue
+			line := lineIdx
+			col := t.Start - lineOffsets[lineIdx]
+
+			length := t.End - t.Start
+
+			deltaLine := line - prevLine
+			deltaCol := col
+
+			if deltaLine == 0 {
+				deltaCol = col - prevCol
 			}
 
-			kind := SymbolKindVariable
+			s.semDataBuf = append(s.semDataBuf, deltaLine, deltaCol, length, t.TokenType, t.Modifiers)
 
-			valID := doc.getAssignedValue(sym.NodeID)
+			prevLine = line
+			prevCol = col
+		}
 
-			if valID != ast.InvalidNode {
-				valKind := doc.Tree.Nodes[valID].Kind
-				if valKind == ast.KindFunctionExpr {
-					if key.ReceiverHash != 0 {
-						kind = SymbolKindMethod
-					} else {
-						kind = SymbolKindFunction
-					}
-				} else if valKind == ast.KindTableExpr {
-					kind = SymbolKindClass
-				} else if key.ReceiverHash != 0 {
-					kind = SymbolKindField
-				}
-			} else if key.ReceiverHash != 0 {
-				kind = SymbolKindField
-			}
+		WriteMessage(s.Writer, Response{
+			RPC: "2.0",
+			ID:  req.ID,
+			Result: SemanticTokens{
+				Data: s.semDataBuf,
+			},
+		})
+	case "textDocument/signatureHelp":
+		var params SignatureHelpParams
 
-			results = append(results, SymbolInformation{
-				Name: sym.Name,
-				Kind: kind,
-				Location: Location{
-					URI:   sym.URI,
-					Range: getNodeRange(doc.Tree, sym.NodeID),
-				},
-			})
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
+		}
 
-			count++
+		uri := s.normalizeURI(params.TextDocument.URI)
 
-			if count >= MaxWorkspaceResults {
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
+
+		var (
+			isComment bool
+			low       int
+			high      = len(doc.Tree.Comments)
+		)
+
+		for low < high {
+			mid := int(uint(low+high) >> 1)
+
+			c := doc.Tree.Comments[mid]
+			if c.End < offset {
+				low = mid + 1
+			} else if c.Start > offset {
+				high = mid
+			} else {
+				isComment = true
+
 				break
 			}
 		}
 
-		if results == nil {
-			results = []SymbolInformation{}
-		}
-
-		WriteMessage(s.Writer, Response{
-			RPC:    "2.0",
-			ID:     req.ID,
-			Result: results,
-		})
-	case "textDocument/prepareRename":
-		var params PrepareRenameParams
-
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			return
-		}
-
-		uri := s.normalizeURI(params.TextDocument.URI)
-
-		doc, ok := s.Documents[uri]
-		if !ok {
+		if isComment {
 			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
 
 			return
 		}
 
-		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
+		var callID ast.NodeID = ast.InvalidNode
 
-		ctx := s.resolveSymbolAt(uri, offset)
-		if ctx == nil {
-			WriteMessage(s.Writer, Response{
-				RPC: "2.0",
-				ID:  req.ID,
-				Error: ResponseError{
-					Code:    -32602,
-					Message: "Cannot rename this element.",
-				},
+		curr := doc.Tree.NodeAt(offset)
+
+		for curr != ast.InvalidNode && int(curr) < len(doc.Tree.Nodes) {
+			node := doc.Tree.Nodes[curr]
+
+			if node.Kind == ast.KindBlock || node.Kind == ast.KindFunctionExpr || node.Kind == ast.KindString {
+				break
+			}
+
+			if node.Kind == ast.KindCallExpr || node.Kind == ast.KindMethodCall {
+				if int(node.Left) < len(doc.Tree.Nodes) && offset > doc.Tree.Nodes[node.Left].End {
+					callID = curr
+
+					break
+				}
+			}
+
+			curr = node.Parent
+		}
+
+		if callID == ast.InvalidNode {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		callNode := doc.Tree.Nodes[callID]
+
+		var funcIdentID ast.NodeID
+
+		if callNode.Kind == ast.KindMethodCall {
+			funcIdentID = callNode.Right
+		} else {
+			funcIdentID = callNode.Left
+		}
+
+		if funcIdentID == ast.InvalidNode || int(funcIdentID) >= len(doc.Tree.Nodes) {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		ctx := s.resolveSymbolAt(uri, doc.Tree.Nodes[funcIdentID].Start)
+		if ctx == nil || ctx.TargetDoc == nil || ctx.TargetDefID == ast.InvalidNode {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
+		if valID == ast.InvalidNode || int(valID) >= len(ctx.TargetDoc.Tree.Nodes) || ctx.TargetDoc.Tree.Nodes[valID].Kind != ast.KindFunctionExpr {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		luadoc := parseLuaDoc(ctx.TargetDoc.getCommentsAbove(ctx.TargetDefID))
+		funcNode := ctx.TargetDoc.Tree.Nodes[valID]
+
+		var (
+			paramsInfo []ParameterInformation
+			labels     []string
+		)
+
+		paramDocs := make(map[string]LuaDocParam)
+
+		for _, p := range luadoc.Params {
+			paramDocs[p.Name] = p
+		}
+
+		for i := uint16(0); i < funcNode.Count; i++ {
+			if funcNode.Extra+uint32(i) >= uint32(len(ctx.TargetDoc.Tree.ExtraList)) {
+				continue
+			}
+
+			pID := ctx.TargetDoc.Tree.ExtraList[funcNode.Extra+uint32(i)]
+			if pID == ast.InvalidNode || int(pID) >= len(ctx.TargetDoc.Tree.Nodes) {
+				continue
+			}
+
+			pNode := ctx.TargetDoc.Tree.Nodes[pID]
+			if pNode.Start > pNode.End || pNode.End > uint32(len(ctx.TargetDoc.Source)) {
+				continue
+			}
+
+			pName := ast.String(ctx.TargetDoc.Source[pNode.Start:pNode.End])
+
+			label := pName
+
+			var docContent *MarkupContent
+
+			if pDoc, ok := paramDocs[pName]; ok {
+				if pDoc.Type != "" {
+					label += ": " + pDoc.Type
+				}
+
+				if pDoc.Desc != "" {
+					docContent = &MarkupContent{Kind: "markdown", Value: pDoc.Desc}
+				}
+			}
+
+			labels = append(labels, label)
+			paramsInfo = append(paramsInfo, ParameterInformation{
+				Label:         label,
+				Documentation: docContent,
 			})
-
-			return
 		}
 
-		WriteMessage(s.Writer, Response{
-			RPC: "2.0",
-			ID:  req.ID,
-			Result: PrepareRenameResult{
-				Range:       getNodeRange(doc.Tree, ctx.IdentNodeID),
-				Placeholder: ctx.IdentName,
-			},
-		})
-	case "textDocument/linkedEditingRange":
-		var params LinkedEditingRangeParams
+		var activeParam int
 
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			return
-		}
+		for i := uint16(0); i < callNode.Count; i++ {
+			if callNode.Extra+uint32(i) >= uint32(len(doc.Tree.ExtraList)) {
+				continue
+			}
 
-		uri := s.normalizeURI(params.TextDocument.URI)
+			argID := doc.Tree.ExtraList[callNode.Extra+uint32(i)]
+			if argID == ast.InvalidNode || int(argID) >= len(doc.Tree.Nodes) {
+				continue
+			}
 
-		doc, ok := s.Documents[uri]
-		if !ok {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+			argNode := doc.Tree.Nodes[argID]
 
-			return
-		}
+			if offset > argNode.End {
+				activeParam = int(i) + 1
+			} else {
+				activeParam = int(i)
 
-		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
-
-		ctx := s.resolveSymbolAt(uri, offset)
-		if ctx == nil || ctx.IsGlobal || ctx.TargetDoc == nil || ctx.TargetDoc != doc || ctx.TargetDefID == ast.InvalidNode {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
-			return
-		}
-
-		var ranges []Range
-
-		for i, def := range doc.Resolver.References {
-			if def == ctx.TargetDefID {
-				ranges = append(ranges, getNodeRange(doc.Tree, ast.NodeID(i)))
+				break
 			}
 		}
 
+		var funcDoc *MarkupContent
+
+		if luadoc.Description != "" {
+			funcDoc = &MarkupContent{Kind: "markdown", Value: luadoc.Description}
+		}
+
+		sigInfo := SignatureInformation{
+			Label:         ctx.DisplayName + "(" + strings.Join(labels, ", ") + ")",
+			Documentation: funcDoc,
+			Parameters:    paramsInfo,
+		}
+
 		WriteMessage(s.Writer, Response{
 			RPC: "2.0",
 			ID:  req.ID,
-			Result: LinkedEditingRanges{
-				Ranges: ranges,
+			Result: SignatureHelp{
+				Signatures:      []SignatureInformation{sigInfo},
+				ActiveSignature: 0,
+				ActiveParameter: activeParam,
 			},
 		})
 	case "textDocument/prepareCallHierarchy":
@@ -2048,515 +2499,6 @@ func (s *Server) handleMessage(req Request) {
 		}
 
 		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: result})
-	case "textDocument/rename":
-		var params RenameParams
-
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			return
-		}
-
-		uri := s.normalizeURI(params.TextDocument.URI)
-
-		doc, ok := s.Documents[uri]
-		if !ok {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
-			return
-		}
-
-		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
-		ctx := s.resolveSymbolAt(uri, offset)
-
-		if ctx == nil {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
-			return
-		}
-
-		changes := make(map[string][]TextEdit)
-		seen := make(map[RefKey]bool)
-
-		addEdit := func(dDoc *Document, dUri string, nodeID ast.NodeID) {
-			rk := RefKey{URI: dUri, ID: nodeID}
-
-			if seen[rk] {
-				return
-			}
-
-			seen[rk] = true
-
-			changes[dUri] = append(changes[dUri], TextEdit{
-				Range:   getNodeRange(dDoc.Tree, nodeID),
-				NewText: params.NewName,
-			})
-		}
-
-		if ctx.TargetDefID != ast.InvalidNode {
-			for i, def := range ctx.TargetDoc.Resolver.References {
-				if def == ctx.TargetDefID {
-					addEdit(ctx.TargetDoc, ctx.TargetURI, ast.NodeID(i))
-				}
-			}
-		}
-
-		if ctx.IsGlobal {
-			for dUri, dDoc := range s.Documents {
-				if ctx.GKey.ReceiverHash == 0 {
-					for _, id := range dDoc.Resolver.GlobalDefs {
-						node := dDoc.Tree.Nodes[id]
-
-						if ast.HashBytes(dDoc.Source[node.Start:node.End]) == ctx.GKey.PropHash {
-							addEdit(dDoc, dUri, id)
-						}
-					}
-
-					for _, id := range dDoc.Resolver.GlobalRefs {
-						node := dDoc.Tree.Nodes[id]
-
-						if ast.HashBytes(dDoc.Source[node.Start:node.End]) == ctx.GKey.PropHash {
-							if dDoc.Resolver.References[id] == ast.InvalidNode {
-								addEdit(dDoc, dUri, id)
-							}
-						}
-					}
-				} else {
-					for _, fd := range dDoc.Resolver.FieldDefs {
-						if fd.ReceiverHash == ctx.GKey.ReceiverHash && fd.PropHash == ctx.GKey.PropHash {
-							addEdit(dDoc, dUri, fd.NodeID)
-						}
-					}
-
-					for _, pf := range dDoc.Resolver.PendingFields {
-						if pf.ReceiverHash == ctx.GKey.ReceiverHash && pf.PropHash == ctx.GKey.PropHash {
-							if dDoc.Resolver.References[pf.PropNodeID] == ast.InvalidNode {
-								addEdit(dDoc, dUri, pf.PropNodeID)
-							}
-						}
-					}
-				}
-			}
-		}
-
-		WriteMessage(s.Writer, Response{
-			RPC: "2.0",
-			ID:  req.ID,
-			Result: WorkspaceEdit{
-				Changes: changes,
-			},
-		})
-	case "textDocument/signatureHelp":
-		var params SignatureHelpParams
-
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			return
-		}
-
-		uri := s.normalizeURI(params.TextDocument.URI)
-
-		doc, ok := s.Documents[uri]
-		if !ok {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
-			return
-		}
-
-		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
-
-		var (
-			isComment bool
-			low       int
-			high      = len(doc.Tree.Comments)
-		)
-
-		for low < high {
-			mid := int(uint(low+high) >> 1)
-
-			c := doc.Tree.Comments[mid]
-			if c.End < offset {
-				low = mid + 1
-			} else if c.Start > offset {
-				high = mid
-			} else {
-				isComment = true
-
-				break
-			}
-		}
-
-		if isComment {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
-			return
-		}
-
-		var callID ast.NodeID = ast.InvalidNode
-
-		curr := doc.Tree.NodeAt(offset)
-
-		for curr != ast.InvalidNode && int(curr) < len(doc.Tree.Nodes) {
-			node := doc.Tree.Nodes[curr]
-
-			if node.Kind == ast.KindBlock || node.Kind == ast.KindFunctionExpr || node.Kind == ast.KindString {
-				break
-			}
-
-			if node.Kind == ast.KindCallExpr || node.Kind == ast.KindMethodCall {
-				if int(node.Left) < len(doc.Tree.Nodes) && offset > doc.Tree.Nodes[node.Left].End {
-					callID = curr
-
-					break
-				}
-			}
-
-			curr = node.Parent
-		}
-
-		if callID == ast.InvalidNode {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
-			return
-		}
-
-		callNode := doc.Tree.Nodes[callID]
-
-		var funcIdentID ast.NodeID
-
-		if callNode.Kind == ast.KindMethodCall {
-			funcIdentID = callNode.Right
-		} else {
-			funcIdentID = callNode.Left
-		}
-
-		if funcIdentID == ast.InvalidNode || int(funcIdentID) >= len(doc.Tree.Nodes) {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
-			return
-		}
-
-		ctx := s.resolveSymbolAt(uri, doc.Tree.Nodes[funcIdentID].Start)
-		if ctx == nil || ctx.TargetDoc == nil || ctx.TargetDefID == ast.InvalidNode {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
-			return
-		}
-
-		valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
-		if valID == ast.InvalidNode || int(valID) >= len(ctx.TargetDoc.Tree.Nodes) || ctx.TargetDoc.Tree.Nodes[valID].Kind != ast.KindFunctionExpr {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
-			return
-		}
-
-		luadoc := parseLuaDoc(ctx.TargetDoc.getCommentsAbove(ctx.TargetDefID))
-		funcNode := ctx.TargetDoc.Tree.Nodes[valID]
-
-		var (
-			paramsInfo []ParameterInformation
-			labels     []string
-		)
-
-		paramDocs := make(map[string]LuaDocParam)
-
-		for _, p := range luadoc.Params {
-			paramDocs[p.Name] = p
-		}
-
-		for i := uint16(0); i < funcNode.Count; i++ {
-			if funcNode.Extra+uint32(i) >= uint32(len(ctx.TargetDoc.Tree.ExtraList)) {
-				continue
-			}
-
-			pID := ctx.TargetDoc.Tree.ExtraList[funcNode.Extra+uint32(i)]
-			if pID == ast.InvalidNode || int(pID) >= len(ctx.TargetDoc.Tree.Nodes) {
-				continue
-			}
-
-			pNode := ctx.TargetDoc.Tree.Nodes[pID]
-			if pNode.Start > pNode.End || pNode.End > uint32(len(ctx.TargetDoc.Source)) {
-				continue
-			}
-
-			pName := ast.String(ctx.TargetDoc.Source[pNode.Start:pNode.End])
-
-			label := pName
-
-			var docContent *MarkupContent
-
-			if pDoc, ok := paramDocs[pName]; ok {
-				if pDoc.Type != "" {
-					label += ": " + pDoc.Type
-				}
-
-				if pDoc.Desc != "" {
-					docContent = &MarkupContent{Kind: "markdown", Value: pDoc.Desc}
-				}
-			}
-
-			labels = append(labels, label)
-			paramsInfo = append(paramsInfo, ParameterInformation{
-				Label:         label,
-				Documentation: docContent,
-			})
-		}
-
-		var activeParam int
-
-		for i := uint16(0); i < callNode.Count; i++ {
-			if callNode.Extra+uint32(i) >= uint32(len(doc.Tree.ExtraList)) {
-				continue
-			}
-
-			argID := doc.Tree.ExtraList[callNode.Extra+uint32(i)]
-			if argID == ast.InvalidNode || int(argID) >= len(doc.Tree.Nodes) {
-				continue
-			}
-
-			argNode := doc.Tree.Nodes[argID]
-
-			if offset > argNode.End {
-				activeParam = int(i) + 1
-			} else {
-				activeParam = int(i)
-
-				break
-			}
-		}
-
-		var funcDoc *MarkupContent
-
-		if luadoc.Description != "" {
-			funcDoc = &MarkupContent{Kind: "markdown", Value: luadoc.Description}
-		}
-
-		sigInfo := SignatureInformation{
-			Label:         ctx.DisplayName + "(" + strings.Join(labels, ", ") + ")",
-			Documentation: funcDoc,
-			Parameters:    paramsInfo,
-		}
-
-		WriteMessage(s.Writer, Response{
-			RPC: "2.0",
-			ID:  req.ID,
-			Result: SignatureHelp{
-				Signatures:      []SignatureInformation{sigInfo},
-				ActiveSignature: 0,
-				ActiveParameter: activeParam,
-			},
-		})
-	case "textDocument/inlayHint":
-		var params InlayHintParams
-
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			return
-		}
-
-		if !s.InlayParamHints && !s.InlayImplicitSelf {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []InlayHint{}})
-
-			return
-		}
-
-		uri := s.normalizeURI(params.TextDocument.URI)
-
-		doc, ok := s.Documents[uri]
-		if !ok {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []InlayHint{}})
-
-			return
-		}
-
-		startOffset := doc.Tree.Offset(params.Range.Start.Line, params.Range.Start.Character)
-		endOffset := doc.Tree.Offset(params.Range.End.Line, params.Range.End.Character)
-
-		var hints []InlayHint
-
-		for i := 1; i < len(doc.Tree.Nodes); i++ {
-			node := doc.Tree.Nodes[i]
-
-			if node.Start > endOffset || node.End < startOffset {
-				continue
-			}
-
-			// 1. Implicit 'self' hint for method definitions
-			if s.InlayImplicitSelf && node.Kind == ast.KindFunctionStmt {
-				if int(node.Left) < len(doc.Tree.Nodes) && doc.Tree.Nodes[node.Left].Kind == ast.KindMethodName {
-					nameNode := doc.Tree.Nodes[node.Left]
-
-					var funcNode ast.Node
-
-					if int(node.Right) < len(doc.Tree.Nodes) {
-						funcNode = doc.Tree.Nodes[node.Right]
-					}
-
-					var parenOff uint32
-
-					if nameNode.End != 0xFFFFFFFF && nameNode.End <= uint32(len(doc.Source)) {
-						for j := nameNode.End; j < uint32(len(doc.Source)); j++ {
-							if doc.Source[j] == '(' {
-								parenOff = j + 1
-
-								break
-							}
-						}
-					}
-
-					if parenOff > 0 {
-						var label string
-
-						if funcNode.Count > 0 {
-							label = "self, "
-						} else {
-							label = "self"
-						}
-
-						sLine, sCol := doc.Tree.Position(parenOff)
-
-						hints = append(hints, InlayHint{
-							Position: Position{Line: sLine, Character: sCol},
-							Label:    label,
-							Kind:     ParameterHint,
-							Tooltip:  "Implicit 'self' parameter from colon syntax",
-						})
-					}
-				}
-
-				continue
-			}
-
-			// 2. Parameter name hints for function calls
-			if !s.InlayParamHints {
-				continue
-			}
-
-			if node.Kind != ast.KindCallExpr && node.Kind != ast.KindMethodCall {
-				continue
-			}
-
-			if node.Count == 0 {
-				continue
-			}
-
-			var funcIdentID ast.NodeID
-
-			if node.Kind == ast.KindMethodCall {
-				funcIdentID = node.Right
-			} else {
-				funcIdentID = node.Left
-				if int(funcIdentID) < len(doc.Tree.Nodes) && doc.Tree.Nodes[funcIdentID].Kind == ast.KindMemberExpr {
-					funcIdentID = doc.Tree.Nodes[funcIdentID].Right
-				}
-			}
-
-			if int(funcIdentID) >= len(doc.Tree.Nodes) || doc.Tree.Nodes[funcIdentID].Kind != ast.KindIdent {
-				continue
-			}
-
-			ctx := s.resolveSymbolAt(uri, doc.Tree.Nodes[funcIdentID].Start)
-			if ctx == nil || ctx.TargetDoc == nil || ctx.TargetDefID == ast.InvalidNode {
-				continue
-			}
-
-			valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
-			if valID == ast.InvalidNode || int(valID) >= len(ctx.TargetDoc.Tree.Nodes) || ctx.TargetDoc.Tree.Nodes[valID].Kind != ast.KindFunctionExpr {
-				continue
-			}
-
-			hasImplicitSelfCall := node.Kind == ast.KindMethodCall
-
-			var hasImplicitSelfDef bool
-
-			pDefID := ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Parent
-			if pDefID != ast.InvalidNode && int(pDefID) < len(ctx.TargetDoc.Tree.Nodes) && ctx.TargetDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
-				hasImplicitSelfDef = true
-			}
-
-			paramOffset := 0
-			if hasImplicitSelfCall && !hasImplicitSelfDef {
-				paramOffset = 1 // e.g., table:func(arg) -> function table.func(self, arg)
-			} else if !hasImplicitSelfCall && hasImplicitSelfDef {
-				paramOffset = -1 // e.g., table.func(table, arg) -> function table:func(arg)
-			}
-
-			funcNode := ctx.TargetDoc.Tree.Nodes[valID]
-
-			for j := uint16(0); j < node.Count; j++ {
-				paramIdx := int(j) + paramOffset
-
-				if paramIdx < 0 || paramIdx >= int(funcNode.Count) {
-					continue
-				}
-
-				// SAFE GUARD: ExtraList and Node indexing for arguments
-				if node.Extra+uint32(j) >= uint32(len(doc.Tree.ExtraList)) {
-					continue
-				}
-
-				argID := doc.Tree.ExtraList[node.Extra+uint32(j)]
-				if argID == ast.InvalidNode || int(argID) >= len(doc.Tree.Nodes) {
-					continue
-				}
-
-				argNode := doc.Tree.Nodes[argID]
-
-				if funcNode.Extra+uint32(paramIdx) >= uint32(len(ctx.TargetDoc.Tree.ExtraList)) {
-					continue
-				}
-
-				pID := ctx.TargetDoc.Tree.ExtraList[funcNode.Extra+uint32(paramIdx)]
-				if pID == ast.InvalidNode || int(pID) >= len(ctx.TargetDoc.Tree.Nodes) {
-					continue
-				}
-
-				pNode := ctx.TargetDoc.Tree.Nodes[pID]
-				if pNode.Kind == ast.KindVararg {
-					continue
-				}
-
-				if pNode.Start > pNode.End || pNode.End > uint32(len(ctx.TargetDoc.Source)) {
-					continue
-				}
-
-				pName := ctx.TargetDoc.Source[pNode.Start:pNode.End]
-
-				if bytes.Equal(pName, []byte("self")) {
-					continue
-				}
-
-				if s.InlaySuppressMatch && argNode.Kind == ast.KindIdent {
-					if argNode.Start <= argNode.End && argNode.End <= uint32(len(doc.Source)) {
-						argName := doc.Source[argNode.Start:argNode.End]
-						if bytes.Equal(pName, argName) {
-							continue
-						}
-					}
-				}
-
-				if argNode.Start == 0xFFFFFFFF {
-					continue
-				}
-
-				sLine, sCol := doc.Tree.Position(argNode.Start)
-				hints = append(hints, InlayHint{
-					Position:     Position{Line: sLine, Character: sCol},
-					Label:        ast.String(pName) + ":",
-					Kind:         ParameterHint,
-					PaddingRight: true,
-				})
-			}
-		}
-
-		if hints == nil {
-			hints = []InlayHint{}
-		}
-
-		WriteMessage(s.Writer, Response{
-			RPC:    "2.0",
-			ID:     req.ID,
-			Result: hints,
-		})
 	case "textDocument/codeAction":
 		var params CodeActionParams
 
@@ -3189,8 +3131,14 @@ func (s *Server) handleMessage(req Request) {
 			ID:     req.ID,
 			Result: action,
 		})
-	case "textDocument/foldingRange":
-		var params FoldingRangeParams
+	case "textDocument/codeLens":
+		if !s.FeatureCodeLens {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		var params CodeLensParams
 
 		err := json.Unmarshal(req.Params, &params)
 		if err != nil {
@@ -3206,239 +3154,112 @@ func (s *Server) handleMessage(req Request) {
 			return
 		}
 
-		ranges := make([]FoldingRange, 0, 64)
+		var lenses []CodeLens
 
 		for i := 1; i < len(doc.Tree.Nodes); i++ {
 			node := doc.Tree.Nodes[i]
 
-			switch node.Kind {
-			case ast.KindFunctionExpr, ast.KindTableExpr, ast.KindDo, ast.KindWhile, ast.KindRepeat, ast.KindIf, ast.KindElseIf, ast.KindElse, ast.KindForNum, ast.KindForIn, ast.KindString:
-				sLine, sCol := doc.Tree.Position(node.Start)
-				eLine, eCol := doc.Tree.Position(node.End)
+			if node.Kind == ast.KindLocalFunction || node.Kind == ast.KindFunctionStmt {
+				identNodeID := node.Left
 
-				// Only fold if it spans multiple lines
-				if sLine < eLine {
-					ranges = append(ranges, FoldingRange{
-						StartLine:      sLine,
-						StartCharacter: sCol,
-						EndLine:        eLine,
-						EndCharacter:   eCol,
-					})
+				for {
+					if identNodeID == ast.InvalidNode || int(identNodeID) >= len(doc.Tree.Nodes) {
+						break
+					}
+
+					n := doc.Tree.Nodes[identNodeID]
+
+					if n.Kind == ast.KindMethodName || n.Kind == ast.KindMemberExpr {
+						identNodeID = n.Right
+					} else {
+						break
+					}
 				}
-			}
-		}
 
-		for _, c := range doc.Tree.Comments {
-			sLine, sCol := doc.Tree.Position(c.Start)
-			eLine, eCol := doc.Tree.Position(c.End)
+				if identNodeID == ast.InvalidNode || int(identNodeID) >= len(doc.Tree.Nodes) || doc.Tree.Nodes[identNodeID].Kind != ast.KindIdent {
+					continue
+				}
 
-			if sLine < eLine {
-				ranges = append(ranges, FoldingRange{
-					StartLine:      sLine,
-					StartCharacter: sCol,
-					EndLine:        eLine,
-					EndCharacter:   eCol,
-					Kind:           "comment",
+				lenses = append(lenses, CodeLens{
+					Range: getNodeRange(doc.Tree, identNodeID),
+					Data: map[string]any{
+						"uri":    uri,
+						"nodeId": float64(identNodeID),
+					},
 				})
 			}
 		}
 
-		WriteMessage(s.Writer, Response{
-			RPC:    "2.0",
-			ID:     req.ID,
-			Result: ranges,
-		})
-	case "textDocument/semanticTokens/full":
-		var params SemanticTokensParams
+		if lenses == nil {
+			lenses = []CodeLens{}
+		}
 
-		err := json.Unmarshal(req.Params, &params)
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: lenses})
+	case "codeLens/resolve":
+		var codeLens CodeLens
+
+		err := json.Unmarshal(req.Params, &codeLens)
 		if err != nil {
 			return
 		}
 
-		uri := s.normalizeURI(params.TextDocument.URI)
-
-		doc, ok := s.Documents[uri]
+		data, ok := codeLens.Data.(map[string]any)
 		if !ok {
-			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: codeLens})
 
 			return
 		}
 
-		s.semTokensBuf = s.semTokensBuf[:0]
+		uri, _ := data["uri"].(string)
+		nodeIDFloat, _ := data["nodeId"].(float64)
+		nodeID := ast.NodeID(nodeIDFloat)
 
-		for i := 1; i < len(doc.Tree.Nodes); i++ {
-			node := doc.Tree.Nodes[i]
+		doc, ok := s.Documents[uri]
+		if !ok || nodeID == ast.InvalidNode || int(nodeID) >= len(doc.Tree.Nodes) {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: codeLens})
 
-			if node.Kind != ast.KindIdent {
-				continue
-			}
-
-			identBytes := doc.Source[node.Start:node.End]
-
-			var (
-				tokenType uint32 = 0 // 0: variable
-				modifiers uint32 = 0
-			)
-
-			defID := doc.Resolver.References[i]
-			isDecl := ast.NodeID(i) == defID
-
-			if isDecl {
-				modifiers |= 1 << 0 // declaration
-			}
-
-			if defID == ast.InvalidNode {
-				if s.isKnownGlobal(identBytes) {
-					modifiers |= 1 << 3 // defaultLibrary
-				}
-			} else {
-				pNode := doc.Tree.Nodes[defID]
-				if pNode.Parent != ast.InvalidNode {
-					parentOfDef := doc.Tree.Nodes[pNode.Parent]
-					if parentOfDef.Kind == ast.KindFunctionExpr || parentOfDef.Kind == ast.KindFunctionStmt {
-						if parentOfDef.Left != defID && parentOfDef.Right != defID {
-							tokenType = 2 // parameter
-						}
-					}
-				}
-
-				if ast.Attr(doc.Tree.Nodes[defID].Extra) != ast.AttrNone {
-					parentOfDef := doc.Tree.Nodes[doc.Tree.Nodes[defID].Parent]
-					if parentOfDef.Kind == ast.KindNameList {
-						modifiers |= 1 << 1 // readonly
-					}
-				}
-			}
-
-			parentID := node.Parent
-			if parentID != ast.InvalidNode {
-				pNode := doc.Tree.Nodes[parentID]
-
-				if pNode.Kind == ast.KindMemberExpr && pNode.Right == ast.NodeID(i) {
-					tokenType = 1 // property
-				} else if pNode.Kind == ast.KindMethodCall && pNode.Right == ast.NodeID(i) {
-					tokenType = 4 // method
-				} else if pNode.Kind == ast.KindMethodName && pNode.Right == ast.NodeID(i) {
-					tokenType = 4 // method
-				} else if pNode.Kind == ast.KindRecordField && pNode.Left == ast.NodeID(i) {
-					tokenType = 1 // property
-				}
-			}
-
-			if tokenType == 0 || tokenType == 1 {
-				targetDoc := doc
-				targetDef := defID
-
-				if defID == ast.InvalidNode {
-					hash := ast.HashBytes(identBytes)
-					recHash := uint64(0)
-
-					if tokenType == 1 && parentID != ast.InvalidNode {
-						pNode := doc.Tree.Nodes[parentID]
-						recID := pNode.Left
-						recBytes := doc.Source[doc.Tree.Nodes[recID].Start:doc.Tree.Nodes[recID].End]
-						recHash = ast.HashBytes(recBytes)
-					}
-
-					if sym, ok := s.getGlobalSymbol(recHash, hash); ok {
-						if gDoc, ok := s.Documents[sym.URI]; ok {
-							targetDoc = gDoc
-							targetDef = sym.NodeID
-						}
-					}
-				}
-
-				if targetDef != ast.InvalidNode {
-					valID := targetDoc.getAssignedValue(targetDef)
-					if valID != ast.InvalidNode {
-						vNode := targetDoc.Tree.Nodes[valID]
-						switch vNode.Kind {
-						case ast.KindFunctionExpr:
-							if tokenType == 1 {
-								tokenType = 4 // method
-							} else {
-								tokenType = 3 // function
-							}
-						case ast.KindTableExpr:
-							tokenType = 5 // class
-						}
-					} else {
-						pID := targetDoc.Tree.Nodes[targetDef].Parent
-						if pID != ast.InvalidNode {
-							pNode := targetDoc.Tree.Nodes[pID]
-							if pNode.Kind == ast.KindFunctionStmt || pNode.Kind == ast.KindLocalFunction {
-								if tokenType == 1 {
-									tokenType = 4 // method
-								} else {
-									tokenType = 3 // function
-								}
-							}
-						}
-					}
-				}
-			}
-
-			if defID != ast.InvalidNode {
-				isDep, _ := doc.HasDeprecatedTag(defID)
-				if isDep {
-					modifiers |= 1 << 2 // deprecated
-				}
-			}
-
-			s.semTokensBuf = append(s.semTokensBuf, SemanticToken{
-				Start:     node.Start,
-				End:       node.End,
-				TokenType: tokenType,
-				Modifiers: modifiers,
-			})
+			return
 		}
 
-		slices.SortFunc(s.semTokensBuf, func(a, b SemanticToken) int {
-			return cmp.Compare(a.Start, b.Start)
-		})
+		identNode := doc.Tree.Nodes[nodeID]
 
-		s.semDataBuf = s.semDataBuf[:0]
+		ctx := s.resolveSymbolAt(uri, identNode.Start)
+		if ctx == nil {
+			codeLens.Command = &Command{Title: "0 references", Command: ""}
+
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: codeLens})
+
+			return
+		}
+
+		locations := s.getReferences(ctx, false)
+		count := len(locations)
+
+		var title string
+
+		if count == 1 {
+			title = "1 reference"
+		} else {
+			title = fmt.Sprintf("%d references", count)
+		}
 
 		var (
-			prevLine uint32
-			prevCol  uint32
-			lineIdx  uint32
+			cmd  string
+			args []any
 		)
 
-		lineOffsets := doc.Tree.LineOffsets
-		numLines := uint32(len(lineOffsets))
-
-		for _, t := range s.semTokensBuf {
-			for lineIdx+1 < numLines && lineOffsets[lineIdx+1] <= t.Start {
-				lineIdx++
-			}
-
-			line := lineIdx
-			col := t.Start - lineOffsets[lineIdx]
-
-			length := t.End - t.Start
-
-			deltaLine := line - prevLine
-			deltaCol := col
-
-			if deltaLine == 0 {
-				deltaCol = col - prevCol
-			}
-
-			s.semDataBuf = append(s.semDataBuf, deltaLine, deltaCol, length, t.TokenType, t.Modifiers)
-
-			prevLine = line
-			prevCol = col
+		if count > 0 {
+			cmd = "lugo.showReferences"
+			args = []any{uri, codeLens.Range.Start, locations}
 		}
 
-		WriteMessage(s.Writer, Response{
-			RPC: "2.0",
-			ID:  req.ID,
-			Result: SemanticTokens{
-				Data: s.semDataBuf,
-			},
-		})
+		codeLens.Command = &Command{
+			Title:     title,
+			Command:   cmd,
+			Arguments: args,
+		}
+
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: codeLens})
 	case "textDocument/formatting":
 		if !s.FeatureFormatting {
 			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
@@ -3494,620 +3315,186 @@ func (s *Server) handleMessage(req Request) {
 			ID:     req.ID,
 			Result: changes,
 		})
-	}
-}
-
-func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []SafeFix {
-	var fixes []SafeFix
-
-	if doc.IsMeta {
-		return fixes
-	}
-
-	if actualReads == nil {
-		actualReads = make([]int, len(doc.Tree.Nodes))
-
-		for refID, defID := range doc.Resolver.References {
-			if defID != ast.InvalidNode && ast.NodeID(refID) != defID {
-				if s.isActualRead(doc, ast.NodeID(refID), defID) {
-					actualReads[defID]++
-				}
-			}
-		}
-	}
-
-	unusedDefs := make([]bool, len(doc.Tree.Nodes))
-	deadStores := make(map[ast.NodeID]*DeadStoreInfo)
-
-	for _, defID := range doc.Resolver.LocalDefs {
-		if actualReads[defID] == 0 {
-			if ast.Attr(doc.Tree.Nodes[defID].Extra) == ast.AttrClose {
-				continue
-			}
-
-			name := doc.Source[doc.Tree.Nodes[defID].Start:doc.Tree.Nodes[defID].End]
-			if len(name) > 0 && name[0] != '_' {
-				unusedDefs[defID] = true
-
-				deadStores[defID] = &DeadStoreInfo{CanRemoveAll: true}
-			}
-		}
-	}
-
-	// PASS 1: Collect dead mutations
-	for i := 1; i < len(doc.Tree.Nodes); i++ {
-		nodeID := ast.NodeID(i)
-		node := doc.Tree.Nodes[nodeID]
-
-		switch node.Kind {
-		case ast.KindAssign:
-			lhsList := doc.Tree.Nodes[node.Left]
-			allUnused := true
-
-			var coverage []ast.NodeID
-
-			for j := uint16(0); j < lhsList.Count; j++ {
-				lhsID := doc.Tree.ExtraList[lhsList.Extra+uint32(j)]
-				defID := s.getRootDef(doc, lhsID)
-
-				if defID == ast.InvalidNode || !unusedDefs[defID] {
-					allUnused = false
-
-					break
-				}
-
-				coverage = append(coverage, defID)
-			}
-
-			if allUnused && lhsList.Count > 0 {
-				rhsSafe := true
-
-				if node.Right != ast.InvalidNode {
-					exprList := doc.Tree.Nodes[node.Right]
-
-					for j := uint16(0); j < exprList.Count; j++ {
-						if !s.isSideEffectFree(doc, doc.Tree.ExtraList[exprList.Extra+uint32(j)]) {
-							rhsSafe = false
-
-							break
-						}
-					}
-				}
-
-				if rhsSafe {
-					edit := TextEdit{
-						Range:   s.getStatementRemovalRange(doc, nodeID),
-						NewText: "",
-					}
-
-					for _, defID := range coverage {
-						ds := deadStores[defID]
-
-						ds.Edits = append(ds.Edits, edit)
-						ds.Coverage = append(ds.Coverage, nodeID)
-					}
-				} else if node.Right != ast.InvalidNode {
-					exprList := doc.Tree.Nodes[node.Right]
-
-					if exprList.Count == 1 {
-						exprID := doc.Tree.ExtraList[exprList.Extra]
-						exprNode := doc.Tree.Nodes[exprID]
-
-						if exprNode.Kind == ast.KindCallExpr || exprNode.Kind == ast.KindMethodCall {
-							callText := doc.Source[exprNode.Start:exprNode.End]
-
-							edit := TextEdit{
-								Range:   getNodeRange(doc.Tree, nodeID),
-								NewText: string(callText),
-							}
-
-							for _, defID := range coverage {
-								ds := deadStores[defID]
-
-								ds.Edits = append(ds.Edits, edit)
-								ds.Coverage = append(ds.Coverage, nodeID)
-							}
-						} else {
-							for _, defID := range coverage {
-								deadStores[defID].CanRemoveAll = false
-							}
-						}
-					} else {
-						for _, defID := range coverage {
-							deadStores[defID].CanRemoveAll = false
-						}
-					}
-				} else {
-					for _, defID := range coverage {
-						deadStores[defID].CanRemoveAll = false
-					}
-				}
-			} else {
-				for j := uint16(0); j < lhsList.Count; j++ {
-					lhsID := doc.Tree.ExtraList[lhsList.Extra+uint32(j)]
-
-					defID := s.getRootDef(doc, lhsID)
-					if defID != ast.InvalidNode && unusedDefs[defID] {
-						deadStores[defID].CanRemoveAll = false
-					}
-				}
-			}
-		case ast.KindCallExpr:
-			fnID := node.Left
-			if doc.Tree.Nodes[fnID].Kind == ast.KindMemberExpr {
-				recID := doc.Tree.Nodes[fnID].Left
-				propID := doc.Tree.Nodes[fnID].Right
-				if recID != ast.InvalidNode && propID != ast.InvalidNode {
-					recStr := doc.Source[doc.Tree.Nodes[recID].Start:doc.Tree.Nodes[recID].End]
-					propStr := doc.Source[doc.Tree.Nodes[propID].Start:doc.Tree.Nodes[propID].End]
-
-					if bytes.Equal(recStr, []byte("table")) && (bytes.Equal(propStr, []byte("insert")) || bytes.Equal(propStr, []byte("remove")) || bytes.Equal(propStr, []byte("sort"))) {
-						if node.Count > 0 {
-							firstArgID := doc.Tree.ExtraList[node.Extra]
-							defID := s.getRootDef(doc, firstArgID)
-
-							if defID != ast.InvalidNode && unusedDefs[defID] {
-								argsSafe := true
-
-								for j := uint16(1); j < node.Count; j++ {
-									if !s.isSideEffectFree(doc, doc.Tree.ExtraList[node.Extra+uint32(j)]) {
-										argsSafe = false
-
-										break
-									}
-								}
-
-								if argsSafe {
-									edit := TextEdit{
-										Range:   s.getStatementRemovalRange(doc, nodeID),
-										NewText: "",
-									}
-
-									ds := deadStores[defID]
-
-									ds.Edits = append(ds.Edits, edit)
-									ds.Coverage = append(ds.Coverage, nodeID)
-								} else {
-									deadStores[defID].CanRemoveAll = false
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// PASS 2: Generate SafeFixes
-	for i := 1; i < len(doc.Tree.Nodes); i++ {
-		nodeID := ast.NodeID(i)
-		node := doc.Tree.Nodes[nodeID]
-
-		switch node.Kind {
-		case ast.KindLocalAssign:
-			s.processListForFixes(doc, node.Left, node.Right, unusedDefs, deadStores, &fixes, true)
-		case ast.KindForIn:
-			s.processListForFixes(doc, node.Left, ast.InvalidNode, unusedDefs, deadStores, &fixes, false)
-		case ast.KindLocalFunction:
-			if unusedDefs[node.Left] {
-				fixes = append(fixes, SafeFix{
-					Coverage: []ast.NodeID{node.Left},
-					Edits: []TextEdit{{
-						Range:   s.getStatementRemovalRange(doc, nodeID),
-						NewText: "",
-					}},
-					Title: "Remove unused local function",
-				})
-
-				unusedDefs[node.Left] = false
-
-				continue
-			}
-
-			if node.Right != ast.InvalidNode {
-				s.processParamsForFixes(doc, node.Right, unusedDefs, &fixes)
-			}
-		case ast.KindFunctionExpr, ast.KindFunctionStmt:
-			var funcExprID ast.NodeID
-
-			if node.Kind == ast.KindFunctionExpr {
-				funcExprID = nodeID
-			} else {
-				funcExprID = node.Right
-			}
-
-			if funcExprID != ast.InvalidNode {
-				s.processParamsForFixes(doc, funcExprID, unusedDefs, &fixes)
-			}
-		case ast.KindForNum:
-			if unusedDefs[node.Left] {
-				fixes = append(fixes, s.createRenameFix(doc, node.Left))
-
-				unusedDefs[node.Left] = false
-			}
-		case ast.KindReturn:
-			if node.Left != ast.InvalidNode {
-				exprList := doc.Tree.Nodes[node.Left]
-				if exprList.Count > 0 {
-					firstExprID := doc.Tree.ExtraList[exprList.Extra]
-					firstExprNode := doc.Tree.Nodes[firstExprID]
-
-					retLine, _ := doc.Tree.Position(node.Start)
-					exprLine, _ := doc.Tree.Position(firstExprNode.Start)
-
-					if exprLine > retLine {
-						fixes = append(fixes, SafeFix{
-							Coverage: []ast.NodeID{nodeID},
-							Edits: []TextEdit{{
-								Range:   getRange(doc.Tree, node.Start, node.Start+6),
-								NewText: "return;",
-							}},
-							Title: "Add ';' to fix ambiguous return",
-						})
-					}
-				}
-			}
-		case ast.KindBlock, ast.KindFile:
-			var terminalFound bool
-
-			for j := uint16(0); j < node.Count; j++ {
-				stmtID := doc.Tree.ExtraList[node.Extra+uint32(j)]
-
-				if terminalFound {
-					lastStmtID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
-
-					fixes = append(fixes, SafeFix{
-						Coverage: []ast.NodeID{stmtID},
-						Edits: []TextEdit{{
-							Range:   s.expandRemovalRange(doc, doc.Tree.Nodes[stmtID].Start, doc.Tree.Nodes[lastStmtID].End),
-							NewText: "",
-						}},
-						Title: "Remove unreachable code",
-					})
-
-					break
-				}
-
-				if isTerminal(doc.Tree, stmtID) {
-					terminalFound = true
-				}
-			}
-		}
-	}
-
-	return fixes
-}
-
-func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.NodeID, unused []bool, deadStores map[ast.NodeID]*DeadStoreInfo, fixes *[]SafeFix, canRemoveStatement bool) {
-	if nameListID == ast.InvalidNode {
-		return
-	}
-
-	nameList := doc.Tree.Nodes[nameListID]
-
-	var unusedCount int
-
-	for i := uint16(0); i < nameList.Count; i++ {
-		if unused[doc.Tree.ExtraList[nameList.Extra+uint32(i)]] {
-			unusedCount++
-		}
-	}
-
-	if unusedCount == 0 {
-		return
-	}
-
-	suffixStart := int(nameList.Count)
-
-	for i := int(nameList.Count) - 1; i >= 0; i-- {
-		if unused[doc.Tree.ExtraList[nameList.Extra+uint32(i)]] {
-			suffixStart = i
-		} else {
-			break
-		}
-	}
-
-	for i := 0; i < suffixStart; i++ {
-		id := doc.Tree.ExtraList[nameList.Extra+uint32(i)]
-		if unused[id] {
-			*fixes = append(*fixes, s.createRenameFix(doc, id))
-
-			unused[id] = false
-		}
-	}
-
-	if suffixStart < int(nameList.Count) {
-		var coverage []ast.NodeID
-
-		canCleanlyRemove := true
-
-		for i := suffixStart; i < int(nameList.Count); i++ {
-			id := doc.Tree.ExtraList[nameList.Extra+uint32(i)]
-
-			coverage = append(coverage, id)
-
-			unused[id] = false
-
-			if ds := deadStores[id]; ds != nil && !ds.CanRemoveAll {
-				canCleanlyRemove = false
-			}
+	case "textDocument/linkedEditingRange":
+		var params LinkedEditingRangeParams
+
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
 		}
 
-		if !canCleanlyRemove {
-			for _, id := range coverage {
-				*fixes = append(*fixes, s.createRenameFix(doc, id))
-			}
+		uri := s.normalizeURI(params.TextDocument.URI)
+
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
 
 			return
 		}
 
-		var (
-			extraEdits    []TextEdit
-			extraCoverage []ast.NodeID
-		)
+		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
 
-		for _, id := range coverage {
-			if ds := deadStores[id]; ds != nil {
-				extraEdits = append(extraEdits, ds.Edits...)
-				extraCoverage = append(extraCoverage, ds.Coverage...)
+		ctx := s.resolveSymbolAt(uri, offset)
+		if ctx == nil || ctx.IsGlobal || ctx.TargetDoc == nil || ctx.TargetDoc != doc || ctx.TargetDefID == ast.InvalidNode {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		var ranges []Range
+
+		for i, def := range doc.Resolver.References {
+			if def == ctx.TargetDefID {
+				ranges = append(ranges, getNodeRange(doc.Tree, ast.NodeID(i)))
 			}
 		}
 
-		if suffixStart == 0 && canRemoveStatement {
-			canRemove := true
+		WriteMessage(s.Writer, Response{
+			RPC: "2.0",
+			ID:  req.ID,
+			Result: LinkedEditingRanges{
+				Ranges: ranges,
+			},
+		})
+	case "textDocument/prepareRename":
+		var params PrepareRenameParams
 
-			if exprListID != ast.InvalidNode {
-				exprList := doc.Tree.Nodes[exprListID]
-
-				for i := uint16(0); i < exprList.Count; i++ {
-					if !s.isSideEffectFree(doc, doc.Tree.ExtraList[exprList.Extra+uint32(i)]) {
-						canRemove = false
-
-						break
-					}
-				}
-			}
-
-			if canRemove {
-				stmtID := nameList.Parent
-
-				edits := []TextEdit{{
-					Range:   s.getStatementRemovalRange(doc, stmtID),
-					NewText: "",
-				}}
-
-				edits = append(edits, extraEdits...)
-				coverage = append(coverage, extraCoverage...)
-
-				*fixes = append(*fixes, SafeFix{
-					Coverage: coverage,
-					Edits:    edits,
-					Title:    "Remove unused assignment",
-				})
-
-				return
-			} else if exprListID != ast.InvalidNode {
-				exprList := doc.Tree.Nodes[exprListID]
-
-				if exprList.Count == 1 {
-					exprID := doc.Tree.ExtraList[exprList.Extra]
-					exprNode := doc.Tree.Nodes[exprID]
-
-					if exprNode.Kind == ast.KindCallExpr || exprNode.Kind == ast.KindMethodCall {
-						stmtID := nameList.Parent
-						callText := doc.Source[exprNode.Start:exprNode.End]
-
-						edits := []TextEdit{{
-							Range:   getNodeRange(doc.Tree, stmtID),
-							NewText: string(callText),
-						}}
-
-						edits = append(edits, extraEdits...)
-						coverage = append(coverage, extraCoverage...)
-
-						*fixes = append(*fixes, SafeFix{
-							Coverage: coverage,
-							Edits:    edits,
-							Title:    "Remove unused assignment (keep function call)",
-						})
-
-						return
-					}
-				}
-			}
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
 		}
 
-		canPartialRemove := true
+		uri := s.normalizeURI(params.TextDocument.URI)
 
-		var rhsEdits []TextEdit
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
 
-		if exprListID != ast.InvalidNode {
-			exprList := doc.Tree.Nodes[exprListID]
-
-			if int(exprList.Count) > suffixStart {
-				for i := suffixStart; i < int(exprList.Count); i++ {
-					if !s.isSideEffectFree(doc, doc.Tree.ExtraList[exprList.Extra+uint32(i)]) {
-						canPartialRemove = false
-
-						break
-					}
-				}
-
-				if canPartialRemove {
-					firstRhsDrop := doc.Tree.ExtraList[exprList.Extra+uint32(suffixStart)]
-					lastRhsDrop := doc.Tree.ExtraList[exprList.Extra+uint32(exprList.Count-1)]
-
-					var limit uint32
-
-					if suffixStart > 0 {
-						limit = doc.Tree.Nodes[doc.Tree.ExtraList[exprList.Extra+uint32(suffixStart-1)]].End
-					} else {
-						limit = doc.Tree.Nodes[exprListID].Start
-					}
-
-					startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRhsDrop].Start, limit)
-
-					rhsEdits = append(rhsEdits, TextEdit{
-						Range:   getRange(doc.Tree, startOff, doc.Tree.Nodes[lastRhsDrop].End),
-						NewText: "",
-					})
-				}
-			}
+			return
 		}
 
-		if canPartialRemove && suffixStart > 0 {
-			firstLhsDrop := doc.Tree.ExtraList[nameList.Extra+uint32(suffixStart)]
-			lastLhsDrop := doc.Tree.ExtraList[nameList.Extra+uint32(nameList.Count-1)]
-			prevLhsNode := doc.Tree.ExtraList[nameList.Extra+uint32(suffixStart-1)]
+		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
 
-			startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstLhsDrop].Start, doc.Tree.Nodes[prevLhsNode].End)
-
-			edits := []TextEdit{{
-				Range:   getRange(doc.Tree, startOff, doc.Tree.Nodes[lastLhsDrop].End),
-				NewText: "",
-			}}
-
-			edits = append(edits, rhsEdits...)
-			edits = append(edits, extraEdits...)
-
-			coverage = append(coverage, extraCoverage...)
-
-			title := "Remove unused variable"
-
-			if len(coverage) > 1 {
-				title = "Remove unused variables"
-			}
-
-			*fixes = append(*fixes, SafeFix{
-				Coverage: coverage,
-				Edits:    edits,
-				Title:    title,
+		ctx := s.resolveSymbolAt(uri, offset)
+		if ctx == nil {
+			WriteMessage(s.Writer, Response{
+				RPC: "2.0",
+				ID:  req.ID,
+				Error: ResponseError{
+					Code:    -32602,
+					Message: "Cannot rename this element.",
+				},
 			})
 
 			return
 		}
 
-		for _, id := range coverage {
-			*fixes = append(*fixes, s.createRenameFix(doc, id))
-		}
-	}
-}
+		WriteMessage(s.Writer, Response{
+			RPC: "2.0",
+			ID:  req.ID,
+			Result: PrepareRenameResult{
+				Range:       getNodeRange(doc.Tree, ctx.IdentNodeID),
+				Placeholder: ctx.IdentName,
+			},
+		})
+	case "textDocument/rename":
+		var params RenameParams
 
-func (s *Server) processParamsForFixes(doc *Document, funcExprID ast.NodeID, unused []bool, fixes *[]SafeFix) {
-	funcNode := doc.Tree.Nodes[funcExprID]
-	if funcNode.Count == 0 {
-		return
-	}
-
-	suffixStart := int(funcNode.Count)
-
-	for i := int(funcNode.Count) - 1; i >= 0; i-- {
-		id := doc.Tree.ExtraList[funcNode.Extra+uint32(i)]
-
-		if unused[id] {
-			suffixStart = i
-		} else {
-			break
-		}
-	}
-
-	for i := 0; i < suffixStart; i++ {
-		id := doc.Tree.ExtraList[funcNode.Extra+uint32(i)]
-		if unused[id] {
-			*fixes = append(*fixes, s.createRenameFix(doc, id))
-
-			unused[id] = false
-		}
-	}
-
-	if suffixStart < int(funcNode.Count) {
-		var coverage []ast.NodeID
-
-		for i := suffixStart; i < int(funcNode.Count); i++ {
-			id := doc.Tree.ExtraList[funcNode.Extra+uint32(i)]
-
-			coverage = append(coverage, id)
-
-			unused[id] = false
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return
 		}
 
-		firstDrop := doc.Tree.ExtraList[funcNode.Extra+uint32(suffixStart)]
-		lastDrop := doc.Tree.ExtraList[funcNode.Extra+uint32(funcNode.Count-1)]
+		uri := s.normalizeURI(params.TextDocument.URI)
 
-		var startOff uint32
+		doc, ok := s.Documents[uri]
+		if !ok {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
 
-		if suffixStart == 0 {
-			startOff = doc.Tree.Nodes[firstDrop].Start
+			return
+		}
 
-			for i := startOff - 1; i < uint32(len(doc.Source)); i-- {
-				if doc.Source[i] == '(' {
-					startOff = i + 1
+		offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
+		ctx := s.resolveSymbolAt(uri, offset)
 
-					break
+		if ctx == nil {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+			return
+		}
+
+		changes := make(map[string][]TextEdit)
+		seen := make(map[RefKey]bool)
+
+		addEdit := func(dDoc *Document, dUri string, nodeID ast.NodeID) {
+			rk := RefKey{URI: dUri, ID: nodeID}
+
+			if seen[rk] {
+				return
+			}
+
+			seen[rk] = true
+
+			changes[dUri] = append(changes[dUri], TextEdit{
+				Range:   getNodeRange(dDoc.Tree, nodeID),
+				NewText: params.NewName,
+			})
+		}
+
+		if ctx.TargetDefID != ast.InvalidNode {
+			for i, def := range ctx.TargetDoc.Resolver.References {
+				if def == ctx.TargetDefID {
+					addEdit(ctx.TargetDoc, ctx.TargetURI, ast.NodeID(i))
 				}
 			}
-		} else {
-			prevNode := doc.Tree.ExtraList[funcNode.Extra+uint32(suffixStart-1)]
-			startOff = s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstDrop].Start, doc.Tree.Nodes[prevNode].End)
 		}
 
-		endOff := doc.Tree.Nodes[lastDrop].End
+		if ctx.IsGlobal {
+			for dUri, dDoc := range s.Documents {
+				if ctx.GKey.ReceiverHash == 0 {
+					for _, id := range dDoc.Resolver.GlobalDefs {
+						node := dDoc.Tree.Nodes[id]
 
-		title := "Remove unused parameter"
+						if ast.HashBytes(dDoc.Source[node.Start:node.End]) == ctx.GKey.PropHash {
+							addEdit(dDoc, dUri, id)
+						}
+					}
 
-		if len(coverage) > 1 {
-			title = "Remove unused parameters"
+					for _, id := range dDoc.Resolver.GlobalRefs {
+						node := dDoc.Tree.Nodes[id]
+
+						if ast.HashBytes(dDoc.Source[node.Start:node.End]) == ctx.GKey.PropHash {
+							if dDoc.Resolver.References[id] == ast.InvalidNode {
+								addEdit(dDoc, dUri, id)
+							}
+						}
+					}
+				} else {
+					for _, fd := range dDoc.Resolver.FieldDefs {
+						if fd.ReceiverHash == ctx.GKey.ReceiverHash && fd.PropHash == ctx.GKey.PropHash {
+							addEdit(dDoc, dUri, fd.NodeID)
+						}
+					}
+
+					for _, pf := range dDoc.Resolver.PendingFields {
+						if pf.ReceiverHash == ctx.GKey.ReceiverHash && pf.PropHash == ctx.GKey.PropHash {
+							if dDoc.Resolver.References[pf.PropNodeID] == ast.InvalidNode {
+								addEdit(dDoc, dUri, pf.PropNodeID)
+							}
+						}
+					}
+				}
+			}
 		}
 
-		*fixes = append(*fixes, SafeFix{
-			Coverage: coverage,
-			Edits: []TextEdit{{
-				Range:   getRange(doc.Tree, startOff, endOff),
-				NewText: "",
-			}},
-			Title: title,
+		WriteMessage(s.Writer, Response{
+			RPC: "2.0",
+			ID:  req.ID,
+			Result: WorkspaceEdit{
+				Changes: changes,
+			},
 		})
 	}
-}
-
-func (s *Server) createRenameFix(doc *Document, id ast.NodeID) SafeFix {
-	node := doc.Tree.Nodes[id]
-	name := ast.String(doc.Source[node.Start:node.End])
-
-	return SafeFix{
-		Coverage: []ast.NodeID{id},
-		Edits: []TextEdit{{
-			Range:   getNodeRange(doc.Tree, id),
-			NewText: "_" + name,
-		}},
-		Title: "Prefix with '_'",
-	}
-}
-
-func (s *Server) findCommaBefore(source []byte, start, limit uint32) uint32 {
-	if start <= limit || start == 0 {
-		return limit
-	}
-
-	commaPos := start
-
-	for i := start - 1; i >= limit && i < uint32(len(source)); i-- {
-		if source[i] == ',' {
-			commaPos = i
-
-			break
-		}
-	}
-
-	for i := commaPos - 1; i >= limit && i < uint32(len(source)); i-- {
-		if source[i] == ' ' || source[i] == '\t' {
-			commaPos = i
-		} else {
-			break
-		}
-	}
-
-	return commaPos
 }
 
 func (s *Server) refreshWorkspace() {
@@ -4196,24 +3583,6 @@ func (s *Server) refreshWorkspace() {
 			cpuFile.Close()
 		}
 	*/
-}
-
-func (s *Server) publishWorkspaceDiagnostics() {
-	start := time.Now()
-
-	var diagCount int
-
-	for uri := range s.Documents {
-		if s.isWorkspaceURI(uri) || s.OpenFiles[uri] {
-			s.publishDiagnostics(uri)
-
-			diagCount++
-		}
-	}
-
-	took := time.Since(start)
-
-	s.Log.Printf("Published diagnostics for %d files in %s\n", diagCount, took)
 }
 
 func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged, failed *int) {
@@ -4342,6 +3711,67 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 	}
 
 	walk(path)
+}
+
+func (s *Server) indexEmbeddedStdlib(total, indexed, unchanged *int) {
+	entries, err := stdlibFS.ReadDir("stdlib")
+	if err != nil {
+		return
+	}
+
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".lua") {
+			b, err := stdlibFS.ReadFile("stdlib/" + e.Name())
+			if err == nil {
+				uri := "std:///" + e.Name()
+
+				if existing, ok := s.Documents[uri]; ok && bytes.Equal(existing.Source, b) {
+					s.activeURIs[uri] = true
+
+					*unchanged++
+
+					continue
+				}
+
+				*total += len(b)
+
+				s.updateDocument(uri, b)
+
+				s.activeURIs[uri] = true
+
+				*indexed++
+			}
+		}
+	}
+}
+
+func (s *Server) compileIgnorePatterns() {
+	s.compiledIgnores = make([]IgnorePattern, 0, len(s.IgnoreGlobs))
+
+	for _, g := range s.IgnoreGlobs {
+		cleanGlob := strings.TrimPrefix(strings.TrimPrefix(g, "**/"), "*/")
+		cleanGlob = strings.TrimSuffix(strings.TrimSuffix(cleanGlob, "/**"), "/*")
+
+		if cleanGlob == "" {
+			continue
+		}
+
+		if !strings.ContainsAny(cleanGlob, "*?[") {
+			cleanPath := filepath.FromSlash(cleanGlob)
+
+			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{
+				ContainsPath: string(filepath.Separator) + cleanPath + string(filepath.Separator),
+				SuffixPath:   string(filepath.Separator) + cleanPath,
+				HasSuffix:    cleanGlob,
+			})
+		} else if strings.HasPrefix(cleanGlob, "*") && !strings.ContainsAny(cleanGlob[1:], "*?[") {
+			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{HasSuffix: cleanGlob[1:]})
+		} else if strings.HasSuffix(cleanGlob, "*") && !strings.ContainsAny(cleanGlob[:len(cleanGlob)-1], "*?[") {
+			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{HasPrefix: cleanGlob[:len(cleanGlob)-1]})
+		} else {
+			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{MatchFallback: g})
+		}
+	}
 }
 
 func (s *Server) updateDocument(uri string, source []byte) {
@@ -4594,6 +4024,600 @@ func (s *Server) updateDocument(uri string, source []byte) {
 	}
 
 	s.Documents[uri] = doc
+}
+
+func (s *Server) clearDocument(uri string) {
+	if doc, ok := s.Documents[uri]; ok {
+		s.removeDocumentGlobals(uri, doc)
+	}
+
+	delete(s.Documents, uri)
+
+	WriteMessage(s.Writer, OutgoingNotification{
+		RPC:    "2.0",
+		Method: "textDocument/publishDiagnostics",
+		Params: PublishDiagnosticsParams{
+			URI:         uri,
+			Diagnostics: []Diagnostic{},
+		},
+	})
+}
+
+func (s *Server) uriToPath(uri string) string {
+	if !strings.HasPrefix(uri, "file://") {
+		return ""
+	}
+
+	path := uri[7:]
+
+	if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") {
+		path = path[1:]
+	}
+
+	if decoded, err := url.PathUnescape(path); err == nil {
+		path = decoded
+	}
+
+	return filepath.Clean(filepath.FromSlash(path))
+}
+
+func (s *Server) pathToURI(pathStr string) string {
+	cleanPath := filepath.Clean(pathStr)
+
+	if runtime.GOOS == "windows" {
+		if len(cleanPath) > 1 && cleanPath[1] == ':' {
+			cleanPath = strings.ToLower(cleanPath[:1]) + cleanPath[1:]
+		}
+
+		return "file:///" + filepath.ToSlash(cleanPath)
+	}
+
+	return "file://" + filepath.ToSlash(cleanPath)
+}
+
+func (s *Server) normalizeURI(uri string) string {
+	if !strings.HasPrefix(uri, "file://") {
+		return uri
+	}
+
+	return s.pathToURI(s.uriToPath(uri))
+}
+
+func (s *Server) isIgnored(fullPath, name string) bool {
+	for _, p := range s.compiledIgnores {
+		if p.HasSuffix != "" && strings.HasSuffix(name, p.HasSuffix) {
+			return true
+		}
+
+		if p.HasPrefix != "" && strings.HasPrefix(name, p.HasPrefix) {
+			return true
+		}
+
+		if p.ContainsPath != "" && strings.Contains(fullPath, p.ContainsPath) {
+			return true
+		}
+
+		if p.SuffixPath != "" && strings.HasSuffix(fullPath, p.SuffixPath) {
+			return true
+		}
+
+		if p.MatchFallback != "" {
+			if matched, _ := filepath.Match(p.MatchFallback, name); matched {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (s *Server) isIgnoredURI(uri string) bool {
+	path := s.uriToPath(uri)
+
+	if path == "" {
+		return false
+	}
+
+	return s.isIgnored(path, filepath.Base(path))
+}
+
+func (s *Server) isWorkspaceURI(uri string) bool {
+	if strings.HasPrefix(uri, "std:///") {
+		return false
+	}
+
+	path := s.uriToPath(uri)
+
+	if path == "" {
+		return false
+	}
+
+	lowerPath := strings.ToLower(path)
+
+	for _, libPath := range s.lowerLibraryPaths {
+		if strings.HasPrefix(lowerPath, libPath) {
+			return false
+		}
+	}
+
+	if s.RootURI == "" {
+		return true
+	}
+
+	return strings.HasPrefix(lowerPath, s.lowerRootPath)
+}
+
+func (s *Server) resolveSymbolAt(uri string, offset uint32) *SymbolContext {
+	doc, ok := s.Documents[uri]
+	if !ok {
+		return nil
+	}
+
+	nodeID := doc.Tree.NodeAt(offset)
+
+	return s.resolveSymbolNode(uri, doc, nodeID)
+}
+
+func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID) *SymbolContext {
+	if nodeID == ast.InvalidNode || int(nodeID) >= len(doc.Tree.Nodes) {
+		return nil
+	}
+
+	identNode := doc.Tree.Nodes[nodeID]
+
+	if identNode.Kind != ast.KindIdent && identNode.Kind != ast.KindVararg {
+		return nil
+	}
+
+	if identNode.Start > identNode.End || identNode.End > uint32(len(doc.Source)) {
+		return nil
+	}
+
+	identBytes := doc.Source[identNode.Start:identNode.End]
+	identName := ast.String(identBytes)
+
+	displayName := identName
+	if displayName == "" {
+		displayName = "<error>"
+	}
+
+	defID := doc.Resolver.References[nodeID]
+	parentID := identNode.Parent
+
+	var (
+		gKey   GlobalKey
+		isProp bool
+		recDef ast.NodeID = ast.InvalidNode
+	)
+
+	if parentID != ast.InvalidNode && int(parentID) < len(doc.Tree.Nodes) {
+		pNode := doc.Tree.Nodes[parentID]
+
+		isProp = (pNode.Kind == ast.KindMemberExpr || pNode.Kind == ast.KindMethodCall || pNode.Kind == ast.KindMethodName) && pNode.Right == nodeID
+		isRecordKey := pNode.Kind == ast.KindRecordField && pNode.Left == nodeID
+
+		if isProp {
+			recID := pNode.Left
+
+			if recID != ast.InvalidNode && int(recID) < len(doc.Tree.Nodes) {
+				recNode := doc.Tree.Nodes[recID]
+
+				if recNode.Start <= identNode.End && identNode.End <= uint32(len(doc.Source)) {
+					displayName = ast.String(doc.Source[recNode.Start:identNode.End])
+				}
+
+				if recNode.Start <= recNode.End && recNode.End <= uint32(len(doc.Source)) {
+					recBytes := doc.Source[recNode.Start:recNode.End]
+					gKey = GlobalKey{ReceiverHash: ast.HashBytes(recBytes), PropHash: ast.HashBytes(identBytes)}
+				}
+
+				curr := recID
+
+				for curr != ast.InvalidNode && int(curr) < len(doc.Tree.Nodes) {
+					n := doc.Tree.Nodes[curr]
+					if n.Kind == ast.KindIdent {
+						recDef = doc.Resolver.References[curr]
+
+						break
+					} else if n.Kind == ast.KindMemberExpr {
+						curr = n.Left
+					} else {
+						break
+					}
+				}
+			}
+		} else if isRecordKey {
+			isProp = true
+
+			gKey = GlobalKey{ReceiverHash: 0, PropHash: 0}
+		} else {
+			gKey = GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes(identBytes)}
+
+			if defID == ast.InvalidNode && (pNode.Kind == ast.KindNameList || pNode.Kind == ast.KindFunctionExpr || pNode.Kind == ast.KindForNum || pNode.Kind == ast.KindLocalFunction || pNode.Kind == ast.KindFunctionStmt) {
+				defID = nodeID
+			}
+		}
+	} else {
+		gKey = GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes(identBytes)}
+	}
+
+	isGlobal := defID == ast.InvalidNode && recDef == ast.InvalidNode && (!isProp || gKey.ReceiverHash != 0)
+
+	ctx := &SymbolContext{
+		TargetDoc:   doc,
+		TargetURI:   uri,
+		IdentNodeID: nodeID,
+		IdentName:   identName,
+		DisplayName: displayName,
+		IsProp:      isProp,
+		GKey:        gKey,
+		IsGlobal:    isGlobal,
+		RecDefID:    recDef,
+	}
+
+	if defID != ast.InvalidNode {
+		ctx.TargetDefID = defID
+
+		if !ctx.IsGlobal && ctx.TargetDoc != nil && ctx.TargetDoc.ExportedGlobalDefs != nil {
+			if exportedKey, exported := ctx.TargetDoc.ExportedGlobalDefs[defID]; exported {
+				ctx.IsGlobal = true
+				ctx.GKey = exportedKey
+			}
+		}
+	} else if gKey.PropHash != 0 {
+		if gSym, ok := s.getGlobalSymbol(gKey.ReceiverHash, gKey.PropHash); ok {
+			if gDoc, docOk := s.Documents[gSym.URI]; docOk {
+				ctx.TargetDoc = gDoc
+				ctx.TargetDefID = gSym.NodeID
+				ctx.TargetURI = gSym.URI
+			}
+		}
+	}
+
+	return ctx
+}
+
+func (s *Server) getReferences(ctx *SymbolContext, includeDeclaration bool) []Location {
+	var locations []Location
+
+	seen := make(map[RefKey]bool)
+
+	addRef := func(dDoc *Document, dUri string, nodeID ast.NodeID) {
+		if !includeDeclaration && dUri == ctx.TargetURI && nodeID == ctx.TargetDefID {
+			return
+		}
+
+		if nodeID == ast.InvalidNode || int(nodeID) >= len(dDoc.Tree.Nodes) {
+			return
+		}
+
+		rk := RefKey{URI: dUri, ID: nodeID}
+
+		if seen[rk] {
+			return
+		}
+
+		seen[rk] = true
+
+		node := dDoc.Tree.Nodes[nodeID]
+
+		startLine, startCol := dDoc.Tree.Position(node.Start)
+		endLine, endCol := dDoc.Tree.Position(node.End)
+
+		locations = append(locations, Location{
+			URI: dUri,
+			Range: Range{
+				Start: Position{Line: startLine, Character: startCol},
+				End:   Position{Line: endLine, Character: endCol},
+			},
+		})
+	}
+
+	if ctx.TargetDefID != ast.InvalidNode {
+		for i, def := range ctx.TargetDoc.Resolver.References {
+			if def == ctx.TargetDefID {
+				addRef(ctx.TargetDoc, ctx.TargetURI, ast.NodeID(i))
+			}
+		}
+	}
+
+	for ref := range s.iterateGlobalReferences(ctx) {
+		addRef(ref.Doc, ref.URI, ref.NodeID)
+	}
+
+	if locations == nil {
+		locations = []Location{}
+	}
+
+	return locations
+}
+
+func (s *Server) iterateGlobalReferences(ctx *SymbolContext) iter.Seq[GlobalReference] {
+	return func(yield func(GlobalReference) bool) {
+		if !ctx.IsGlobal {
+			return
+		}
+
+		for dUri, dDoc := range s.Documents {
+			if ctx.GKey.ReceiverHash == 0 {
+				for _, id := range dDoc.Resolver.GlobalDefs {
+					if ast.HashBytes(dDoc.Source[dDoc.Tree.Nodes[id].Start:dDoc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
+						if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: id}) {
+							return
+						}
+					}
+				}
+
+				for _, id := range dDoc.Resolver.GlobalRefs {
+					if ast.HashBytes(dDoc.Source[dDoc.Tree.Nodes[id].Start:dDoc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
+						if dDoc.Resolver.References[id] == ast.InvalidNode {
+							if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: id}) {
+								return
+							}
+						}
+					}
+				}
+			} else {
+				for _, fd := range dDoc.Resolver.FieldDefs {
+					if fd.ReceiverHash == ctx.GKey.ReceiverHash && fd.PropHash == ctx.GKey.PropHash {
+						if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: fd.NodeID}) {
+							return
+						}
+					}
+				}
+
+				for _, pf := range dDoc.Resolver.PendingFields {
+					if pf.ReceiverHash == ctx.GKey.ReceiverHash && pf.PropHash == ctx.GKey.PropHash {
+						if dDoc.Resolver.References[pf.PropNodeID] == ast.InvalidNode {
+							if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: pf.PropNodeID}) {
+								return
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func (s *Server) getGlobalAlias(hash uint64) uint64 {
+	sym, ok := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]
+	if !ok {
+		return 0
+	}
+
+	doc, ok := s.Documents[sym.URI]
+	if !ok {
+		return 0
+	}
+
+	valID := doc.getAssignedValue(sym.NodeID)
+	if valID == ast.InvalidNode {
+		return 0
+	}
+
+	node := doc.Tree.Nodes[valID]
+
+	if node.Kind == ast.KindIdent || node.Kind == ast.KindMemberExpr {
+		if node.Kind == ast.KindIdent && doc.Resolver.References[valID] != ast.InvalidNode {
+			return 0
+		}
+
+		return ast.HashBytes(doc.Source[node.Start:node.End])
+	}
+
+	return 0
+}
+
+func (s *Server) getGlobalPath(doc *Document, id ast.NodeID, depth int) []byte {
+	if id == ast.InvalidNode || int(id) >= len(doc.Tree.Nodes) || depth > 10 {
+		return nil
+	}
+
+	node := doc.Tree.Nodes[id]
+
+	switch node.Kind {
+	case ast.KindIdent:
+		defID := doc.Resolver.References[id]
+		if defID == ast.InvalidNode {
+			if node.Start <= node.End && node.End <= uint32(len(doc.Source)) {
+				return doc.Source[node.Start:node.End]
+			}
+			return nil
+		}
+
+		valID := doc.getAssignedValue(defID)
+		if valID != ast.InvalidNode && valID != id {
+			return s.getGlobalPath(doc, valID, depth+1)
+		}
+
+		return nil
+	case ast.KindMemberExpr:
+		leftPath := s.getGlobalPath(doc, node.Left, depth+1)
+		if leftPath != nil {
+			if node.Right == ast.InvalidNode || int(node.Right) >= len(doc.Tree.Nodes) {
+				return nil
+			}
+
+			rightNode := doc.Tree.Nodes[node.Right]
+
+			if rightNode.Start <= rightNode.End && rightNode.End <= uint32(len(doc.Source)) {
+				rightBytes := doc.Source[rightNode.Start:rightNode.End]
+
+				buf := make([]byte, 0, len(leftPath)+1+len(rightBytes))
+				buf = append(buf, leftPath...)
+				buf = append(buf, '.')
+				buf = append(buf, rightBytes...)
+
+				return buf
+			}
+		}
+	}
+
+	return nil
+}
+
+func (s *Server) getGlobalSymbol(recHash, propHash uint64) (GlobalSymbol, bool) {
+	currRec := recHash
+
+	for range 10 {
+		key := GlobalKey{ReceiverHash: currRec, PropHash: propHash}
+		if sym, exists := s.GlobalIndex[key]; exists {
+			return sym, true
+		}
+
+		if currRec == 0 {
+			break
+		}
+
+		nextRec := s.getGlobalAlias(currRec)
+		if nextRec == 0 {
+			break
+		}
+
+		currRec = nextRec
+	}
+
+	return GlobalSymbol{}, false
+}
+
+func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, depth int, name string) {
+	if doc, ok := s.Documents[uri]; ok {
+		if doc.ExportedGlobals == nil {
+			doc.ExportedGlobals = make(map[GlobalKey]ast.NodeID)
+			doc.ExportedGlobalDefs = make(map[ast.NodeID]GlobalKey)
+		}
+
+		doc.ExportedGlobals[key] = nodeID
+		doc.ExportedGlobalDefs[nodeID] = key
+	}
+
+	if existing, exists := s.GlobalIndex[key]; exists {
+		if depth > existing.Depth {
+			return
+		}
+
+		// Prefer standard library definitions if depths are tied
+		if depth == existing.Depth && strings.HasPrefix(existing.URI, "std://") && !strings.HasPrefix(uri, "std://") {
+			return
+		}
+	}
+
+	s.GlobalIndex[key] = GlobalSymbol{
+		URI:    uri,
+		NodeID: nodeID,
+		Depth:  depth,
+		Name:   name,
+	}
+}
+
+func (s *Server) removeDocumentGlobals(uri string, doc *Document) {
+	if doc.ExportedGlobals == nil {
+		return
+	}
+
+	for key := range doc.ExportedGlobals {
+		if sym, ok := s.GlobalIndex[key]; ok && sym.URI == uri {
+			delete(s.GlobalIndex, key)
+
+			var (
+				bestSym GlobalSymbol
+				found   bool
+			)
+
+			for otherURI, otherDoc := range s.Documents {
+				if otherURI == uri {
+					continue
+				}
+
+				if nodeID, exists := otherDoc.ExportedGlobals[key]; exists {
+					d := getASTDepth(otherDoc.Tree, nodeID)
+
+					isStd := strings.HasPrefix(otherURI, "std://")
+					bestIsStd := strings.HasPrefix(bestSym.URI, "std://")
+
+					var take bool
+
+					if !found {
+						take = true
+					} else if d < bestSym.Depth {
+						take = true
+					} else if d == bestSym.Depth {
+						if isStd && !bestIsStd {
+							take = true
+						} else if isStd == bestIsStd {
+							if otherURI > bestSym.URI || (otherURI == bestSym.URI && nodeID > bestSym.NodeID) {
+								take = true
+							}
+						}
+					}
+
+					if take {
+						bestSym = GlobalSymbol{
+							URI:    otherURI,
+							NodeID: nodeID,
+							Depth:  d,
+							Name:   sym.Name,
+						}
+						found = true
+					}
+				}
+			}
+
+			if found {
+				s.GlobalIndex[key] = bestSym
+			}
+		}
+	}
+}
+
+func (s *Server) suggestGlobal(name string) string {
+	var (
+		bestMatch string
+		minDist   = 3
+	)
+
+	check := func(candidate string) {
+		d := levenshteinFast(name, candidate, minDist-1)
+		if d < minDist {
+			minDist = d
+			bestMatch = candidate
+		}
+	}
+
+	// Prioritize known globals
+	for k := range s.KnownGlobals {
+		check(k)
+	}
+
+	// Then check workspace globals
+	for key, sym := range s.GlobalIndex {
+		if key.ReceiverHash == 0 {
+			check(sym.Name)
+		}
+	}
+
+	return bestMatch
+}
+
+func (s *Server) isKnownGlobal(name []byte) bool {
+	if s.KnownGlobals[ast.String(name)] {
+		return true
+	}
+
+	if len(s.KnownGlobalGlobs) == 0 {
+		return false
+	}
+
+	strName := ast.String(name)
+
+	for _, glob := range s.KnownGlobalGlobs {
+		if matched, _ := filepath.Match(glob, strName); matched {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (s *Server) publishDiagnostics(uri string) {
@@ -5260,787 +5284,662 @@ func (s *Server) publishDiagnostics(uri string) {
 	})
 }
 
-func (s *Server) resolveSymbolAt(uri string, offset uint32) *SymbolContext {
-	doc, ok := s.Documents[uri]
-	if !ok {
-		return nil
+func (s *Server) publishWorkspaceDiagnostics() {
+	start := time.Now()
+
+	var diagCount int
+
+	for uri := range s.Documents {
+		if s.isWorkspaceURI(uri) || s.OpenFiles[uri] {
+			s.publishDiagnostics(uri)
+
+			diagCount++
+		}
 	}
 
-	nodeID := doc.Tree.NodeAt(offset)
+	took := time.Since(start)
 
-	return s.resolveSymbolNode(uri, doc, nodeID)
+	s.Log.Printf("Published diagnostics for %d files in %s\n", diagCount, took)
 }
 
-func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID) *SymbolContext {
-	if nodeID == ast.InvalidNode || int(nodeID) >= len(doc.Tree.Nodes) {
-		return nil
+func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []SafeFix {
+	var fixes []SafeFix
+
+	if doc.IsMeta {
+		return fixes
 	}
 
-	identNode := doc.Tree.Nodes[nodeID]
+	if actualReads == nil {
+		actualReads = make([]int, len(doc.Tree.Nodes))
 
-	if identNode.Kind != ast.KindIdent && identNode.Kind != ast.KindVararg {
-		return nil
-	}
-
-	if identNode.Start > identNode.End || identNode.End > uint32(len(doc.Source)) {
-		return nil
-	}
-
-	identBytes := doc.Source[identNode.Start:identNode.End]
-	identName := ast.String(identBytes)
-
-	displayName := identName
-	if displayName == "" {
-		displayName = "<error>"
-	}
-
-	defID := doc.Resolver.References[nodeID]
-	parentID := identNode.Parent
-
-	var (
-		gKey   GlobalKey
-		isProp bool
-		recDef ast.NodeID = ast.InvalidNode
-	)
-
-	if parentID != ast.InvalidNode && int(parentID) < len(doc.Tree.Nodes) {
-		pNode := doc.Tree.Nodes[parentID]
-
-		isProp = (pNode.Kind == ast.KindMemberExpr || pNode.Kind == ast.KindMethodCall || pNode.Kind == ast.KindMethodName) && pNode.Right == nodeID
-		isRecordKey := pNode.Kind == ast.KindRecordField && pNode.Left == nodeID
-
-		if isProp {
-			recID := pNode.Left
-
-			if recID != ast.InvalidNode && int(recID) < len(doc.Tree.Nodes) {
-				recNode := doc.Tree.Nodes[recID]
-
-				if recNode.Start <= identNode.End && identNode.End <= uint32(len(doc.Source)) {
-					displayName = ast.String(doc.Source[recNode.Start:identNode.End])
-				}
-
-				if recNode.Start <= recNode.End && recNode.End <= uint32(len(doc.Source)) {
-					recBytes := doc.Source[recNode.Start:recNode.End]
-					gKey = GlobalKey{ReceiverHash: ast.HashBytes(recBytes), PropHash: ast.HashBytes(identBytes)}
-				}
-
-				curr := recID
-
-				for curr != ast.InvalidNode && int(curr) < len(doc.Tree.Nodes) {
-					n := doc.Tree.Nodes[curr]
-					if n.Kind == ast.KindIdent {
-						recDef = doc.Resolver.References[curr]
-
-						break
-					} else if n.Kind == ast.KindMemberExpr {
-						curr = n.Left
-					} else {
-						break
-					}
+		for refID, defID := range doc.Resolver.References {
+			if defID != ast.InvalidNode && ast.NodeID(refID) != defID {
+				if s.isActualRead(doc, ast.NodeID(refID), defID) {
+					actualReads[defID]++
 				}
 			}
-		} else if isRecordKey {
-			isProp = true
-
-			gKey = GlobalKey{ReceiverHash: 0, PropHash: 0}
-		} else {
-			gKey = GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes(identBytes)}
-
-			if defID == ast.InvalidNode && (pNode.Kind == ast.KindNameList || pNode.Kind == ast.KindFunctionExpr || pNode.Kind == ast.KindForNum || pNode.Kind == ast.KindLocalFunction || pNode.Kind == ast.KindFunctionStmt) {
-				defID = nodeID
-			}
 		}
-	} else {
-		gKey = GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes(identBytes)}
 	}
 
-	isGlobal := defID == ast.InvalidNode && recDef == ast.InvalidNode && (!isProp || gKey.ReceiverHash != 0)
+	unusedDefs := make([]bool, len(doc.Tree.Nodes))
+	deadStores := make(map[ast.NodeID]*DeadStoreInfo)
 
-	ctx := &SymbolContext{
-		TargetDoc:   doc,
-		TargetURI:   uri,
-		IdentNodeID: nodeID,
-		IdentName:   identName,
-		DisplayName: displayName,
-		IsProp:      isProp,
-		GKey:        gKey,
-		IsGlobal:    isGlobal,
-		RecDefID:    recDef,
-	}
-
-	if defID != ast.InvalidNode {
-		ctx.TargetDefID = defID
-
-		if !ctx.IsGlobal && ctx.TargetDoc != nil && ctx.TargetDoc.ExportedGlobalDefs != nil {
-			if exportedKey, exported := ctx.TargetDoc.ExportedGlobalDefs[defID]; exported {
-				ctx.IsGlobal = true
-				ctx.GKey = exportedKey
+	for _, defID := range doc.Resolver.LocalDefs {
+		if actualReads[defID] == 0 {
+			if ast.Attr(doc.Tree.Nodes[defID].Extra) == ast.AttrClose {
+				continue
 			}
-		}
-	} else if gKey.PropHash != 0 {
-		if gSym, ok := s.getGlobalSymbol(gKey.ReceiverHash, gKey.PropHash); ok {
-			if gDoc, docOk := s.Documents[gSym.URI]; docOk {
-				ctx.TargetDoc = gDoc
-				ctx.TargetDefID = gSym.NodeID
-				ctx.TargetURI = gSym.URI
+
+			name := doc.Source[doc.Tree.Nodes[defID].Start:doc.Tree.Nodes[defID].End]
+			if len(name) > 0 && name[0] != '_' {
+				unusedDefs[defID] = true
+
+				deadStores[defID] = &DeadStoreInfo{CanRemoveAll: true}
 			}
 		}
 	}
 
-	return ctx
-}
-
-func (s *Server) getReferences(ctx *SymbolContext, includeDeclaration bool) []Location {
-	var locations []Location
-
-	seen := make(map[RefKey]bool)
-
-	addRef := func(dDoc *Document, dUri string, nodeID ast.NodeID) {
-		if !includeDeclaration && dUri == ctx.TargetURI && nodeID == ctx.TargetDefID {
-			return
-		}
-
-		if nodeID == ast.InvalidNode || int(nodeID) >= len(dDoc.Tree.Nodes) {
-			return
-		}
-
-		rk := RefKey{URI: dUri, ID: nodeID}
-
-		if seen[rk] {
-			return
-		}
-
-		seen[rk] = true
-
-		node := dDoc.Tree.Nodes[nodeID]
-
-		startLine, startCol := dDoc.Tree.Position(node.Start)
-		endLine, endCol := dDoc.Tree.Position(node.End)
-
-		locations = append(locations, Location{
-			URI: dUri,
-			Range: Range{
-				Start: Position{Line: startLine, Character: startCol},
-				End:   Position{Line: endLine, Character: endCol},
-			},
-		})
-	}
-
-	if ctx.TargetDefID != ast.InvalidNode {
-		for i, def := range ctx.TargetDoc.Resolver.References {
-			if def == ctx.TargetDefID {
-				addRef(ctx.TargetDoc, ctx.TargetURI, ast.NodeID(i))
-			}
-		}
-	}
-
-	for ref := range s.iterateGlobalReferences(ctx) {
-		addRef(ref.Doc, ref.URI, ref.NodeID)
-	}
-
-	if locations == nil {
-		locations = []Location{}
-	}
-
-	return locations
-}
-
-func (s *Server) getDocumentHighlights(uri string, doc *Document, ctx *SymbolContext) []DocumentHighlight {
-	var highlights []DocumentHighlight
-
-	addHighlight := func(nodeID ast.NodeID, kind DocumentHighlightKind) {
-		if nodeID == ast.InvalidNode || int(nodeID) >= len(doc.Tree.Nodes) {
-			return
-		}
-
+	// PASS 1: Collect dead mutations
+	for i := 1; i < len(doc.Tree.Nodes); i++ {
+		nodeID := ast.NodeID(i)
 		node := doc.Tree.Nodes[nodeID]
 
-		sLine, sCol := doc.Tree.Position(node.Start)
-		eLine, eCol := doc.Tree.Position(node.End)
+		switch node.Kind {
+		case ast.KindAssign:
+			lhsList := doc.Tree.Nodes[node.Left]
+			allUnused := true
 
-		highlights = append(highlights, DocumentHighlight{
-			Range: Range{
-				Start: Position{Line: sLine, Character: sCol},
-				End:   Position{Line: eLine, Character: eCol},
-			},
-			Kind: kind,
+			var coverage []ast.NodeID
+
+			for j := uint16(0); j < lhsList.Count; j++ {
+				lhsID := doc.Tree.ExtraList[lhsList.Extra+uint32(j)]
+				defID := s.getRootDef(doc, lhsID)
+
+				if defID == ast.InvalidNode || !unusedDefs[defID] {
+					allUnused = false
+
+					break
+				}
+
+				coverage = append(coverage, defID)
+			}
+
+			if allUnused && lhsList.Count > 0 {
+				rhsSafe := true
+
+				if node.Right != ast.InvalidNode {
+					exprList := doc.Tree.Nodes[node.Right]
+
+					for j := uint16(0); j < exprList.Count; j++ {
+						if !s.isSideEffectFree(doc, doc.Tree.ExtraList[exprList.Extra+uint32(j)]) {
+							rhsSafe = false
+
+							break
+						}
+					}
+				}
+
+				if rhsSafe {
+					edit := TextEdit{
+						Range:   s.getStatementRemovalRange(doc, nodeID),
+						NewText: "",
+					}
+
+					for _, defID := range coverage {
+						ds := deadStores[defID]
+
+						ds.Edits = append(ds.Edits, edit)
+						ds.Coverage = append(ds.Coverage, nodeID)
+					}
+				} else if node.Right != ast.InvalidNode {
+					exprList := doc.Tree.Nodes[node.Right]
+
+					if exprList.Count == 1 {
+						exprID := doc.Tree.ExtraList[exprList.Extra]
+						exprNode := doc.Tree.Nodes[exprID]
+
+						if exprNode.Kind == ast.KindCallExpr || exprNode.Kind == ast.KindMethodCall {
+							callText := doc.Source[exprNode.Start:exprNode.End]
+
+							edit := TextEdit{
+								Range:   getNodeRange(doc.Tree, nodeID),
+								NewText: string(callText),
+							}
+
+							for _, defID := range coverage {
+								ds := deadStores[defID]
+
+								ds.Edits = append(ds.Edits, edit)
+								ds.Coverage = append(ds.Coverage, nodeID)
+							}
+						} else {
+							for _, defID := range coverage {
+								deadStores[defID].CanRemoveAll = false
+							}
+						}
+					} else {
+						for _, defID := range coverage {
+							deadStores[defID].CanRemoveAll = false
+						}
+					}
+				} else {
+					for _, defID := range coverage {
+						deadStores[defID].CanRemoveAll = false
+					}
+				}
+			} else {
+				for j := uint16(0); j < lhsList.Count; j++ {
+					lhsID := doc.Tree.ExtraList[lhsList.Extra+uint32(j)]
+
+					defID := s.getRootDef(doc, lhsID)
+					if defID != ast.InvalidNode && unusedDefs[defID] {
+						deadStores[defID].CanRemoveAll = false
+					}
+				}
+			}
+		case ast.KindCallExpr:
+			fnID := node.Left
+			if doc.Tree.Nodes[fnID].Kind == ast.KindMemberExpr {
+				recID := doc.Tree.Nodes[fnID].Left
+				propID := doc.Tree.Nodes[fnID].Right
+				if recID != ast.InvalidNode && propID != ast.InvalidNode {
+					recStr := doc.Source[doc.Tree.Nodes[recID].Start:doc.Tree.Nodes[recID].End]
+					propStr := doc.Source[doc.Tree.Nodes[propID].Start:doc.Tree.Nodes[propID].End]
+
+					if bytes.Equal(recStr, []byte("table")) && (bytes.Equal(propStr, []byte("insert")) || bytes.Equal(propStr, []byte("remove")) || bytes.Equal(propStr, []byte("sort"))) {
+						if node.Count > 0 {
+							firstArgID := doc.Tree.ExtraList[node.Extra]
+							defID := s.getRootDef(doc, firstArgID)
+
+							if defID != ast.InvalidNode && unusedDefs[defID] {
+								argsSafe := true
+
+								for j := uint16(1); j < node.Count; j++ {
+									if !s.isSideEffectFree(doc, doc.Tree.ExtraList[node.Extra+uint32(j)]) {
+										argsSafe = false
+
+										break
+									}
+								}
+
+								if argsSafe {
+									edit := TextEdit{
+										Range:   s.getStatementRemovalRange(doc, nodeID),
+										NewText: "",
+									}
+
+									ds := deadStores[defID]
+
+									ds.Edits = append(ds.Edits, edit)
+									ds.Coverage = append(ds.Coverage, nodeID)
+								} else {
+									deadStores[defID].CanRemoveAll = false
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// PASS 2: Generate SafeFixes
+	for i := 1; i < len(doc.Tree.Nodes); i++ {
+		nodeID := ast.NodeID(i)
+		node := doc.Tree.Nodes[nodeID]
+
+		switch node.Kind {
+		case ast.KindLocalAssign:
+			s.processListForFixes(doc, node.Left, node.Right, unusedDefs, deadStores, &fixes, true)
+		case ast.KindForIn:
+			s.processListForFixes(doc, node.Left, ast.InvalidNode, unusedDefs, deadStores, &fixes, false)
+		case ast.KindLocalFunction:
+			if unusedDefs[node.Left] {
+				fixes = append(fixes, SafeFix{
+					Coverage: []ast.NodeID{node.Left},
+					Edits: []TextEdit{{
+						Range:   s.getStatementRemovalRange(doc, nodeID),
+						NewText: "",
+					}},
+					Title: "Remove unused local function",
+				})
+
+				unusedDefs[node.Left] = false
+
+				continue
+			}
+
+			if node.Right != ast.InvalidNode {
+				s.processParamsForFixes(doc, node.Right, unusedDefs, &fixes)
+			}
+		case ast.KindFunctionExpr, ast.KindFunctionStmt:
+			var funcExprID ast.NodeID
+
+			if node.Kind == ast.KindFunctionExpr {
+				funcExprID = nodeID
+			} else {
+				funcExprID = node.Right
+			}
+
+			if funcExprID != ast.InvalidNode {
+				s.processParamsForFixes(doc, funcExprID, unusedDefs, &fixes)
+			}
+		case ast.KindForNum:
+			if unusedDefs[node.Left] {
+				fixes = append(fixes, s.createRenameFix(doc, node.Left))
+
+				unusedDefs[node.Left] = false
+			}
+		case ast.KindReturn:
+			if node.Left != ast.InvalidNode {
+				exprList := doc.Tree.Nodes[node.Left]
+				if exprList.Count > 0 {
+					firstExprID := doc.Tree.ExtraList[exprList.Extra]
+					firstExprNode := doc.Tree.Nodes[firstExprID]
+
+					retLine, _ := doc.Tree.Position(node.Start)
+					exprLine, _ := doc.Tree.Position(firstExprNode.Start)
+
+					if exprLine > retLine {
+						fixes = append(fixes, SafeFix{
+							Coverage: []ast.NodeID{nodeID},
+							Edits: []TextEdit{{
+								Range:   getRange(doc.Tree, node.Start, node.Start+6),
+								NewText: "return;",
+							}},
+							Title: "Add ';' to fix ambiguous return",
+						})
+					}
+				}
+			}
+		case ast.KindBlock, ast.KindFile:
+			var terminalFound bool
+
+			for j := uint16(0); j < node.Count; j++ {
+				stmtID := doc.Tree.ExtraList[node.Extra+uint32(j)]
+
+				if terminalFound {
+					lastStmtID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
+
+					fixes = append(fixes, SafeFix{
+						Coverage: []ast.NodeID{stmtID},
+						Edits: []TextEdit{{
+							Range:   s.expandRemovalRange(doc, doc.Tree.Nodes[stmtID].Start, doc.Tree.Nodes[lastStmtID].End),
+							NewText: "",
+						}},
+						Title: "Remove unreachable code",
+					})
+
+					break
+				}
+
+				if isTerminal(doc.Tree, stmtID) {
+					terminalFound = true
+				}
+			}
+		}
+	}
+
+	return fixes
+}
+
+func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.NodeID, unused []bool, deadStores map[ast.NodeID]*DeadStoreInfo, fixes *[]SafeFix, canRemoveStatement bool) {
+	if nameListID == ast.InvalidNode {
+		return
+	}
+
+	nameList := doc.Tree.Nodes[nameListID]
+
+	var unusedCount int
+
+	for i := uint16(0); i < nameList.Count; i++ {
+		if unused[doc.Tree.ExtraList[nameList.Extra+uint32(i)]] {
+			unusedCount++
+		}
+	}
+
+	if unusedCount == 0 {
+		return
+	}
+
+	suffixStart := int(nameList.Count)
+
+	for i := int(nameList.Count) - 1; i >= 0; i-- {
+		if unused[doc.Tree.ExtraList[nameList.Extra+uint32(i)]] {
+			suffixStart = i
+		} else {
+			break
+		}
+	}
+
+	for i := 0; i < suffixStart; i++ {
+		id := doc.Tree.ExtraList[nameList.Extra+uint32(i)]
+		if unused[id] {
+			*fixes = append(*fixes, s.createRenameFix(doc, id))
+
+			unused[id] = false
+		}
+	}
+
+	if suffixStart < int(nameList.Count) {
+		var coverage []ast.NodeID
+
+		canCleanlyRemove := true
+
+		for i := suffixStart; i < int(nameList.Count); i++ {
+			id := doc.Tree.ExtraList[nameList.Extra+uint32(i)]
+
+			coverage = append(coverage, id)
+
+			unused[id] = false
+
+			if ds := deadStores[id]; ds != nil && !ds.CanRemoveAll {
+				canCleanlyRemove = false
+			}
+		}
+
+		if !canCleanlyRemove {
+			for _, id := range coverage {
+				*fixes = append(*fixes, s.createRenameFix(doc, id))
+			}
+
+			return
+		}
+
+		var (
+			extraEdits    []TextEdit
+			extraCoverage []ast.NodeID
+		)
+
+		for _, id := range coverage {
+			if ds := deadStores[id]; ds != nil {
+				extraEdits = append(extraEdits, ds.Edits...)
+				extraCoverage = append(extraCoverage, ds.Coverage...)
+			}
+		}
+
+		if suffixStart == 0 && canRemoveStatement {
+			canRemove := true
+
+			if exprListID != ast.InvalidNode {
+				exprList := doc.Tree.Nodes[exprListID]
+
+				for i := uint16(0); i < exprList.Count; i++ {
+					if !s.isSideEffectFree(doc, doc.Tree.ExtraList[exprList.Extra+uint32(i)]) {
+						canRemove = false
+
+						break
+					}
+				}
+			}
+
+			if canRemove {
+				stmtID := nameList.Parent
+
+				edits := []TextEdit{{
+					Range:   s.getStatementRemovalRange(doc, stmtID),
+					NewText: "",
+				}}
+
+				edits = append(edits, extraEdits...)
+				coverage = append(coverage, extraCoverage...)
+
+				*fixes = append(*fixes, SafeFix{
+					Coverage: coverage,
+					Edits:    edits,
+					Title:    "Remove unused assignment",
+				})
+
+				return
+			} else if exprListID != ast.InvalidNode {
+				exprList := doc.Tree.Nodes[exprListID]
+
+				if exprList.Count == 1 {
+					exprID := doc.Tree.ExtraList[exprList.Extra]
+					exprNode := doc.Tree.Nodes[exprID]
+
+					if exprNode.Kind == ast.KindCallExpr || exprNode.Kind == ast.KindMethodCall {
+						stmtID := nameList.Parent
+						callText := doc.Source[exprNode.Start:exprNode.End]
+
+						edits := []TextEdit{{
+							Range:   getNodeRange(doc.Tree, stmtID),
+							NewText: string(callText),
+						}}
+
+						edits = append(edits, extraEdits...)
+						coverage = append(coverage, extraCoverage...)
+
+						*fixes = append(*fixes, SafeFix{
+							Coverage: coverage,
+							Edits:    edits,
+							Title:    "Remove unused assignment (keep function call)",
+						})
+
+						return
+					}
+				}
+			}
+		}
+
+		canPartialRemove := true
+
+		var rhsEdits []TextEdit
+
+		if exprListID != ast.InvalidNode {
+			exprList := doc.Tree.Nodes[exprListID]
+
+			if int(exprList.Count) > suffixStart {
+				for i := suffixStart; i < int(exprList.Count); i++ {
+					if !s.isSideEffectFree(doc, doc.Tree.ExtraList[exprList.Extra+uint32(i)]) {
+						canPartialRemove = false
+
+						break
+					}
+				}
+
+				if canPartialRemove {
+					firstRhsDrop := doc.Tree.ExtraList[exprList.Extra+uint32(suffixStart)]
+					lastRhsDrop := doc.Tree.ExtraList[exprList.Extra+uint32(exprList.Count-1)]
+
+					var limit uint32
+
+					if suffixStart > 0 {
+						limit = doc.Tree.Nodes[doc.Tree.ExtraList[exprList.Extra+uint32(suffixStart-1)]].End
+					} else {
+						limit = doc.Tree.Nodes[exprListID].Start
+					}
+
+					startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRhsDrop].Start, limit)
+
+					rhsEdits = append(rhsEdits, TextEdit{
+						Range:   getRange(doc.Tree, startOff, doc.Tree.Nodes[lastRhsDrop].End),
+						NewText: "",
+					})
+				}
+			}
+		}
+
+		if canPartialRemove && suffixStart > 0 {
+			firstLhsDrop := doc.Tree.ExtraList[nameList.Extra+uint32(suffixStart)]
+			lastLhsDrop := doc.Tree.ExtraList[nameList.Extra+uint32(nameList.Count-1)]
+			prevLhsNode := doc.Tree.ExtraList[nameList.Extra+uint32(suffixStart-1)]
+
+			startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstLhsDrop].Start, doc.Tree.Nodes[prevLhsNode].End)
+
+			edits := []TextEdit{{
+				Range:   getRange(doc.Tree, startOff, doc.Tree.Nodes[lastLhsDrop].End),
+				NewText: "",
+			}}
+
+			edits = append(edits, rhsEdits...)
+			edits = append(edits, extraEdits...)
+
+			coverage = append(coverage, extraCoverage...)
+
+			title := "Remove unused variable"
+
+			if len(coverage) > 1 {
+				title = "Remove unused variables"
+			}
+
+			*fixes = append(*fixes, SafeFix{
+				Coverage: coverage,
+				Edits:    edits,
+				Title:    title,
+			})
+
+			return
+		}
+
+		for _, id := range coverage {
+			*fixes = append(*fixes, s.createRenameFix(doc, id))
+		}
+	}
+}
+
+func (s *Server) processParamsForFixes(doc *Document, funcExprID ast.NodeID, unused []bool, fixes *[]SafeFix) {
+	funcNode := doc.Tree.Nodes[funcExprID]
+	if funcNode.Count == 0 {
+		return
+	}
+
+	suffixStart := int(funcNode.Count)
+
+	for i := int(funcNode.Count) - 1; i >= 0; i-- {
+		id := doc.Tree.ExtraList[funcNode.Extra+uint32(i)]
+
+		if unused[id] {
+			suffixStart = i
+		} else {
+			break
+		}
+	}
+
+	for i := 0; i < suffixStart; i++ {
+		id := doc.Tree.ExtraList[funcNode.Extra+uint32(i)]
+		if unused[id] {
+			*fixes = append(*fixes, s.createRenameFix(doc, id))
+
+			unused[id] = false
+		}
+	}
+
+	if suffixStart < int(funcNode.Count) {
+		var coverage []ast.NodeID
+
+		for i := suffixStart; i < int(funcNode.Count); i++ {
+			id := doc.Tree.ExtraList[funcNode.Extra+uint32(i)]
+
+			coverage = append(coverage, id)
+
+			unused[id] = false
+		}
+
+		firstDrop := doc.Tree.ExtraList[funcNode.Extra+uint32(suffixStart)]
+		lastDrop := doc.Tree.ExtraList[funcNode.Extra+uint32(funcNode.Count-1)]
+
+		var startOff uint32
+
+		if suffixStart == 0 {
+			startOff = doc.Tree.Nodes[firstDrop].Start
+
+			for i := startOff - 1; i < uint32(len(doc.Source)); i-- {
+				if doc.Source[i] == '(' {
+					startOff = i + 1
+
+					break
+				}
+			}
+		} else {
+			prevNode := doc.Tree.ExtraList[funcNode.Extra+uint32(suffixStart-1)]
+			startOff = s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstDrop].Start, doc.Tree.Nodes[prevNode].End)
+		}
+
+		endOff := doc.Tree.Nodes[lastDrop].End
+
+		title := "Remove unused parameter"
+
+		if len(coverage) > 1 {
+			title = "Remove unused parameters"
+		}
+
+		*fixes = append(*fixes, SafeFix{
+			Coverage: coverage,
+			Edits: []TextEdit{{
+				Range:   getRange(doc.Tree, startOff, endOff),
+				NewText: "",
+			}},
+			Title: title,
 		})
 	}
-
-	if ctx.TargetDefID != ast.InvalidNode && ctx.TargetURI == uri {
-		for i, def := range doc.Resolver.References {
-			if def == ctx.TargetDefID {
-				kind := ReadHighlight
-
-				if ast.NodeID(i) == ctx.TargetDefID || isWriteAccess(doc.Tree, ast.NodeID(i)) {
-					kind = WriteHighlight
-				}
-
-				addHighlight(ast.NodeID(i), kind)
-			}
-		}
-	} else if ctx.RecDefID != ast.InvalidNode && ctx.TargetURI == uri {
-		for _, fd := range doc.Resolver.FieldDefs {
-			if fd.ReceiverDef == ctx.RecDefID && fd.PropHash == ctx.GKey.PropHash && fd.ReceiverHash == ctx.GKey.ReceiverHash {
-				addHighlight(fd.NodeID, WriteHighlight)
-			}
-		}
-
-		for _, pf := range doc.Resolver.PendingFields {
-			if pf.ReceiverDef == ctx.RecDefID && pf.PropHash == ctx.GKey.PropHash && pf.ReceiverHash == ctx.GKey.ReceiverHash {
-				kind := ReadHighlight
-
-				if isWriteAccess(doc.Tree, pf.PropNodeID) {
-					kind = WriteHighlight
-				}
-
-				addHighlight(pf.PropNodeID, kind)
-			}
-		}
-	}
-
-	for ref := range s.iterateGlobalReferences(ctx) {
-		if ref.URI == uri {
-			kind := ReadHighlight
-
-			if isWriteAccess(ref.Doc.Tree, ref.NodeID) {
-				kind = WriteHighlight
-			} else {
-				if int(ref.NodeID) < len(ref.Doc.Tree.Nodes) {
-					pID := ref.Doc.Tree.Nodes[ref.NodeID].Parent
-
-					if pID != ast.InvalidNode && int(pID) < len(ref.Doc.Tree.Nodes) {
-						pNode := ref.Doc.Tree.Nodes[pID]
-						if pNode.Kind == ast.KindFunctionStmt || pNode.Kind == ast.KindLocalFunction {
-							kind = WriteHighlight
-						}
-					}
-				}
-			}
-
-			addHighlight(ref.NodeID, kind)
-		}
-	}
-
-	if len(highlights) == 0 {
-		addHighlight(ctx.IdentNodeID, WriteHighlight)
-	}
-
-	slices.SortFunc(highlights, func(a, b DocumentHighlight) int {
-		return cmp.Or(
-			cmp.Compare(a.Range.Start.Line, b.Range.Start.Line),
-			cmp.Compare(a.Range.Start.Character, b.Range.Start.Character),
-		)
-	})
-
-	return slices.CompactFunc(highlights, func(a, b DocumentHighlight) bool {
-		return a.Range.Start == b.Range.Start && a.Range.End == b.Range.End
-	})
 }
 
-func (s *Server) buildCallHierarchyItemFromDef(uri string, doc *Document, defID ast.NodeID) CallHierarchyItem {
-	if defID == ast.InvalidNode || int(defID) >= len(doc.Tree.Nodes) {
-		return CallHierarchyItem{}
-	}
-
-	valID := doc.getAssignedValue(defID)
-	isFunc := valID != ast.InvalidNode && int(valID) < len(doc.Tree.Nodes) && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr
-
-	node := doc.Tree.Nodes[defID]
-
-	var name string
-
-	if node.Start <= node.End && node.End <= uint32(len(doc.Source)) {
-		name = ast.String(doc.Source[node.Start:node.End])
-	}
-
-	if name == "" {
-		name = "<error>"
-	}
-
-	kind := SymbolKindVariable
-
-	if isFunc {
-		kind = SymbolKindFunction
-
-		if node.Parent != ast.InvalidNode && int(node.Parent) < len(doc.Tree.Nodes) {
-			if doc.Tree.Nodes[node.Parent].Kind == ast.KindMethodName || doc.Tree.Nodes[node.Parent].Kind == ast.KindRecordField {
-				kind = SymbolKindMethod
-			}
-		}
-	}
-
-	switch node.Kind {
-	case ast.KindFile:
-		name = "(main)"
-		kind = SymbolKindFile
-	case ast.KindFunctionExpr:
-		name = "(anonymous function)"
-		kind = SymbolKindFunction
-	}
-
-	selRange := getNodeRange(doc.Tree, defID)
-	fullRange := selRange
-
-	if isFunc {
-		fullRange = getNodeRange(doc.Tree, valID)
-	} else if node.Kind == ast.KindFile {
-		fullRange = Range{
-			Start: Position{Line: 0, Character: 0},
-			End:   selRange.Start,
-		}
-
-		if len(doc.Tree.LineOffsets) > 0 {
-			lastLine := uint32(len(doc.Tree.LineOffsets) - 1)
-			lastCol := uint32(len(doc.Source)) - doc.Tree.LineOffsets[lastLine]
-
-			fullRange.End = Position{Line: lastLine, Character: lastCol}
-		}
-	}
-
-	var detail string
-
-	if uri != "" {
-		detail = filepath.Base(s.uriToPath(uri))
-	}
-
-	var tags []SymbolTag
-
-	if isDep, _ := doc.HasDeprecatedTag(defID); isDep {
-		tags = append(tags, SymbolTagDeprecated)
-	}
-
-	return CallHierarchyItem{
-		Name:           name,
-		Kind:           kind,
-		Tags:           tags,
-		Detail:         detail,
-		URI:            uri,
-		Range:          fullRange,
-		SelectionRange: selRange,
-		Data: map[string]any{
-			"uri":   uri,
-			"defId": float64(defID),
-		},
-	}
-}
-
-func (s *Server) getGlobalPath(doc *Document, id ast.NodeID, depth int) []byte {
-	if id == ast.InvalidNode || int(id) >= len(doc.Tree.Nodes) || depth > 10 {
-		return nil
-	}
-
-	node := doc.Tree.Nodes[id]
-
-	switch node.Kind {
-	case ast.KindIdent:
-		defID := doc.Resolver.References[id]
-		if defID == ast.InvalidNode {
-			if node.Start <= node.End && node.End <= uint32(len(doc.Source)) {
-				return doc.Source[node.Start:node.End]
-			}
-			return nil
-		}
-
-		valID := doc.getAssignedValue(defID)
-		if valID != ast.InvalidNode && valID != id {
-			return s.getGlobalPath(doc, valID, depth+1)
-		}
-
-		return nil
-	case ast.KindMemberExpr:
-		leftPath := s.getGlobalPath(doc, node.Left, depth+1)
-		if leftPath != nil {
-			if node.Right == ast.InvalidNode || int(node.Right) >= len(doc.Tree.Nodes) {
-				return nil
-			}
-
-			rightNode := doc.Tree.Nodes[node.Right]
-
-			if rightNode.Start <= rightNode.End && rightNode.End <= uint32(len(doc.Source)) {
-				rightBytes := doc.Source[rightNode.Start:rightNode.End]
-
-				buf := make([]byte, 0, len(leftPath)+1+len(rightBytes))
-				buf = append(buf, leftPath...)
-				buf = append(buf, '.')
-				buf = append(buf, rightBytes...)
-
-				return buf
-			}
-		}
-	}
-
-	return nil
-}
-
-func (s *Server) getGlobalAlias(hash uint64) uint64 {
-	sym, ok := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]
-	if !ok {
-		return 0
-	}
-
-	doc, ok := s.Documents[sym.URI]
-	if !ok {
-		return 0
-	}
-
-	valID := doc.getAssignedValue(sym.NodeID)
-	if valID == ast.InvalidNode {
-		return 0
-	}
-
-	node := doc.Tree.Nodes[valID]
-
-	if node.Kind == ast.KindIdent || node.Kind == ast.KindMemberExpr {
-		if node.Kind == ast.KindIdent && doc.Resolver.References[valID] != ast.InvalidNode {
-			return 0
-		}
-
-		return ast.HashBytes(doc.Source[node.Start:node.End])
-	}
-
-	return 0
-}
-
-func (s *Server) getGlobalSymbol(recHash, propHash uint64) (GlobalSymbol, bool) {
-	currRec := recHash
-
-	for range 10 {
-		key := GlobalKey{ReceiverHash: currRec, PropHash: propHash}
-		if sym, exists := s.GlobalIndex[key]; exists {
-			return sym, true
-		}
-
-		if currRec == 0 {
-			break
-		}
-
-		nextRec := s.getGlobalAlias(currRec)
-		if nextRec == 0 {
-			break
-		}
-
-		currRec = nextRec
-	}
-
-	return GlobalSymbol{}, false
-}
-
-func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, depth int, name string) {
-	if doc, ok := s.Documents[uri]; ok {
-		if doc.ExportedGlobals == nil {
-			doc.ExportedGlobals = make(map[GlobalKey]ast.NodeID)
-			doc.ExportedGlobalDefs = make(map[ast.NodeID]GlobalKey)
-		}
-
-		doc.ExportedGlobals[key] = nodeID
-		doc.ExportedGlobalDefs[nodeID] = key
-	}
-
-	if existing, exists := s.GlobalIndex[key]; exists {
-		if depth > existing.Depth {
-			return
-		}
-
-		// Prefer standard library definitions if depths are tied
-		if depth == existing.Depth && strings.HasPrefix(existing.URI, "std://") && !strings.HasPrefix(uri, "std://") {
-			return
-		}
-	}
-
-	s.GlobalIndex[key] = GlobalSymbol{
-		URI:    uri,
-		NodeID: nodeID,
-		Depth:  depth,
-		Name:   name,
-	}
-}
-
-func (s *Server) removeDocumentGlobals(uri string, doc *Document) {
-	if doc.ExportedGlobals == nil {
-		return
-	}
-
-	for key := range doc.ExportedGlobals {
-		if sym, ok := s.GlobalIndex[key]; ok && sym.URI == uri {
-			delete(s.GlobalIndex, key)
-
-			var (
-				bestSym GlobalSymbol
-				found   bool
-			)
-
-			for otherURI, otherDoc := range s.Documents {
-				if otherURI == uri {
-					continue
-				}
-
-				if nodeID, exists := otherDoc.ExportedGlobals[key]; exists {
-					d := getASTDepth(otherDoc.Tree, nodeID)
-
-					isStd := strings.HasPrefix(otherURI, "std://")
-					bestIsStd := strings.HasPrefix(bestSym.URI, "std://")
-
-					var take bool
-
-					if !found {
-						take = true
-					} else if d < bestSym.Depth {
-						take = true
-					} else if d == bestSym.Depth {
-						if isStd && !bestIsStd {
-							take = true
-						} else if isStd == bestIsStd {
-							if otherURI > bestSym.URI || (otherURI == bestSym.URI && nodeID > bestSym.NodeID) {
-								take = true
-							}
-						}
-					}
-
-					if take {
-						bestSym = GlobalSymbol{
-							URI:    otherURI,
-							NodeID: nodeID,
-							Depth:  d,
-							Name:   sym.Name,
-						}
-						found = true
-					}
-				}
-			}
-
-			if found {
-				s.GlobalIndex[key] = bestSym
-			}
-		}
-	}
-}
-
-func (s *Server) indexEmbeddedStdlib(total, indexed, unchanged *int) {
-	entries, err := stdlibFS.ReadDir("stdlib")
-	if err != nil {
-		return
-	}
-
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".lua") {
-			b, err := stdlibFS.ReadFile("stdlib/" + e.Name())
-			if err == nil {
-				uri := "std:///" + e.Name()
-
-				if existing, ok := s.Documents[uri]; ok && bytes.Equal(existing.Source, b) {
-					s.activeURIs[uri] = true
-
-					*unchanged++
-
-					continue
-				}
-
-				*total += len(b)
-
-				s.updateDocument(uri, b)
-
-				s.activeURIs[uri] = true
-
-				*indexed++
-			}
-		}
-	}
-}
-
-func (s *Server) isIgnored(fullPath, name string) bool {
-	for _, p := range s.compiledIgnores {
-		if p.HasSuffix != "" && strings.HasSuffix(name, p.HasSuffix) {
-			return true
-		}
-
-		if p.HasPrefix != "" && strings.HasPrefix(name, p.HasPrefix) {
-			return true
-		}
-
-		if p.ContainsPath != "" && strings.Contains(fullPath, p.ContainsPath) {
-			return true
-		}
-
-		if p.SuffixPath != "" && strings.HasSuffix(fullPath, p.SuffixPath) {
-			return true
-		}
-
-		if p.MatchFallback != "" {
-			if matched, _ := filepath.Match(p.MatchFallback, name); matched {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-func (s *Server) clearDocument(uri string) {
-	if doc, ok := s.Documents[uri]; ok {
-		s.removeDocumentGlobals(uri, doc)
-	}
-
-	delete(s.Documents, uri)
-
-	WriteMessage(s.Writer, OutgoingNotification{
-		RPC:    "2.0",
-		Method: "textDocument/publishDiagnostics",
-		Params: PublishDiagnosticsParams{
-			URI:         uri,
-			Diagnostics: []Diagnostic{},
-		},
-	})
-}
-
-func (s *Server) uriToPath(uri string) string {
-	if !strings.HasPrefix(uri, "file://") {
-		return ""
-	}
-
-	path := uri[7:]
-
-	if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") {
-		path = path[1:]
-	}
-
-	if decoded, err := url.PathUnescape(path); err == nil {
-		path = decoded
-	}
-
-	return filepath.Clean(filepath.FromSlash(path))
-}
-
-func (s *Server) pathToURI(pathStr string) string {
-	cleanPath := filepath.Clean(pathStr)
-
-	if runtime.GOOS == "windows" {
-		if len(cleanPath) > 1 && cleanPath[1] == ':' {
-			cleanPath = strings.ToLower(cleanPath[:1]) + cleanPath[1:]
-		}
-
-		return "file:///" + filepath.ToSlash(cleanPath)
-	}
-
-	return "file://" + filepath.ToSlash(cleanPath)
-}
-
-func (s *Server) normalizeURI(uri string) string {
-	if !strings.HasPrefix(uri, "file://") {
-		return uri
-	}
-
-	return s.pathToURI(s.uriToPath(uri))
-}
-
-func (s *Server) isIgnoredURI(uri string) bool {
-	path := s.uriToPath(uri)
-
-	if path == "" {
-		return false
-	}
-
-	return s.isIgnored(path, filepath.Base(path))
-}
-
-func (s *Server) isWorkspaceURI(uri string) bool {
-	if strings.HasPrefix(uri, "std:///") {
-		return false
-	}
-
-	path := s.uriToPath(uri)
-
-	if path == "" {
-		return false
-	}
-
-	lowerPath := strings.ToLower(path)
-
-	for _, libPath := range s.lowerLibraryPaths {
-		if strings.HasPrefix(lowerPath, libPath) {
-			return false
-		}
-	}
-
-	if s.RootURI == "" {
-		return true
-	}
-
-	return strings.HasPrefix(lowerPath, s.lowerRootPath)
-}
-
-func (s *Server) isKnownGlobal(name []byte) bool {
-	if s.KnownGlobals[ast.String(name)] {
-		return true
-	}
-
-	if len(s.KnownGlobalGlobs) == 0 {
-		return false
-	}
-
-	strName := ast.String(name)
-
-	for _, glob := range s.KnownGlobalGlobs {
-		if matched, _ := filepath.Match(glob, strName); matched {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (s *Server) getEnclosingFunctionDef(doc *Document, id ast.NodeID) ast.NodeID {
-	if id == ast.InvalidNode || int(id) >= len(doc.Tree.Nodes) {
-		return ast.InvalidNode
-	}
-
-	curr := doc.Tree.Nodes[id].Parent
+func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID) bool {
+	curr := refID
 
 	for curr != ast.InvalidNode && int(curr) < len(doc.Tree.Nodes) {
-		node := doc.Tree.Nodes[curr]
-		if node.Kind == ast.KindFunctionExpr {
-			pID := node.Parent
-			if pID != ast.InvalidNode && int(pID) < len(doc.Tree.Nodes) {
-				pNode := doc.Tree.Nodes[pID]
-				if pNode.Kind == ast.KindLocalFunction || pNode.Kind == ast.KindFunctionStmt {
-					return pNode.Left
-				} else if pNode.Kind == ast.KindRecordField {
-					return pNode.Left
-				} else if pNode.Kind == ast.KindExprList {
-					gpID := pNode.Parent
-					if gpID != ast.InvalidNode && int(gpID) < len(doc.Tree.Nodes) {
-						gpNode := doc.Tree.Nodes[gpID]
-						if (gpNode.Kind == ast.KindAssign || gpNode.Kind == ast.KindLocalAssign) && gpNode.Right == pID {
-							idx := -1
+		parentID := doc.Tree.Nodes[curr].Parent
+		if parentID == ast.InvalidNode || int(parentID) >= len(doc.Tree.Nodes) {
+			return true
+		}
 
-							for i := uint16(0); i < pNode.Count; i++ {
-								if pNode.Extra+uint32(i) < uint32(len(doc.Tree.ExtraList)) && doc.Tree.ExtraList[pNode.Extra+uint32(i)] == curr {
-									idx = int(i)
+		pNode := doc.Tree.Nodes[parentID]
 
-									break
-								}
-							}
+		switch pNode.Kind {
+		case ast.KindMemberExpr, ast.KindMethodName, ast.KindIndexExpr:
+			if pNode.Left == curr {
+				if isLHSOfAssignment(doc, parentID) {
+					return true
+				}
 
-							if idx != -1 {
-								lhs := doc.Tree.Nodes[gpNode.Left]
-								if uint16(idx) < lhs.Count && lhs.Extra+uint32(idx) < uint32(len(doc.Tree.ExtraList)) {
-									return doc.Tree.ExtraList[lhs.Extra+uint32(idx)]
-								}
-							}
+				curr = parentID
+
+				continue
+			}
+
+			return true
+		case ast.KindLocalAssign, ast.KindAssign:
+			if pNode.Left == curr {
+				return false
+			}
+			if pNode.Right == curr {
+				if int(pNode.Left) < len(doc.Tree.Nodes) {
+					lhsList := doc.Tree.Nodes[pNode.Left]
+					if lhsList.Count == 1 && lhsList.Extra < uint32(len(doc.Tree.ExtraList)) {
+						lhsExprID := doc.Tree.ExtraList[lhsList.Extra]
+						if s.getRootDef(doc, lhsExprID) == defID {
+							return false
 						}
 					}
 				}
 			}
 
-			return curr
-		} else if node.Kind == ast.KindFile {
-			return curr
-		}
+			return true
+		case ast.KindExprList, ast.KindNameList:
+			if pNode.Kind == ast.KindExprList {
+				gpID := pNode.Parent
+				if gpID != ast.InvalidNode && int(gpID) < len(doc.Tree.Nodes) {
+					gpNode := doc.Tree.Nodes[gpID]
+					if (gpNode.Kind == ast.KindAssign || gpNode.Kind == ast.KindLocalAssign) && gpNode.Left == parentID {
+						return false
+					}
+				}
+			}
 
-		curr = node.Parent
+			curr = parentID
+
+			continue
+		case ast.KindParenExpr, ast.KindBinaryExpr, ast.KindUnaryExpr:
+			curr = parentID
+
+			continue
+		default:
+			return true
+		}
 	}
 
-	return doc.Tree.Root
+	return true
 }
 
 func (s *Server) isSideEffectFree(doc *Document, id ast.NodeID) bool {
@@ -6178,177 +6077,58 @@ func (s *Server) getRootDef(doc *Document, exprID ast.NodeID) ast.NodeID {
 	return ast.InvalidNode
 }
 
-func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID) bool {
-	curr := refID
+func (s *Server) getEnclosingFunctionDef(doc *Document, id ast.NodeID) ast.NodeID {
+	if id == ast.InvalidNode || int(id) >= len(doc.Tree.Nodes) {
+		return ast.InvalidNode
+	}
+
+	curr := doc.Tree.Nodes[id].Parent
 
 	for curr != ast.InvalidNode && int(curr) < len(doc.Tree.Nodes) {
-		parentID := doc.Tree.Nodes[curr].Parent
-		if parentID == ast.InvalidNode || int(parentID) >= len(doc.Tree.Nodes) {
-			return true
-		}
+		node := doc.Tree.Nodes[curr]
+		if node.Kind == ast.KindFunctionExpr {
+			pID := node.Parent
+			if pID != ast.InvalidNode && int(pID) < len(doc.Tree.Nodes) {
+				pNode := doc.Tree.Nodes[pID]
+				if pNode.Kind == ast.KindLocalFunction || pNode.Kind == ast.KindFunctionStmt {
+					return pNode.Left
+				} else if pNode.Kind == ast.KindRecordField {
+					return pNode.Left
+				} else if pNode.Kind == ast.KindExprList {
+					gpID := pNode.Parent
+					if gpID != ast.InvalidNode && int(gpID) < len(doc.Tree.Nodes) {
+						gpNode := doc.Tree.Nodes[gpID]
+						if (gpNode.Kind == ast.KindAssign || gpNode.Kind == ast.KindLocalAssign) && gpNode.Right == pID {
+							idx := -1
 
-		pNode := doc.Tree.Nodes[parentID]
+							for i := uint16(0); i < pNode.Count; i++ {
+								if pNode.Extra+uint32(i) < uint32(len(doc.Tree.ExtraList)) && doc.Tree.ExtraList[pNode.Extra+uint32(i)] == curr {
+									idx = int(i)
 
-		switch pNode.Kind {
-		case ast.KindMemberExpr, ast.KindMethodName, ast.KindIndexExpr:
-			if pNode.Left == curr {
-				if isLHSOfAssignment(doc, parentID) {
-					return true
-				}
-
-				curr = parentID
-
-				continue
-			}
-
-			return true
-		case ast.KindLocalAssign, ast.KindAssign:
-			if pNode.Left == curr {
-				return false
-			}
-			if pNode.Right == curr {
-				if int(pNode.Left) < len(doc.Tree.Nodes) {
-					lhsList := doc.Tree.Nodes[pNode.Left]
-					if lhsList.Count == 1 && lhsList.Extra < uint32(len(doc.Tree.ExtraList)) {
-						lhsExprID := doc.Tree.ExtraList[lhsList.Extra]
-						if s.getRootDef(doc, lhsExprID) == defID {
-							return false
-						}
-					}
-				}
-			}
-
-			return true
-		case ast.KindExprList, ast.KindNameList:
-			if pNode.Kind == ast.KindExprList {
-				gpID := pNode.Parent
-				if gpID != ast.InvalidNode && int(gpID) < len(doc.Tree.Nodes) {
-					gpNode := doc.Tree.Nodes[gpID]
-					if (gpNode.Kind == ast.KindAssign || gpNode.Kind == ast.KindLocalAssign) && gpNode.Left == parentID {
-						return false
-					}
-				}
-			}
-
-			curr = parentID
-
-			continue
-		case ast.KindParenExpr, ast.KindBinaryExpr, ast.KindUnaryExpr:
-			curr = parentID
-
-			continue
-		default:
-			return true
-		}
-	}
-
-	return true
-}
-
-func (s *Server) iterateGlobalReferences(ctx *SymbolContext) iter.Seq[GlobalReference] {
-	return func(yield func(GlobalReference) bool) {
-		if !ctx.IsGlobal {
-			return
-		}
-
-		for dUri, dDoc := range s.Documents {
-			if ctx.GKey.ReceiverHash == 0 {
-				for _, id := range dDoc.Resolver.GlobalDefs {
-					if ast.HashBytes(dDoc.Source[dDoc.Tree.Nodes[id].Start:dDoc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
-						if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: id}) {
-							return
-						}
-					}
-				}
-
-				for _, id := range dDoc.Resolver.GlobalRefs {
-					if ast.HashBytes(dDoc.Source[dDoc.Tree.Nodes[id].Start:dDoc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
-						if dDoc.Resolver.References[id] == ast.InvalidNode {
-							if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: id}) {
-								return
+									break
+								}
 							}
-						}
-					}
-				}
-			} else {
-				for _, fd := range dDoc.Resolver.FieldDefs {
-					if fd.ReceiverHash == ctx.GKey.ReceiverHash && fd.PropHash == ctx.GKey.PropHash {
-						if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: fd.NodeID}) {
-							return
-						}
-					}
-				}
 
-				for _, pf := range dDoc.Resolver.PendingFields {
-					if pf.ReceiverHash == ctx.GKey.ReceiverHash && pf.PropHash == ctx.GKey.PropHash {
-						if dDoc.Resolver.References[pf.PropNodeID] == ast.InvalidNode {
-							if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: pf.PropNodeID}) {
-								return
+							if idx != -1 {
+								lhs := doc.Tree.Nodes[gpNode.Left]
+								if uint16(idx) < lhs.Count && lhs.Extra+uint32(idx) < uint32(len(doc.Tree.ExtraList)) {
+									return doc.Tree.ExtraList[lhs.Extra+uint32(idx)]
+								}
 							}
 						}
 					}
 				}
 			}
-		}
-	}
-}
 
-func (s *Server) compileIgnorePatterns() {
-	s.compiledIgnores = make([]IgnorePattern, 0, len(s.IgnoreGlobs))
-
-	for _, g := range s.IgnoreGlobs {
-		cleanGlob := strings.TrimPrefix(strings.TrimPrefix(g, "**/"), "*/")
-		cleanGlob = strings.TrimSuffix(strings.TrimSuffix(cleanGlob, "/**"), "/*")
-
-		if cleanGlob == "" {
-			continue
+			return curr
+		} else if node.Kind == ast.KindFile {
+			return curr
 		}
 
-		if !strings.ContainsAny(cleanGlob, "*?[") {
-			cleanPath := filepath.FromSlash(cleanGlob)
-
-			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{
-				ContainsPath: string(filepath.Separator) + cleanPath + string(filepath.Separator),
-				SuffixPath:   string(filepath.Separator) + cleanPath,
-				HasSuffix:    cleanGlob,
-			})
-		} else if strings.HasPrefix(cleanGlob, "*") && !strings.ContainsAny(cleanGlob[1:], "*?[") {
-			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{HasSuffix: cleanGlob[1:]})
-		} else if strings.HasSuffix(cleanGlob, "*") && !strings.ContainsAny(cleanGlob[:len(cleanGlob)-1], "*?[") {
-			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{HasPrefix: cleanGlob[:len(cleanGlob)-1]})
-		} else {
-			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{MatchFallback: g})
-		}
-	}
-}
-
-func (s *Server) suggestGlobal(name string) string {
-	var (
-		bestMatch string
-		minDist   = 3
-	)
-
-	check := func(candidate string) {
-		d := levenshteinFast(name, candidate, minDist-1)
-		if d < minDist {
-			minDist = d
-			bestMatch = candidate
-		}
+		curr = node.Parent
 	}
 
-	// Prioritize known globals
-	for k := range s.KnownGlobals {
-		check(k)
-	}
-
-	// Then check workspace globals
-	for key, sym := range s.GlobalIndex {
-		if key.ReceiverHash == 0 {
-			check(sym.Name)
-		}
-	}
-
-	return bestMatch
+	return doc.Tree.Root
 }
 
 func (s *Server) checkSafetyAndBudget(doc *Document, targetIf ast.NodeID, budget int) ([]ast.NodeID, bool) {
@@ -6405,6 +6185,200 @@ func (s *Server) checkSafetyAndBudget(doc *Document, targetIf ast.NodeID, budget
 	}
 
 	return trailing, true
+}
+
+func (s *Server) createRenameFix(doc *Document, id ast.NodeID) SafeFix {
+	node := doc.Tree.Nodes[id]
+	name := ast.String(doc.Source[node.Start:node.End])
+
+	return SafeFix{
+		Coverage: []ast.NodeID{id},
+		Edits: []TextEdit{{
+			Range:   getNodeRange(doc.Tree, id),
+			NewText: "_" + name,
+		}},
+		Title: "Prefix with '_'",
+	}
+}
+
+func (s *Server) expandRemovalRange(doc *Document, start, end uint32) Range {
+	// Consume leading spaces/tabs on the same line
+	for start > 0 {
+		c := doc.Source[start-1]
+
+		if c == ' ' || c == '\t' {
+			start--
+		} else {
+			break
+		}
+	}
+
+	// Consume optional trailing semicolon
+	for end < uint32(len(doc.Source)) {
+		c := doc.Source[end]
+
+		if c == ' ' || c == '\t' {
+			end++
+		} else if c == ';' {
+			end++
+
+			break
+		} else {
+			break
+		}
+	}
+
+	// Consume trailing spaces/tabs and exactly ONE newline
+	var hadNewline bool
+
+	for end < uint32(len(doc.Source)) {
+		c := doc.Source[end]
+
+		if c == ' ' || c == '\t' || c == '\r' {
+			end++
+		} else if c == '\n' {
+			end++
+
+			hadNewline = true
+
+			break
+		} else {
+			break
+		}
+	}
+
+	if hadNewline {
+		prevLineEmpty := start == 0
+
+		if !prevLineEmpty && doc.Source[start-1] == '\n' {
+			i := start - 1
+			if i > 0 && doc.Source[i-1] == '\r' {
+				i--
+			}
+
+			isEmpty := true
+
+			for i > 0 {
+				c := doc.Source[i-1]
+
+				if c == ' ' || c == '\t' {
+					i--
+				} else if c == '\n' {
+					break
+				} else {
+					isEmpty = false
+
+					break
+				}
+			}
+
+			prevLineEmpty = isEmpty || i == 0
+		}
+
+		// Consume one extra trailing empty line, to prevent leaving behind double blank lines.
+		if prevLineEmpty {
+			tempEnd := end
+
+			for tempEnd < uint32(len(doc.Source)) {
+				c := doc.Source[tempEnd]
+
+				if c == ' ' || c == '\t' || c == '\r' {
+					tempEnd++
+				} else if c == '\n' {
+					tempEnd++
+
+					end = tempEnd
+
+					break
+				} else {
+					break
+				}
+			}
+		}
+	}
+
+	return getRange(doc.Tree, start, end)
+}
+
+func (s *Server) findCommaBefore(source []byte, start, limit uint32) uint32 {
+	if start <= limit || start == 0 {
+		return limit
+	}
+
+	commaPos := start
+
+	for i := start - 1; i >= limit && i < uint32(len(source)); i-- {
+		if source[i] == ',' {
+			commaPos = i
+
+			break
+		}
+	}
+
+	for i := commaPos - 1; i >= limit && i < uint32(len(source)); i-- {
+		if source[i] == ' ' || source[i] == '\t' {
+			commaPos = i
+		} else {
+			break
+		}
+	}
+
+	return commaPos
+}
+
+func (s *Server) flattenBlock(doc *Document, blockID ast.NodeID, indent string, budget int) string {
+	if blockID == ast.InvalidNode || int(blockID) >= len(doc.Tree.Nodes) {
+		return ""
+	}
+
+	var out strings.Builder
+
+	blockNode := doc.Tree.Nodes[blockID]
+
+	for i := uint16(0); i < blockNode.Count; i++ {
+		if blockNode.Extra+uint32(i) >= uint32(len(doc.Tree.ExtraList)) {
+			continue
+		}
+
+		childID := doc.Tree.ExtraList[blockNode.Extra+uint32(i)]
+		stmtStr := s.formatStatement(doc, childID, indent, budget)
+
+		if i > 0 {
+			prevID := doc.Tree.ExtraList[blockNode.Extra+uint32(i-1)]
+
+			var gap []byte
+
+			if int(prevID) < len(doc.Tree.Nodes) && int(childID) < len(doc.Tree.Nodes) {
+				prevNode := doc.Tree.Nodes[prevID]
+				currNode := doc.Tree.Nodes[childID]
+
+				if prevNode.End <= currNode.Start && currNode.Start <= uint32(len(doc.Source)) {
+					gap = doc.Source[prevNode.End:currNode.Start]
+				}
+			}
+
+			out.WriteString("\n")
+
+			if len(gap) > 0 && bytes.Count(gap, []byte{'\n'}) > 1 {
+				out.WriteString("\n")
+				out.WriteString(indent)
+			} else if int(childID) < len(doc.Tree.Nodes) {
+				currNode := doc.Tree.Nodes[childID]
+				if currNode.Kind == ast.KindIf || currNode.Kind == ast.KindDo || currNode.Kind == ast.KindForNum || currNode.Kind == ast.KindForIn || currNode.Kind == ast.KindWhile {
+					out.WriteString("\n")
+					out.WriteString(indent)
+				} else {
+					out.WriteString(indent)
+				}
+			} else {
+				out.WriteString(indent)
+			}
+		}
+
+		out.WriteString(stmtStr)
+	}
+
+	return out.String()
 }
 
 func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string, budget int) string {
@@ -6602,59 +6576,10 @@ func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string
 	return out.String()
 }
 
-func (s *Server) flattenBlock(doc *Document, blockID ast.NodeID, indent string, budget int) string {
-	if blockID == ast.InvalidNode || int(blockID) >= len(doc.Tree.Nodes) {
-		return ""
-	}
+func (s *Server) getStatementRemovalRange(doc *Document, nodeID ast.NodeID) Range {
+	node := doc.Tree.Nodes[nodeID]
 
-	var out strings.Builder
-
-	blockNode := doc.Tree.Nodes[blockID]
-
-	for i := uint16(0); i < blockNode.Count; i++ {
-		if blockNode.Extra+uint32(i) >= uint32(len(doc.Tree.ExtraList)) {
-			continue
-		}
-
-		childID := doc.Tree.ExtraList[blockNode.Extra+uint32(i)]
-		stmtStr := s.formatStatement(doc, childID, indent, budget)
-
-		if i > 0 {
-			prevID := doc.Tree.ExtraList[blockNode.Extra+uint32(i-1)]
-
-			var gap []byte
-
-			if int(prevID) < len(doc.Tree.Nodes) && int(childID) < len(doc.Tree.Nodes) {
-				prevNode := doc.Tree.Nodes[prevID]
-				currNode := doc.Tree.Nodes[childID]
-
-				if prevNode.End <= currNode.Start && currNode.Start <= uint32(len(doc.Source)) {
-					gap = doc.Source[prevNode.End:currNode.Start]
-				}
-			}
-
-			out.WriteString("\n")
-
-			if len(gap) > 0 && bytes.Count(gap, []byte{'\n'}) > 1 {
-				out.WriteString("\n")
-				out.WriteString(indent)
-			} else if int(childID) < len(doc.Tree.Nodes) {
-				currNode := doc.Tree.Nodes[childID]
-				if currNode.Kind == ast.KindIf || currNode.Kind == ast.KindDo || currNode.Kind == ast.KindForNum || currNode.Kind == ast.KindForIn || currNode.Kind == ast.KindWhile {
-					out.WriteString("\n")
-					out.WriteString(indent)
-				} else {
-					out.WriteString(indent)
-				}
-			} else {
-				out.WriteString(indent)
-			}
-		}
-
-		out.WriteString(stmtStr)
-	}
-
-	return out.String()
+	return s.expandRemovalRange(doc, node.Start, node.End)
 }
 
 func (s *Server) invertCondition(doc *Document, condID ast.NodeID) string {
@@ -6750,119 +6675,184 @@ func (s *Server) invertCondition(doc *Document, condID ast.NodeID) string {
 	return "not (" + condStr + ")"
 }
 
-func (s *Server) expandRemovalRange(doc *Document, start, end uint32) Range {
-	// Consume leading spaces/tabs on the same line
-	for start > 0 {
-		c := doc.Source[start-1]
-
-		if c == ' ' || c == '\t' {
-			start--
-		} else {
-			break
-		}
+func (s *Server) buildCallHierarchyItemFromDef(uri string, doc *Document, defID ast.NodeID) CallHierarchyItem {
+	if defID == ast.InvalidNode || int(defID) >= len(doc.Tree.Nodes) {
+		return CallHierarchyItem{}
 	}
 
-	// Consume optional trailing semicolon
-	for end < uint32(len(doc.Source)) {
-		c := doc.Source[end]
+	valID := doc.getAssignedValue(defID)
+	isFunc := valID != ast.InvalidNode && int(valID) < len(doc.Tree.Nodes) && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr
 
-		if c == ' ' || c == '\t' {
-			end++
-		} else if c == ';' {
-			end++
+	node := doc.Tree.Nodes[defID]
 
-			break
-		} else {
-			break
-		}
+	var name string
+
+	if node.Start <= node.End && node.End <= uint32(len(doc.Source)) {
+		name = ast.String(doc.Source[node.Start:node.End])
 	}
 
-	// Consume trailing spaces/tabs and exactly ONE newline
-	var hadNewline bool
-
-	for end < uint32(len(doc.Source)) {
-		c := doc.Source[end]
-
-		if c == ' ' || c == '\t' || c == '\r' {
-			end++
-		} else if c == '\n' {
-			end++
-
-			hadNewline = true
-
-			break
-		} else {
-			break
-		}
+	if name == "" {
+		name = "<error>"
 	}
 
-	if hadNewline {
-		prevLineEmpty := start == 0
+	kind := SymbolKindVariable
 
-		if !prevLineEmpty && doc.Source[start-1] == '\n' {
-			i := start - 1
-			if i > 0 && doc.Source[i-1] == '\r' {
-				i--
+	if isFunc {
+		kind = SymbolKindFunction
+
+		if node.Parent != ast.InvalidNode && int(node.Parent) < len(doc.Tree.Nodes) {
+			if doc.Tree.Nodes[node.Parent].Kind == ast.KindMethodName || doc.Tree.Nodes[node.Parent].Kind == ast.KindRecordField {
+				kind = SymbolKindMethod
 			}
+		}
+	}
 
-			isEmpty := true
+	switch node.Kind {
+	case ast.KindFile:
+		name = "(main)"
+		kind = SymbolKindFile
+	case ast.KindFunctionExpr:
+		name = "(anonymous function)"
+		kind = SymbolKindFunction
+	}
 
-			for i > 0 {
-				c := doc.Source[i-1]
+	selRange := getNodeRange(doc.Tree, defID)
+	fullRange := selRange
 
-				if c == ' ' || c == '\t' {
-					i--
-				} else if c == '\n' {
-					break
-				} else {
-					isEmpty = false
+	if isFunc {
+		fullRange = getNodeRange(doc.Tree, valID)
+	} else if node.Kind == ast.KindFile {
+		fullRange = Range{
+			Start: Position{Line: 0, Character: 0},
+			End:   selRange.Start,
+		}
 
-					break
+		if len(doc.Tree.LineOffsets) > 0 {
+			lastLine := uint32(len(doc.Tree.LineOffsets) - 1)
+			lastCol := uint32(len(doc.Source)) - doc.Tree.LineOffsets[lastLine]
+
+			fullRange.End = Position{Line: lastLine, Character: lastCol}
+		}
+	}
+
+	var detail string
+
+	if uri != "" {
+		detail = filepath.Base(s.uriToPath(uri))
+	}
+
+	var tags []SymbolTag
+
+	if isDep, _ := doc.HasDeprecatedTag(defID); isDep {
+		tags = append(tags, SymbolTagDeprecated)
+	}
+
+	return CallHierarchyItem{
+		Name:           name,
+		Kind:           kind,
+		Tags:           tags,
+		Detail:         detail,
+		URI:            uri,
+		Range:          fullRange,
+		SelectionRange: selRange,
+		Data: map[string]any{
+			"uri":   uri,
+			"defId": float64(defID),
+		},
+	}
+}
+
+func (s *Server) getDocumentHighlights(uri string, doc *Document, ctx *SymbolContext) []DocumentHighlight {
+	var highlights []DocumentHighlight
+
+	addHighlight := func(nodeID ast.NodeID, kind DocumentHighlightKind) {
+		if nodeID == ast.InvalidNode || int(nodeID) >= len(doc.Tree.Nodes) {
+			return
+		}
+
+		node := doc.Tree.Nodes[nodeID]
+
+		sLine, sCol := doc.Tree.Position(node.Start)
+		eLine, eCol := doc.Tree.Position(node.End)
+
+		highlights = append(highlights, DocumentHighlight{
+			Range: Range{
+				Start: Position{Line: sLine, Character: sCol},
+				End:   Position{Line: eLine, Character: eCol},
+			},
+			Kind: kind,
+		})
+	}
+
+	if ctx.TargetDefID != ast.InvalidNode && ctx.TargetURI == uri {
+		for i, def := range doc.Resolver.References {
+			if def == ctx.TargetDefID {
+				kind := ReadHighlight
+
+				if ast.NodeID(i) == ctx.TargetDefID || isWriteAccess(doc.Tree, ast.NodeID(i)) {
+					kind = WriteHighlight
+				}
+
+				addHighlight(ast.NodeID(i), kind)
+			}
+		}
+	} else if ctx.RecDefID != ast.InvalidNode && ctx.TargetURI == uri {
+		for _, fd := range doc.Resolver.FieldDefs {
+			if fd.ReceiverDef == ctx.RecDefID && fd.PropHash == ctx.GKey.PropHash && fd.ReceiverHash == ctx.GKey.ReceiverHash {
+				addHighlight(fd.NodeID, WriteHighlight)
+			}
+		}
+
+		for _, pf := range doc.Resolver.PendingFields {
+			if pf.ReceiverDef == ctx.RecDefID && pf.PropHash == ctx.GKey.PropHash && pf.ReceiverHash == ctx.GKey.ReceiverHash {
+				kind := ReadHighlight
+
+				if isWriteAccess(doc.Tree, pf.PropNodeID) {
+					kind = WriteHighlight
+				}
+
+				addHighlight(pf.PropNodeID, kind)
+			}
+		}
+	}
+
+	for ref := range s.iterateGlobalReferences(ctx) {
+		if ref.URI == uri {
+			kind := ReadHighlight
+
+			if isWriteAccess(ref.Doc.Tree, ref.NodeID) {
+				kind = WriteHighlight
+			} else {
+				if int(ref.NodeID) < len(ref.Doc.Tree.Nodes) {
+					pID := ref.Doc.Tree.Nodes[ref.NodeID].Parent
+
+					if pID != ast.InvalidNode && int(pID) < len(ref.Doc.Tree.Nodes) {
+						pNode := ref.Doc.Tree.Nodes[pID]
+						if pNode.Kind == ast.KindFunctionStmt || pNode.Kind == ast.KindLocalFunction {
+							kind = WriteHighlight
+						}
+					}
 				}
 			}
 
-			prevLineEmpty = isEmpty || i == 0
-		}
-
-		// Consume one extra trailing empty line, to prevent leaving behind double blank lines.
-		if prevLineEmpty {
-			tempEnd := end
-
-			for tempEnd < uint32(len(doc.Source)) {
-				c := doc.Source[tempEnd]
-
-				if c == ' ' || c == '\t' || c == '\r' {
-					tempEnd++
-				} else if c == '\n' {
-					tempEnd++
-
-					end = tempEnd
-
-					break
-				} else {
-					break
-				}
-			}
+			addHighlight(ref.NodeID, kind)
 		}
 	}
 
-	return getRange(doc.Tree, start, end)
-}
-
-func (s *Server) getStatementRemovalRange(doc *Document, nodeID ast.NodeID) Range {
-	node := doc.Tree.Nodes[nodeID]
-
-	return s.expandRemovalRange(doc, node.Start, node.End)
-}
-
-func getRange(tree *ast.Tree, start, end uint32) Range {
-	sLine, sCol := tree.Position(start)
-	eLine, eCol := tree.Position(end)
-
-	return Range{
-		Start: Position{Line: sLine, Character: sCol},
-		End:   Position{Line: eLine, Character: eCol},
+	if len(highlights) == 0 {
+		addHighlight(ctx.IdentNodeID, WriteHighlight)
 	}
+
+	slices.SortFunc(highlights, func(a, b DocumentHighlight) int {
+		return cmp.Or(
+			cmp.Compare(a.Range.Start.Line, b.Range.Start.Line),
+			cmp.Compare(a.Range.Start.Character, b.Range.Start.Character),
+		)
+	})
+
+	return slices.CompactFunc(highlights, func(a, b DocumentHighlight) bool {
+		return a.Range.Start == b.Range.Start && a.Range.End == b.Range.End
+	})
 }
 
 func getASTDepth(tree *ast.Tree, id ast.NodeID) int {
@@ -6879,40 +6869,44 @@ func getASTDepth(tree *ast.Tree, id ast.NodeID) int {
 	return depth
 }
 
-func containsFold(b, queryLower []byte) bool {
-	if len(queryLower) == 0 {
-		return true
+func getNodeRange(tree *ast.Tree, nodeID ast.NodeID) Range {
+	if nodeID == ast.InvalidNode || int(nodeID) >= len(tree.Nodes) {
+		return Range{}
 	}
 
-	if len(b) < len(queryLower) {
+	node := tree.Nodes[nodeID]
+
+	return getRange(tree, node.Start, node.End)
+}
+
+func getRange(tree *ast.Tree, start, end uint32) Range {
+	sLine, sCol := tree.Position(start)
+	eLine, eCol := tree.Position(end)
+
+	return Range{
+		Start: Position{Line: sLine, Character: sCol},
+		End:   Position{Line: eLine, Character: eCol},
+	}
+}
+
+func isLHSOfAssignment(doc *Document, nodeID ast.NodeID) bool {
+	if nodeID == ast.InvalidNode || int(nodeID) >= len(doc.Tree.Nodes) {
 		return false
 	}
 
-	for i := 0; i <= len(b)-len(queryLower); i++ {
-		match := true
+	pID := doc.Tree.Nodes[nodeID].Parent
+	if pID == ast.InvalidNode || int(pID) >= len(doc.Tree.Nodes) {
+		return false
+	}
 
-		for j := range queryLower {
-			cb := b[i+j]
-
-			if cb >= 'A' && cb <= 'Z' {
-				cb += 32 // fast to-lower
+	pNode := doc.Tree.Nodes[pID]
+	if pNode.Kind == ast.KindExprList {
+		gpID := pNode.Parent
+		if gpID != ast.InvalidNode && int(gpID) < len(doc.Tree.Nodes) {
+			gpNode := doc.Tree.Nodes[gpID]
+			if (gpNode.Kind == ast.KindAssign || gpNode.Kind == ast.KindLocalAssign) && gpNode.Left == pID {
+				return true
 			}
-
-			qb := queryLower[j]
-
-			if cb != qb {
-				if (cb == '.' && qb == ':') || (cb == ':' && qb == '.') {
-					continue
-				}
-
-				match = false
-
-				break
-			}
-		}
-
-		if match {
-			return true
 		}
 	}
 
@@ -6942,254 +6936,6 @@ func isRootLevel(tree *ast.Tree, id ast.NodeID) bool {
 		}
 
 		curr = n.Parent
-	}
-
-	return false
-}
-
-// Fast, zero-allocation Levenshtein distance for strings up to 63 bytes.
-func levenshteinFast(s, t string, maxDist int) int {
-	if len(s) > len(t) {
-		s, t = t, s
-	}
-
-	ls := len(s)
-	lt := len(t)
-
-	if ls == 0 {
-		return lt
-	}
-
-	if lt-ls > maxDist || lt > 63 {
-		return maxDist + 1
-	}
-
-	var (
-		v0 [64]int
-		v1 [64]int
-	)
-
-	p0, p1 := &v0, &v1
-
-	for i := 0; i <= ls; i++ {
-		p0[i] = i
-	}
-
-	for i := range lt {
-		p1[0] = i + 1
-
-		minDistForRow := p1[0]
-
-		for j := range ls {
-			cost := 1
-
-			if t[i] == s[j] {
-				cost = 0
-			}
-
-			a := p1[j] + 1
-			b := p0[j+1] + 1
-			c := p0[j] + cost
-
-			m := min(c, min(b, a))
-
-			p1[j+1] = m
-
-			if m < minDistForRow {
-				minDistForRow = m
-			}
-		}
-
-		if minDistForRow > maxDist {
-			return maxDist + 1
-		}
-
-		p0, p1 = p1, p0
-	}
-
-	return p0[ls]
-}
-
-// hasPrefixFold does a zero-allocation, case-insensitive prefix check.
-func hasPrefixFold(b, prefix []byte) bool {
-	if len(b) < len(prefix) {
-		return false
-	}
-
-	for i, pb := range prefix {
-		cb := b[i]
-
-		if cb >= 'A' && cb <= 'Z' {
-			cb += 32 // fast to-lower
-		}
-
-		if cb != pb {
-			return false
-		}
-	}
-
-	return true
-}
-
-func trimTrailingWhitespace(text string) string {
-	var out strings.Builder
-
-	lines := strings.Split(text, "\n")
-
-	for i, line := range lines {
-		out.WriteString(strings.TrimRight(line, " \t\r"))
-
-		if i < len(lines)-1 {
-			out.WriteString("\n")
-		}
-	}
-
-	return out.String()
-}
-
-func setCfg[T comparable](dst *T, value T, flag *bool) {
-	if *dst == value {
-		return
-	}
-
-	*dst = value
-
-	if flag != nil {
-		*flag = true
-	}
-}
-
-func mapsEqualStringBool(a, b map[string]bool) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	for k, av := range a {
-		if bv, ok := b[k]; !ok || bv != av {
-			return false
-		}
-	}
-
-	return true
-}
-
-func reindentNodeText(doc *Document, id ast.NodeID, targetIndent string) string {
-	if id == ast.InvalidNode || int(id) >= len(doc.Tree.Nodes) {
-		return ""
-	}
-
-	node := doc.Tree.Nodes[id]
-	if node.Start >= node.End || node.End > uint32(len(doc.Source)) {
-		return ""
-	}
-
-	text := string(doc.Source[node.Start:node.End])
-
-	var baseIndent string
-
-	for i := int(node.Start) - 1; i >= 0; i-- {
-		c := doc.Source[i]
-		if c == '\n' {
-			baseIndent = string(doc.Source[i+1 : node.Start])
-
-			break
-		} else if c != ' ' && c != '\t' {
-			baseIndent = ""
-
-			break
-		}
-	}
-
-	if len(baseIndent) == 0 && node.Start > 0 {
-		for i := 0; i < int(node.Start); i++ {
-			c := doc.Source[i]
-
-			if c == ' ' || c == '\t' {
-				baseIndent += string(c)
-			} else {
-				baseIndent = ""
-			}
-		}
-	}
-
-	var out strings.Builder
-
-	lines := strings.Split(text, "\n")
-
-	for i, line := range lines {
-		if i > 0 {
-			out.WriteString("\n")
-			out.WriteString(targetIndent)
-
-			if strings.HasPrefix(line, baseIndent) {
-				out.WriteString(line[len(baseIndent):])
-			} else {
-				out.WriteString(strings.TrimLeft(line, " \t"))
-			}
-		} else {
-			out.WriteString(line)
-		}
-	}
-
-	return out.String()
-}
-
-func getNodeRange(tree *ast.Tree, nodeID ast.NodeID) Range {
-	if nodeID == ast.InvalidNode || int(nodeID) >= len(tree.Nodes) {
-		return Range{}
-	}
-
-	node := tree.Nodes[nodeID]
-
-	return getRange(tree, node.Start, node.End)
-}
-
-func isWriteAccess(tree *ast.Tree, nodeID ast.NodeID) bool {
-	if nodeID == ast.InvalidNode || int(nodeID) >= len(tree.Nodes) {
-		return false
-	}
-
-	pID := tree.Nodes[nodeID].Parent
-	if pID == ast.InvalidNode || int(pID) >= len(tree.Nodes) {
-		return false
-	}
-
-	pNode := tree.Nodes[pID]
-
-	switch pNode.Kind {
-	case ast.KindNameList:
-		gpID := pNode.Parent
-		if gpID != ast.InvalidNode && int(gpID) < len(tree.Nodes) {
-			gpNode := tree.Nodes[gpID]
-
-			return gpNode.Kind == ast.KindLocalAssign || gpNode.Kind == ast.KindForIn
-		}
-	case ast.KindExprList:
-		gpID := pNode.Parent
-		if gpID != ast.InvalidNode && int(gpID) < len(tree.Nodes) {
-			gpNode := tree.Nodes[gpID]
-
-			return gpNode.Kind == ast.KindAssign && gpNode.Left == pID
-		}
-	case ast.KindForNum, ast.KindLocalFunction, ast.KindFunctionStmt, ast.KindRecordField:
-		return pNode.Left == nodeID
-	case ast.KindMethodName:
-		return pNode.Right == nodeID
-	case ast.KindMemberExpr:
-		if pNode.Right == nodeID {
-			gpID := pNode.Parent
-			if gpID != ast.InvalidNode && int(gpID) < len(tree.Nodes) {
-				gpNode := tree.Nodes[gpID]
-				if gpNode.Kind == ast.KindExprList {
-					ggpID := gpNode.Parent
-					if ggpID != ast.InvalidNode && int(ggpID) < len(tree.Nodes) {
-						ggpNode := tree.Nodes[ggpID]
-
-						return ggpNode.Kind == ast.KindAssign && ggpNode.Left == gpID
-					}
-				}
-			}
-		}
 	}
 
 	return false
@@ -7256,26 +7002,279 @@ func isTerminal(tree *ast.Tree, id ast.NodeID) bool {
 	return false
 }
 
-func isLHSOfAssignment(doc *Document, nodeID ast.NodeID) bool {
-	if nodeID == ast.InvalidNode || int(nodeID) >= len(doc.Tree.Nodes) {
+func isWriteAccess(tree *ast.Tree, nodeID ast.NodeID) bool {
+	if nodeID == ast.InvalidNode || int(nodeID) >= len(tree.Nodes) {
 		return false
 	}
 
-	pID := doc.Tree.Nodes[nodeID].Parent
-	if pID == ast.InvalidNode || int(pID) >= len(doc.Tree.Nodes) {
+	pID := tree.Nodes[nodeID].Parent
+	if pID == ast.InvalidNode || int(pID) >= len(tree.Nodes) {
 		return false
 	}
 
-	pNode := doc.Tree.Nodes[pID]
-	if pNode.Kind == ast.KindExprList {
+	pNode := tree.Nodes[pID]
+
+	switch pNode.Kind {
+	case ast.KindNameList:
 		gpID := pNode.Parent
-		if gpID != ast.InvalidNode && int(gpID) < len(doc.Tree.Nodes) {
-			gpNode := doc.Tree.Nodes[gpID]
-			if (gpNode.Kind == ast.KindAssign || gpNode.Kind == ast.KindLocalAssign) && gpNode.Left == pID {
-				return true
+		if gpID != ast.InvalidNode && int(gpID) < len(tree.Nodes) {
+			gpNode := tree.Nodes[gpID]
+
+			return gpNode.Kind == ast.KindLocalAssign || gpNode.Kind == ast.KindForIn
+		}
+	case ast.KindExprList:
+		gpID := pNode.Parent
+		if gpID != ast.InvalidNode && int(gpID) < len(tree.Nodes) {
+			gpNode := tree.Nodes[gpID]
+
+			return gpNode.Kind == ast.KindAssign && gpNode.Left == pID
+		}
+	case ast.KindForNum, ast.KindLocalFunction, ast.KindFunctionStmt, ast.KindRecordField:
+		return pNode.Left == nodeID
+	case ast.KindMethodName:
+		return pNode.Right == nodeID
+	case ast.KindMemberExpr:
+		if pNode.Right == nodeID {
+			gpID := pNode.Parent
+			if gpID != ast.InvalidNode && int(gpID) < len(tree.Nodes) {
+				gpNode := tree.Nodes[gpID]
+				if gpNode.Kind == ast.KindExprList {
+					ggpID := gpNode.Parent
+					if ggpID != ast.InvalidNode && int(ggpID) < len(tree.Nodes) {
+						ggpNode := tree.Nodes[ggpID]
+
+						return ggpNode.Kind == ast.KindAssign && ggpNode.Left == gpID
+					}
+				}
 			}
 		}
 	}
 
 	return false
+}
+
+func containsFold(b, queryLower []byte) bool {
+	if len(queryLower) == 0 {
+		return true
+	}
+
+	if len(b) < len(queryLower) {
+		return false
+	}
+
+	for i := 0; i <= len(b)-len(queryLower); i++ {
+		match := true
+
+		for j := range queryLower {
+			cb := b[i+j]
+
+			if cb >= 'A' && cb <= 'Z' {
+				cb += 32 // fast to-lower
+			}
+
+			qb := queryLower[j]
+
+			if cb != qb {
+				if (cb == '.' && qb == ':') || (cb == ':' && qb == '.') {
+					continue
+				}
+
+				match = false
+
+				break
+			}
+		}
+
+		if match {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hasPrefixFold(b, prefix []byte) bool {
+	if len(b) < len(prefix) {
+		return false
+	}
+
+	for i, pb := range prefix {
+		cb := b[i]
+
+		if cb >= 'A' && cb <= 'Z' {
+			cb += 32 // fast to-lower
+		}
+
+		if cb != pb {
+			return false
+		}
+	}
+
+	return true
+}
+
+// Fast, zero-allocation Levenshtein distance for strings up to 63 bytes.
+func levenshteinFast(s, t string, maxDist int) int {
+	if len(s) > len(t) {
+		s, t = t, s
+	}
+
+	ls := len(s)
+	lt := len(t)
+
+	if ls == 0 {
+		return lt
+	}
+
+	if lt-ls > maxDist || lt > 63 {
+		return maxDist + 1
+	}
+
+	var (
+		v0 [64]int
+		v1 [64]int
+	)
+
+	p0, p1 := &v0, &v1
+
+	for i := 0; i <= ls; i++ {
+		p0[i] = i
+	}
+
+	for i := range lt {
+		p1[0] = i + 1
+
+		minDistForRow := p1[0]
+
+		for j := range ls {
+			cost := 1
+
+			if t[i] == s[j] {
+				cost = 0
+			}
+
+			a := p1[j] + 1
+			b := p0[j+1] + 1
+			c := p0[j] + cost
+
+			m := min(c, min(b, a))
+
+			p1[j+1] = m
+
+			if m < minDistForRow {
+				minDistForRow = m
+			}
+		}
+
+		if minDistForRow > maxDist {
+			return maxDist + 1
+		}
+
+		p0, p1 = p1, p0
+	}
+
+	return p0[ls]
+}
+
+func reindentNodeText(doc *Document, id ast.NodeID, targetIndent string) string {
+	if id == ast.InvalidNode || int(id) >= len(doc.Tree.Nodes) {
+		return ""
+	}
+
+	node := doc.Tree.Nodes[id]
+	if node.Start >= node.End || node.End > uint32(len(doc.Source)) {
+		return ""
+	}
+
+	text := string(doc.Source[node.Start:node.End])
+
+	var baseIndent string
+
+	for i := int(node.Start) - 1; i >= 0; i-- {
+		c := doc.Source[i]
+		if c == '\n' {
+			baseIndent = string(doc.Source[i+1 : node.Start])
+
+			break
+		} else if c != ' ' && c != '\t' {
+			baseIndent = ""
+
+			break
+		}
+	}
+
+	if len(baseIndent) == 0 && node.Start > 0 {
+		for i := 0; i < int(node.Start); i++ {
+			c := doc.Source[i]
+
+			if c == ' ' || c == '\t' {
+				baseIndent += string(c)
+			} else {
+				baseIndent = ""
+			}
+		}
+	}
+
+	var out strings.Builder
+
+	lines := strings.Split(text, "\n")
+
+	for i, line := range lines {
+		if i > 0 {
+			out.WriteString("\n")
+			out.WriteString(targetIndent)
+
+			if strings.HasPrefix(line, baseIndent) {
+				out.WriteString(line[len(baseIndent):])
+			} else {
+				out.WriteString(strings.TrimLeft(line, " \t"))
+			}
+		} else {
+			out.WriteString(line)
+		}
+	}
+
+	return out.String()
+}
+
+func trimTrailingWhitespace(text string) string {
+	var out strings.Builder
+
+	lines := strings.Split(text, "\n")
+
+	for i, line := range lines {
+		out.WriteString(strings.TrimRight(line, " \t\r"))
+
+		if i < len(lines)-1 {
+			out.WriteString("\n")
+		}
+	}
+
+	return out.String()
+}
+
+func mapsEqualStringBool(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for k, av := range a {
+		if bv, ok := b[k]; !ok || bv != av {
+			return false
+		}
+	}
+
+	return true
+}
+
+func setCfg[T comparable](dst *T, value T, flag *bool) {
+	if *dst == value {
+		return
+	}
+
+	*dst = value
+
+	if flag != nil {
+		*flag = true
+	}
 }
