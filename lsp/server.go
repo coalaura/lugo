@@ -2342,17 +2342,24 @@ func (s *Server) handleMessage(req Request) {
 
 			// 1. Implicit 'self' hint for method definitions
 			if s.InlayImplicitSelf && node.Kind == ast.KindFunctionStmt {
-				if doc.Tree.Nodes[node.Left].Kind == ast.KindMethodName {
+				if int(node.Left) < len(doc.Tree.Nodes) && doc.Tree.Nodes[node.Left].Kind == ast.KindMethodName {
 					nameNode := doc.Tree.Nodes[node.Left]
-					funcNode := doc.Tree.Nodes[node.Right]
+
+					var funcNode ast.Node
+
+					if int(node.Right) < len(doc.Tree.Nodes) {
+						funcNode = doc.Tree.Nodes[node.Right]
+					}
 
 					var parenOff uint32
 
-					for j := nameNode.End; j < uint32(len(doc.Source)); j++ {
-						if doc.Source[j] == '(' {
-							parenOff = j + 1
+					if nameNode.End != 0xFFFFFFFF && nameNode.End <= uint32(len(doc.Source)) {
+						for j := nameNode.End; j < uint32(len(doc.Source)); j++ {
+							if doc.Source[j] == '(' {
+								parenOff = j + 1
 
-							break
+								break
+							}
 						}
 					}
 
@@ -2398,12 +2405,12 @@ func (s *Server) handleMessage(req Request) {
 				funcIdentID = node.Right
 			} else {
 				funcIdentID = node.Left
-				if doc.Tree.Nodes[funcIdentID].Kind == ast.KindMemberExpr {
+				if int(funcIdentID) < len(doc.Tree.Nodes) && doc.Tree.Nodes[funcIdentID].Kind == ast.KindMemberExpr {
 					funcIdentID = doc.Tree.Nodes[funcIdentID].Right
 				}
 			}
 
-			if doc.Tree.Nodes[funcIdentID].Kind != ast.KindIdent {
+			if int(funcIdentID) >= len(doc.Tree.Nodes) || doc.Tree.Nodes[funcIdentID].Kind != ast.KindIdent {
 				continue
 			}
 
@@ -2413,15 +2420,16 @@ func (s *Server) handleMessage(req Request) {
 			}
 
 			valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
-			if valID == ast.InvalidNode || ctx.TargetDoc.Tree.Nodes[valID].Kind != ast.KindFunctionExpr {
+			if valID == ast.InvalidNode || int(valID) >= len(ctx.TargetDoc.Tree.Nodes) || ctx.TargetDoc.Tree.Nodes[valID].Kind != ast.KindFunctionExpr {
 				continue
 			}
 
 			hasImplicitSelfCall := node.Kind == ast.KindMethodCall
-			hasImplicitSelfDef := false
+
+			var hasImplicitSelfDef bool
 
 			pDefID := ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Parent
-			if pDefID != ast.InvalidNode && ctx.TargetDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
+			if pDefID != ast.InvalidNode && int(pDefID) < len(ctx.TargetDoc.Tree.Nodes) && ctx.TargetDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
 				hasImplicitSelfDef = true
 			}
 
@@ -2441,26 +2449,53 @@ func (s *Server) handleMessage(req Request) {
 					continue
 				}
 
+				// SAFE GUARD: ExtraList and Node indexing for arguments
+				if node.Extra+uint32(j) >= uint32(len(doc.Tree.ExtraList)) {
+					continue
+				}
+
 				argID := doc.Tree.ExtraList[node.Extra+uint32(j)]
+				if argID == ast.InvalidNode || int(argID) >= len(doc.Tree.Nodes) {
+					continue
+				}
+
 				argNode := doc.Tree.Nodes[argID]
 
-				pID := ctx.TargetDoc.Tree.ExtraList[funcNode.Extra+uint32(paramIdx)]
-				pNode := ctx.TargetDoc.Tree.Nodes[pID]
+				if funcNode.Extra+uint32(paramIdx) >= uint32(len(ctx.TargetDoc.Tree.ExtraList)) {
+					continue
+				}
 
+				pID := ctx.TargetDoc.Tree.ExtraList[funcNode.Extra+uint32(paramIdx)]
+				if pID == ast.InvalidNode || int(pID) >= len(ctx.TargetDoc.Tree.Nodes) {
+					continue
+				}
+
+				pNode := ctx.TargetDoc.Tree.Nodes[pID]
 				if pNode.Kind == ast.KindVararg {
 					continue
 				}
 
+				if pNode.Start > pNode.End || pNode.End > uint32(len(ctx.TargetDoc.Source)) {
+					continue
+				}
+
 				pName := ctx.TargetDoc.Source[pNode.Start:pNode.End]
+
 				if bytes.Equal(pName, []byte("self")) {
 					continue
 				}
 
 				if s.InlaySuppressMatch && argNode.Kind == ast.KindIdent {
-					argName := doc.Source[argNode.Start:argNode.End]
-					if bytes.Equal(pName, argName) {
-						continue
+					if argNode.Start <= argNode.End && argNode.End <= uint32(len(doc.Source)) {
+						argName := doc.Source[argNode.Start:argNode.End]
+						if bytes.Equal(pName, argName) {
+							continue
+						}
 					}
+				}
+
+				if argNode.Start == 0xFFFFFFFF {
+					continue
 				}
 
 				sLine, sCol := doc.Tree.Position(argNode.Start)
@@ -2496,7 +2531,13 @@ func (s *Server) handleMessage(req Request) {
 		)
 
 		uri := s.normalizeURI(params.TextDocument.URI)
+
 		doc, docOk := s.Documents[uri]
+		if !docOk {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []CodeAction{}})
+
+			return
+		}
 
 		for _, diag := range params.Context.Diagnostics {
 			switch diag.Code {
@@ -2709,7 +2750,7 @@ func (s *Server) handleMessage(req Request) {
 			// 2. Optimize table.insert
 			if node.Kind == ast.KindCallExpr && targetTableInsert == ast.InvalidNode && node.Count == 2 {
 				leftNode := doc.Tree.Nodes[node.Left]
-				if leftNode.Kind == ast.KindMemberExpr {
+				if leftNode.Kind == ast.KindMemberExpr && leftNode.Left != ast.InvalidNode && leftNode.Right != ast.InvalidNode {
 					recName := doc.Source[doc.Tree.Nodes[leftNode.Left].Start:doc.Tree.Nodes[leftNode.Left].End]
 					propName := doc.Source[doc.Tree.Nodes[leftNode.Right].Start:doc.Tree.Nodes[leftNode.Right].End]
 
@@ -2881,7 +2922,7 @@ func (s *Server) handleMessage(req Request) {
 
 			nodeID := ast.NodeID(nodeIDFloat)
 
-			if doc, ok := s.Documents[uri]; ok && nodeID != ast.InvalidNode {
+			if doc, ok := s.Documents[uri]; ok && nodeID != ast.InvalidNode && int(nodeID) < len(doc.Tree.Nodes) {
 				if actionType == "invertCondition" {
 					invertedCond := s.invertCondition(doc, nodeID)
 					action.Edit = &WorkspaceEdit{
