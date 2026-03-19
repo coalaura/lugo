@@ -450,6 +450,7 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		s.removeDocumentGlobals(uri, doc)
 
 		clear(doc.ExportedGlobals)
+		clear(doc.ExportedGlobalDefs)
 
 		tree = existing.Tree
 		tree.Reset(source)
