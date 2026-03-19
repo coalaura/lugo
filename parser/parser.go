@@ -887,19 +887,19 @@ func (p *Parser) parseExpression(precedence int) ast.NodeID {
 		return ast.InvalidNode
 	}
 
-	defer func() {
-		p.depth--
-	}()
-
 	leftID := p.parsePrefix()
 
 	if leftID == ast.InvalidNode {
+		p.depth--
+
 		return ast.InvalidNode
 	}
 
 	for precedence < precedences[p.curr.Kind] {
 		leftID = p.parseInfix(leftID)
 	}
+
+	p.depth--
 
 	return leftID
 }

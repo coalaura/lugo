@@ -501,10 +501,24 @@ func (s *Server) handleCompletion(req Request) {
 	if isMember && len(recName) > 0 {
 		recHash := ast.HashBytes(recName)
 
+		var rootName []byte
+
+		for i, c := range recName {
+			if c == '.' || c == ':' {
+				rootName = recName[:i]
+
+				break
+			}
+		}
+
+		if rootName == nil {
+			rootName = recName
+		}
+
 		var recDef ast.NodeID = ast.InvalidNode
 
 		doc.GetLocalsAt(offset, func(name []byte, defID ast.NodeID) bool {
-			if bytes.Equal(name, recName) {
+			if bytes.Equal(name, rootName) {
 				recDef = defID
 
 				return false

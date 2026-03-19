@@ -284,9 +284,32 @@ func (r *Resolver) GetReceiverContext(recID ast.NodeID) (ast.NodeID, uint64, []b
 		}
 	}
 
-	recBytes := r.source(recID)
+	startIdx := len(r.nameArena)
+
+	r.buildMemberName(recID)
+
+	recBytes := r.nameArena[startIdx:]
 
 	return rootDef, ast.HashBytes(recBytes), recBytes
+}
+
+func (r *Resolver) buildMemberName(id ast.NodeID) {
+	if id == ast.InvalidNode {
+		return
+	}
+
+	node := r.Tree.Nodes[id]
+
+	switch node.Kind {
+	case ast.KindIdent:
+		r.nameArena = append(r.nameArena, r.source(id)...)
+	case ast.KindMemberExpr:
+		r.buildMemberName(node.Left)
+
+		r.nameArena = append(r.nameArena, '.')
+
+		r.buildMemberName(node.Right)
+	}
 }
 
 func (r *Resolver) getTableReceiver(id ast.NodeID) (ast.NodeID, []byte) {
