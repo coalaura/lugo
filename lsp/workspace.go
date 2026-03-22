@@ -516,6 +516,32 @@ func (s *Server) updateDocument(uri string, source []byte) {
 	res.Reset()
 	res.Resolve(rootID)
 
+	doc.ExportedNode = ast.InvalidNode
+
+	if rootID != ast.InvalidNode && int(rootID) < len(tree.Nodes) {
+		root := tree.Nodes[rootID]
+		if root.Kind == ast.KindFile && root.Left != ast.InvalidNode {
+			block := tree.Nodes[root.Left]
+
+			for i := uint16(0); i < block.Count; i++ {
+				if block.Extra+uint32(i) >= uint32(len(tree.ExtraList)) {
+					continue
+				}
+
+				stmtID := tree.ExtraList[block.Extra+uint32(i)]
+				if int(stmtID) < len(tree.Nodes) {
+					stmt := tree.Nodes[stmtID]
+					if stmt.Kind == ast.KindReturn && stmt.Left != ast.InvalidNode {
+						exprList := tree.Nodes[stmt.Left]
+						if exprList.Count > 0 && exprList.Extra < uint32(len(tree.ExtraList)) {
+							doc.ExportedNode = tree.ExtraList[exprList.Extra]
+						}
+					}
+				}
+			}
+		}
+	}
+
 	fieldDefsByLocal := make(map[ast.NodeID][]int, len(res.FieldDefs))
 
 	for i, fd := range res.FieldDefs {
@@ -647,7 +673,78 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		}
 	}
 
-	for _, pf := range res.PendingFields {
+	if doc.ExportedNode != ast.InvalidNode {
+		modName := s.uriToModuleName(uri)
+		if modName == "" {
+			modName = "module"
+		}
+
+		modHash := ast.HashBytesConcat([]byte("module:"), nil, []byte(uri))
+
+		exportNode := doc.Tree.Nodes[doc.ExportedNode]
+		if exportNode.Kind == ast.KindIdent {
+			exportDef := doc.Resolver.References[doc.ExportedNode]
+			if exportDef != ast.InvalidNode {
+				for _, fd := range doc.Resolver.FieldDefs {
+					if fd.ReceiverDef == exportDef {
+						depth := getASTDepth(doc.Tree, fd.NodeID)
+
+						propName := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
+
+						s.setGlobalSymbol(GlobalKey{ReceiverHash: modHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, modName+"."+string(propName))
+					}
+				}
+			}
+		} else if exportNode.Kind == ast.KindTableExpr {
+			for i := uint16(0); i < exportNode.Count; i++ {
+				if exportNode.Extra+uint32(i) >= uint32(len(doc.Tree.ExtraList)) {
+					continue
+				}
+
+				fieldID := doc.Tree.ExtraList[exportNode.Extra+uint32(i)]
+				if int(fieldID) < len(doc.Tree.Nodes) {
+					field := doc.Tree.Nodes[fieldID]
+					if field.Kind == ast.KindRecordField {
+						key := doc.Tree.Nodes[field.Left]
+						if key.Kind == ast.KindIdent {
+							propHash := ast.HashBytes(doc.Source[key.Start:key.End])
+
+							depth := getASTDepth(doc.Tree, field.Left)
+
+							propName := doc.Source[key.Start:key.End]
+
+							s.setGlobalSymbol(GlobalKey{ReceiverHash: modHash, PropHash: propHash}, uri, field.Left, depth, modName+"."+string(propName))
+						}
+					}
+				}
+			}
+		}
+	}
+
+	for i, pf := range res.PendingFields {
+		var reqModName string
+
+		if pf.ReceiverDef != ast.InvalidNode {
+			valID := doc.getAssignedValue(pf.ReceiverDef)
+			reqModName = s.getRequireModName(doc, valID)
+		} else {
+			pID := doc.Tree.Nodes[pf.PropNodeID].Parent
+			if pID != ast.InvalidNode && int(pID) < len(doc.Tree.Nodes) {
+				pNode := doc.Tree.Nodes[pID]
+				if pNode.Kind == ast.KindMemberExpr || pNode.Kind == ast.KindMethodCall {
+					reqModName = s.getRequireModName(doc, pNode.Left)
+				}
+			}
+		}
+
+		if reqModName != "" {
+			targetDoc := s.resolveModule(uri, reqModName)
+			if targetDoc != nil {
+				modHash := ast.HashBytesConcat([]byte("module:"), nil, []byte(targetDoc.URI))
+				res.PendingFields[i].ReceiverHash = modHash
+			}
+		}
+
 		if res.References[pf.PropNodeID] == ast.InvalidNode {
 			var recHash uint64
 
@@ -831,10 +928,118 @@ func (s *Server) pathToURI(pathStr string) string {
 	return "file://" + filepath.ToSlash(cleanPath)
 }
 
+func (s *Server) uriToModuleName(uri string) string {
+	if strings.HasPrefix(uri, "std:///") {
+		name := uri[7:]
+
+		name = strings.TrimSuffix(name, ".lua")
+
+		return strings.ReplaceAll(name, "/", ".")
+	}
+
+	path := s.uriToPath(uri)
+	if path == "" {
+		return ""
+	}
+
+	var bestRoot string
+
+	if s.RootURI != "" {
+		rootPath := s.uriToPath(s.RootURI)
+		if strings.HasPrefix(strings.ToLower(path), strings.ToLower(rootPath)) {
+			bestRoot = rootPath
+		}
+	}
+
+	for _, lib := range s.LibraryPaths {
+		if strings.HasPrefix(strings.ToLower(path), strings.ToLower(lib)) {
+			if len(lib) > len(bestRoot) {
+				bestRoot = lib
+			}
+		}
+	}
+
+	if bestRoot != "" {
+		rel, err := filepath.Rel(bestRoot, path)
+		if err == nil {
+			rel = filepath.ToSlash(rel)
+
+			rel = strings.TrimSuffix(rel, ".lua")
+			rel = strings.TrimSuffix(rel, "/init")
+
+			return strings.ReplaceAll(rel, "/", ".")
+		}
+	}
+
+	base := filepath.Base(path)
+
+	base = strings.TrimSuffix(base, ".lua")
+
+	return base
+}
+
 func (s *Server) normalizeURI(uri string) string {
 	if !strings.HasPrefix(uri, "file://") {
 		return uri
 	}
 
 	return s.pathToURI(s.uriToPath(uri))
+}
+
+func (s *Server) resolveModule(currentURI string, modName string) *Document {
+	if modName == "" {
+		return nil
+	}
+
+	for _, d := range s.Documents {
+		if s.uriToModuleName(d.URI) == modName {
+			return d
+		}
+	}
+
+	modPath := strings.ReplaceAll(modName, ".", "/")
+
+	suffix1 := "/" + modPath + ".lua"
+	suffix2 := "/" + modPath + "/init.lua"
+
+	var (
+		bestMatch *Document
+		bestScore int
+	)
+
+	currentDir := ""
+	if currentURI != "" {
+		currentDir = filepath.ToSlash(filepath.Dir(s.uriToPath(currentURI)))
+	}
+
+	var rootDir string
+
+	if s.RootURI != "" {
+		rootDir = filepath.ToSlash(s.uriToPath(s.RootURI))
+	}
+
+	for uri, d := range s.Documents {
+		if strings.HasPrefix(uri, "std://") {
+			continue
+		}
+
+		path := filepath.ToSlash(s.uriToPath(uri))
+
+		if strings.HasSuffix(path, suffix1) || strings.HasSuffix(path, suffix2) {
+			score := 1
+
+			if currentDir != "" && strings.HasPrefix(path, currentDir) {
+				score = 3
+			} else if rootDir != "" && strings.HasPrefix(path, rootDir) {
+				score = 2
+			}
+
+			if score > bestScore {
+				bestScore = score
+				bestMatch = d
+			}
+		}
+	}
+
+	return bestMatch
 }

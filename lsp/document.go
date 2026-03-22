@@ -25,6 +25,7 @@ type Document struct {
 	ExportedGlobals    map[GlobalKey]ast.NodeID
 	ExportedGlobalDefs map[ast.NodeID]GlobalKey
 	IsMeta             bool
+	ExportedNode       ast.NodeID
 }
 
 func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {

@@ -755,7 +755,7 @@ func (s *Server) publishDiagnostics(uri string) {
 							inSpecifier  bool
 						)
 
-						for j := 0; j < len(fmtBytes); j++ {
+						for j := range fmtBytes {
 							c := fmtBytes[j]
 
 							if !inSpecifier {

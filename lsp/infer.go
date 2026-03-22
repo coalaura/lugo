@@ -541,6 +541,21 @@ func (doc *Document) inferCallExpr(node ast.Node) TypeSet {
 	}
 
 	if doc.Server != nil {
+		if doc.Tree.Nodes[funcIdentID].Kind == ast.KindIdent {
+			funcName := doc.Source[doc.Tree.Nodes[funcIdentID].Start:doc.Tree.Nodes[funcIdentID].End]
+			if bytes.Equal(funcName, []byte("require")) && node.Count > 0 && node.Extra < uint32(len(doc.Tree.ExtraList)) {
+				argID := doc.Tree.ExtraList[node.Extra]
+
+				res, ok := doc.evalNode(argID, 0)
+				if ok && res.kind == ast.KindString {
+					targetDoc := doc.Server.resolveModule(doc.URI, res.str)
+					if targetDoc != nil && targetDoc.ExportedNode != ast.InvalidNode {
+						return targetDoc.InferType(targetDoc.ExportedNode)
+					}
+				}
+			}
+		}
+
 		ctx := doc.Server.resolveSymbolNode(doc.URI, doc, funcIdentID)
 		if ctx != nil && ctx.TargetDoc != nil && ctx.TargetDefID != ast.InvalidNode {
 			luadoc := parseLuaDoc(ctx.TargetDoc.getCommentsAbove(ctx.TargetDefID))

@@ -527,6 +527,20 @@ func (s *Server) handleCompletion(req Request) {
 			return true
 		})
 
+		var modHash uint64
+
+		if recDef != ast.InvalidNode {
+			valID := doc.getAssignedValue(recDef)
+
+			modName := s.getRequireModName(doc, valID)
+			if modName != "" {
+				targetDoc := s.resolveModule(uri, modName)
+				if targetDoc != nil {
+					modHash = ast.HashBytesConcat([]byte("module:"), nil, []byte(targetDoc.URI))
+				}
+			}
+		}
+
 		for _, fd := range doc.Resolver.FieldDefs {
 			if (recDef != ast.InvalidNode && fd.ReceiverDef == recDef) || (recDef == ast.InvalidNode && fd.ReceiverHash == recHash) {
 				node := doc.Tree.Nodes[fd.NodeID]
@@ -552,6 +566,10 @@ func (s *Server) handleCompletion(req Request) {
 			validRecs[currRec] = true
 
 			currRec = s.getGlobalAlias(currRec)
+		}
+
+		if modHash != 0 {
+			validRecs[modHash] = true
 		}
 
 		for key, sym := range s.GlobalIndex {

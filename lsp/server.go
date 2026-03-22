@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -422,4 +423,42 @@ func (s *Server) handleExit(req Request) {
 	s.Log.Println("Received exit notification, terminating.")
 
 	os.Exit(0)
+}
+
+func (s *Server) getRequireModName(doc *Document, callID ast.NodeID) string {
+	if callID == ast.InvalidNode || int(callID) >= len(doc.Tree.Nodes) {
+		return ""
+	}
+
+	node := doc.Tree.Nodes[callID]
+	if node.Kind != ast.KindCallExpr {
+		return ""
+	}
+
+	if int(node.Left) >= len(doc.Tree.Nodes) {
+		return ""
+	}
+
+	funcNode := doc.Tree.Nodes[node.Left]
+	if funcNode.Kind != ast.KindIdent {
+		return ""
+	}
+
+	funcName := doc.Source[funcNode.Start:funcNode.End]
+	if !bytes.Equal(funcName, []byte("require")) {
+		return ""
+	}
+
+	if node.Count == 0 || node.Extra >= uint32(len(doc.Tree.ExtraList)) {
+		return ""
+	}
+
+	argID := doc.Tree.ExtraList[node.Extra]
+
+	res, ok := doc.evalNode(argID, 0)
+	if ok && res.kind == ast.KindString {
+		return res.str
+	}
+
+	return ""
 }

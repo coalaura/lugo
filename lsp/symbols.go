@@ -622,6 +622,7 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 
 				for curr != ast.InvalidNode && int(curr) < len(doc.Tree.Nodes) {
 					n := doc.Tree.Nodes[curr]
+
 					if n.Kind == ast.KindIdent {
 						recDef = doc.Resolver.References[curr]
 
@@ -630,6 +631,22 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 						curr = n.Left
 					} else {
 						break
+					}
+				}
+
+				var modName string
+
+				if recDef != ast.InvalidNode {
+					valID := doc.getAssignedValue(recDef)
+					modName = s.getRequireModName(doc, valID)
+				} else {
+					modName = s.getRequireModName(doc, recID)
+				}
+
+				if modName != "" {
+					targetDoc := s.resolveModule(uri, modName)
+					if targetDoc != nil {
+						gKey.ReceiverHash = ast.HashBytesConcat([]byte("module:"), nil, []byte(targetDoc.URI))
 					}
 				}
 			}
@@ -648,7 +665,23 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 		gKey = GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes(identBytes)}
 	}
 
-	isGlobal := defID == ast.InvalidNode && recDef == ast.InvalidNode && (!isProp || gKey.ReceiverHash != 0)
+	var isModuleAccess bool
+
+	if gKey.ReceiverHash != 0 {
+		if recDef != ast.InvalidNode {
+			valID := doc.getAssignedValue(recDef)
+
+			if s.getRequireModName(doc, valID) != "" {
+				isModuleAccess = true
+			}
+		} else if isProp {
+			if s.getRequireModName(doc, doc.Tree.Nodes[parentID].Left) != "" {
+				isModuleAccess = true
+			}
+		}
+	}
+
+	isGlobal := (defID == ast.InvalidNode && recDef == ast.InvalidNode && (!isProp || gKey.ReceiverHash != 0)) || isModuleAccess
 
 	ctx := &SymbolContext{
 		TargetDoc:   doc,
