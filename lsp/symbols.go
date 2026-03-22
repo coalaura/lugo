@@ -147,7 +147,10 @@ func (s *Server) handleDocumentSymbol(req Request) {
 		return
 	}
 
-	var walkTable func(tableID ast.NodeID) []DocumentSymbol
+	var (
+		walkTable func(tableID ast.NodeID) []DocumentSymbol
+		walk      func(nodeID ast.NodeID) []DocumentSymbol
+	)
 
 	walkTable = func(tableID ast.NodeID) []DocumentSymbol {
 		node := doc.Tree.Nodes[tableID]
@@ -174,10 +177,12 @@ func (s *Server) handleDocumentSymbol(req Request) {
 				switch valNode.Kind {
 				case ast.KindFunctionExpr:
 					kind = SymbolKindMethod
+					children = walk(valNode.Right)
 				case ast.KindTableExpr:
 					kind = SymbolKindClass
-
 					children = walkTable(fieldNode.Right)
+				case ast.KindCallExpr, ast.KindMethodCall:
+					children = walk(fieldNode.Right)
 				}
 
 				syms = append(syms, DocumentSymbol{
@@ -192,8 +197,6 @@ func (s *Server) handleDocumentSymbol(req Request) {
 
 		return syms
 	}
-
-	var walk func(nodeID ast.NodeID) []DocumentSymbol
 
 	walk = func(nodeID ast.NodeID) []DocumentSymbol {
 		if nodeID == ast.InvalidNode {
@@ -220,9 +223,17 @@ func (s *Server) handleDocumentSymbol(req Request) {
 			}
 
 			kind := SymbolKindFunction
-
 			if nameNode.Kind == ast.KindMethodName {
 				kind = SymbolKindMethod
+			}
+
+			var children []DocumentSymbol
+
+			if node.Right != ast.InvalidNode {
+				funcExpr := doc.Tree.Nodes[node.Right]
+				if funcExpr.Kind == ast.KindFunctionExpr {
+					children = walk(funcExpr.Right)
+				}
 			}
 
 			syms = append(syms, DocumentSymbol{
@@ -230,6 +241,7 @@ func (s *Server) handleDocumentSymbol(req Request) {
 				Kind:           kind,
 				Range:          getNodeRange(doc.Tree, nodeID),
 				SelectionRange: getNodeRange(doc.Tree, node.Left),
+				Children:       children,
 			})
 		case ast.KindLocalAssign, ast.KindAssign:
 			lhsList := doc.Tree.Nodes[node.Left]
@@ -257,14 +269,16 @@ func (s *Server) handleDocumentSymbol(req Request) {
 						name = "<error>"
 					}
 
-					if rNode.Kind == ast.KindFunctionExpr {
+					switch rNode.Kind {
+					case ast.KindFunctionExpr:
 						syms = append(syms, DocumentSymbol{
 							Name:           name,
 							Kind:           SymbolKindFunction,
 							Range:          getNodeRange(doc.Tree, nodeID),
 							SelectionRange: getNodeRange(doc.Tree, lID),
+							Children:       walk(rNode.Right),
 						})
-					} else if rNode.Kind == ast.KindTableExpr {
+					case ast.KindTableExpr:
 						syms = append(syms, DocumentSymbol{
 							Name:           name,
 							Kind:           SymbolKindClass,
@@ -272,16 +286,183 @@ func (s *Server) handleDocumentSymbol(req Request) {
 							SelectionRange: getNodeRange(doc.Tree, lID),
 							Children:       walkTable(rID),
 						})
-					} else if node.Kind == ast.KindLocalAssign {
-						syms = append(syms, DocumentSymbol{
-							Name:           name,
-							Kind:           SymbolKindVariable,
-							Range:          getNodeRange(doc.Tree, lID),
-							SelectionRange: getNodeRange(doc.Tree, lID),
-						})
+					default:
+						if node.Kind == ast.KindLocalAssign {
+							syms = append(syms, DocumentSymbol{
+								Name:           name,
+								Kind:           SymbolKindVariable,
+								Range:          getNodeRange(doc.Tree, lID),
+								SelectionRange: getNodeRange(doc.Tree, lID),
+							})
+						}
+
+						if rNode.Kind == ast.KindCallExpr || rNode.Kind == ast.KindMethodCall {
+							syms = append(syms, walk(rID)...)
+						}
 					}
 				}
 			}
+		case ast.KindCallExpr, ast.KindMethodCall:
+			var (
+				funcName    string
+				funcIdentID ast.NodeID
+			)
+
+			if node.Kind == ast.KindMethodCall {
+				funcIdentID = node.Right
+				if int(node.Left) < len(doc.Tree.Nodes) && int(node.Right) < len(doc.Tree.Nodes) {
+					leftNode := doc.Tree.Nodes[node.Left]
+					rightNode := doc.Tree.Nodes[node.Right]
+
+					if leftNode.Start <= rightNode.End && rightNode.End <= uint32(len(doc.Source)) {
+						funcName = ast.String(doc.Source[leftNode.Start:rightNode.End])
+					}
+				}
+			} else {
+				if int(node.Left) < len(doc.Tree.Nodes) {
+					leftNode := doc.Tree.Nodes[node.Left]
+					if leftNode.Start <= leftNode.End && leftNode.End <= uint32(len(doc.Source)) {
+						funcName = ast.String(doc.Source[leftNode.Start:leftNode.End])
+					}
+
+					if leftNode.Kind == ast.KindMemberExpr {
+						funcIdentID = leftNode.Right
+					} else {
+						funcIdentID = node.Left
+					}
+				}
+			}
+
+			var (
+				targetFuncID ast.NodeID = ast.InvalidNode
+				targetDoc    *Document
+				paramOffset  int
+			)
+
+			if funcIdentID != ast.InvalidNode && int(funcIdentID) < len(doc.Tree.Nodes) {
+				ctx := s.resolveSymbolNode(uri, doc, funcIdentID)
+				if ctx != nil && ctx.TargetDefID != ast.InvalidNode && ctx.TargetDoc != nil {
+					valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
+					if valID != ast.InvalidNode && int(valID) < len(ctx.TargetDoc.Tree.Nodes) {
+						if ctx.TargetDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+							targetFuncID = valID
+							targetDoc = ctx.TargetDoc
+
+							hasImplicitSelfCall := node.Kind == ast.KindMethodCall
+
+							var hasImplicitSelfDef bool
+
+							pDefID := ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Parent
+							if pDefID != ast.InvalidNode && int(pDefID) < len(ctx.TargetDoc.Tree.Nodes) {
+								if ctx.TargetDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
+									hasImplicitSelfDef = true
+								}
+							}
+
+							if hasImplicitSelfCall && !hasImplicitSelfDef {
+								paramOffset = 1
+							} else if !hasImplicitSelfCall && hasImplicitSelfDef {
+								paramOffset = -1
+							}
+						}
+					}
+				}
+			}
+
+			for i := uint16(0); i < node.Count; i++ {
+				argID := doc.Tree.ExtraList[node.Extra+uint32(i)]
+				argNode := doc.Tree.Nodes[argID]
+
+				switch argNode.Kind {
+				case ast.KindFunctionExpr:
+					paramName := "callback"
+
+					// Attempt to map the argument back to the function's parameter list
+					if targetFuncID != ast.InvalidNode && targetDoc != nil {
+						targetFuncNode := targetDoc.Tree.Nodes[targetFuncID]
+						paramIdx := int(i) + paramOffset
+						if paramIdx >= 0 && paramIdx < int(targetFuncNode.Count) {
+							if targetFuncNode.Extra+uint32(paramIdx) < uint32(len(targetDoc.Tree.ExtraList)) {
+								pID := targetDoc.Tree.ExtraList[targetFuncNode.Extra+uint32(paramIdx)]
+								if int(pID) < len(targetDoc.Tree.Nodes) {
+									pNode := targetDoc.Tree.Nodes[pID]
+									if pNode.Start <= pNode.End && pNode.End <= uint32(len(targetDoc.Source)) {
+										pNameStr := ast.String(targetDoc.Source[pNode.Start:pNode.End])
+										if pNameStr != "" && pNameStr != "..." {
+											paramName = pNameStr
+										}
+									}
+								}
+							}
+						}
+					}
+
+					name := "(anonymous function)"
+					if funcName != "" {
+						name = paramName + " in " + funcName
+					}
+
+					var selRange Range
+
+					if argNode.Start+8 <= argNode.End {
+						selRange = getRange(doc.Tree, argNode.Start, argNode.Start+8)
+					} else {
+						selRange = getNodeRange(doc.Tree, argID)
+					}
+
+					syms = append(syms, DocumentSymbol{
+						Name:           name,
+						Kind:           SymbolKindFunction,
+						Range:          getNodeRange(doc.Tree, argID),
+						SelectionRange: selRange,
+						Children:       walk(argNode.Right),
+					})
+				case ast.KindCallExpr, ast.KindMethodCall:
+					syms = append(syms, walk(argID)...)
+				case ast.KindTableExpr:
+					syms = append(syms, walkTable(argID)...)
+				}
+			}
+		case ast.KindReturn:
+			if node.Left != ast.InvalidNode {
+				exprList := doc.Tree.Nodes[node.Left]
+
+				for i := uint16(0); i < exprList.Count; i++ {
+					exprID := doc.Tree.ExtraList[exprList.Extra+uint32(i)]
+					exprNode := doc.Tree.Nodes[exprID]
+
+					switch exprNode.Kind {
+					case ast.KindFunctionExpr:
+						var selRange Range
+
+						if exprNode.Start+8 <= exprNode.End {
+							selRange = getRange(doc.Tree, exprNode.Start, exprNode.Start+8)
+						} else {
+							selRange = getNodeRange(doc.Tree, exprID)
+						}
+
+						syms = append(syms, DocumentSymbol{
+							Name:           "(return function)",
+							Kind:           SymbolKindFunction,
+							Range:          getNodeRange(doc.Tree, exprID),
+							SelectionRange: selRange,
+							Children:       walk(exprNode.Right),
+						})
+					case ast.KindCallExpr, ast.KindMethodCall:
+						syms = append(syms, walk(exprID)...)
+					}
+				}
+			}
+		case ast.KindIf:
+			syms = append(syms, walk(node.Right)...)
+
+			for i := uint16(0); i < node.Count; i++ {
+				syms = append(syms, walk(doc.Tree.ExtraList[node.Extra+uint32(i)])...)
+			}
+		case ast.KindElseIf, ast.KindWhile, ast.KindForIn, ast.KindForNum:
+			syms = append(syms, walk(node.Right)...)
+		case ast.KindElse, ast.KindRepeat, ast.KindDo:
+			syms = append(syms, walk(node.Left)...)
 		}
 
 		return syms
