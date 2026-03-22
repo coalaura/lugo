@@ -55,6 +55,7 @@ Lugo performs workspace-wide analysis to catch bugs before runtime:
 * **Redundant Code:** Warns about empty blocks (`do end`) and assigning a variable to itself (with quick-fixes to remove them).
 * **Sanity Checks:** Detects duplicate fields in table literals and unbalanced assignments (assigning fewer or more values than variables).
 * **Type Checking:** Optionally catches strictly invalid operations like attempting to call a number or index a non-table.
+* **Format String Validation:** Warns when `string.format` is called with an incorrect number of arguments.
 * **Deprecation:** Warns when using symbols marked with `@deprecated`.
 
 ## Installation
@@ -112,6 +113,7 @@ lspconfig.lugo.setup({
 		diagDuplicateLocal = true,
 		diagSelfAssignment = true,
 		diagEmptyBlock = true,
+		diagFormatString = true,
 		diagTypeCheck = false, -- Set to true if using strict LuaCATS annotations
 
 		-- Inlay Hints
@@ -154,6 +156,7 @@ You can configure Lugo via your VS Code `settings.json` (also available via the 
 * `lugo.diagnostics.duplicateLocal`: Toggle warnings when a local variable is defined twice in the exact same scope.
 * `lugo.diagnostics.selfAssignment`: Toggle warnings when assigning a variable to itself.
 * `lugo.diagnostics.emptyBlock`: Toggle hints for empty blocks (e.g., `do end`).
+* `lugo.diagnostics.formatString`: Toggle diagnostics for `string.format` argument counts.
 * `lugo.diagnostics.typeCheck`: Toggle strict type checking for operations like calling numbers or indexing non-tables.
 * `lugo.diagnostics.deprecated`: Toggle warnings for usage of `@deprecated` symbols.
 
