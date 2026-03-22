@@ -68,6 +68,7 @@ type Server struct {
 	DiagDuplicateLocal       bool
 	DiagSelfAssignment       bool
 	DiagEmptyBlock           bool
+	DiagFormatString         bool
 	DiagTypeCheck            bool
 
 	// Inlay Hints
@@ -175,6 +176,7 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 	setCfg(&s.DiagDuplicateLocal, opts.DiagDuplicateLocal, &needsRepublish)
 	setCfg(&s.DiagSelfAssignment, opts.DiagSelfAssignment, &needsRepublish)
 	setCfg(&s.DiagEmptyBlock, opts.DiagEmptyBlock, &needsRepublish)
+	setCfg(&s.DiagFormatString, opts.DiagFormatString, &needsRepublish)
 	setCfg(&s.DiagTypeCheck, opts.DiagTypeCheck, &needsRepublish)
 
 	setCfg(&s.InlayParamHints, opts.InlayParamHints, nil)

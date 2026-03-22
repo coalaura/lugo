@@ -110,15 +110,18 @@ type InitializationOptions struct {
 	DiagDuplicateLocal       bool `json:"diagDuplicateLocal"`
 	DiagSelfAssignment       bool `json:"diagSelfAssignment"`
 	DiagEmptyBlock           bool `json:"diagEmptyBlock"`
+	DiagFormatString         bool `json:"diagFormatString"`
 	DiagTypeCheck            bool `json:"diagTypeCheck"`
-	InlayParamHints          bool `json:"inlayParamHints"`
-	InlaySuppressMatch       bool `json:"inlaySuppressMatch"`
-	InlayImplicitSelf        bool `json:"inlayImplicitSelf"`
-	FeatureDocHighlight      bool `json:"featureDocHighlight"`
-	FeatureHoverEval         bool `json:"featureHoverEval"`
-	FeatureCodeLens          bool `json:"featureCodeLens"`
-	FeatureFormatting        bool `json:"featureFormatting"`
-	FormatOpinionated        bool `json:"formatOpinionated"`
+
+	InlayParamHints    bool `json:"inlayParamHints"`
+	InlaySuppressMatch bool `json:"inlaySuppressMatch"`
+	InlayImplicitSelf  bool `json:"inlayImplicitSelf"`
+
+	FeatureDocHighlight bool `json:"featureDocHighlight"`
+	FeatureHoverEval    bool `json:"featureHoverEval"`
+	FeatureCodeLens     bool `json:"featureCodeLens"`
+	FeatureFormatting   bool `json:"featureFormatting"`
+	FormatOpinionated   bool `json:"formatOpinionated"`
 }
 
 type ServerCapabilities struct {

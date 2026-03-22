@@ -197,12 +197,19 @@
                         "markdownDescription": "Enable hints for empty blocks (e.g., `do end`).",
                         "order": 19
                     },
+                    "lugo.diagnostics.formatString": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for `string.format` argument counts.",
+                        "order": 20
+                    },
                     "lugo.diagnostics.typeCheck": {
                         "type": "boolean",
                         "default": false,
                         "scope": "resource",
                         "markdownDescription": "Enable strict type checking for definitely-invalid operations (calling numbers, indexing nil, etc.). **Warning:** Lua is highly dynamic; this will produce false positives unless your codebase uses comprehensive LuaCATS `@type` annotations.",
-                        "order": 20
+                        "order": 21
                     }
                 }
             },
@@ -215,56 +222,56 @@
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable inline parameter name hints for function and method calls.",
-                        "order": 21
+                        "order": 22
                     },
                     "lugo.inlayHints.suppressWhenArgumentMatchesName": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Suppress parameter name hints when the argument name exactly matches the parameter name (e.g., avoiding `pSource: pSource`).",
-                        "order": 22
+                        "order": 23
                     },
                     "lugo.inlayHints.implicitSelf": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable inline `self` hints for method definitions using the colon syntax.",
-                        "order": 23
+                        "order": 24
                     },
                     "lugo.features.documentHighlight": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable document highlights for variables and function/method calls.",
-                        "order": 24
+                        "order": 25
                     },
                     "lugo.features.hoverEvaluation": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Evaluate and display the result of constant expressions on hover (e.g., `1 + 2` suggests `3`).",
-                        "order": 25
+                        "order": 26
                     },
                     "lugo.features.codeLens": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable CodeLens annotations (e.g., reference counts) above function definitions.",
-                        "order": 26
+                        "order": 27
                     },
                     "lugo.features.formatting": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable the built-in Lua formatter for inline format fixing and document formatting.",
-                        "order": 27
+                        "order": 28
                     },
                     "lugo.features.formatOpinionated": {
                         "type": "boolean",
                         "default": false,
                         "scope": "resource",
                         "markdownDescription": "Apply opinionated formatting tweaks (e.g., forcing blank lines between unrelated statements, before returns).",
-                        "order": 28
+                        "order": 29
                     }
                 }
             }

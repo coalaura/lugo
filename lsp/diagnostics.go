@@ -670,6 +670,123 @@ func (s *Server) publishDiagnostics(uri string) {
 				})
 			}
 		}
+
+		// Format string validation
+		if s.DiagFormatString && (node.Kind == ast.KindCallExpr || node.Kind == ast.KindMethodCall) {
+			var (
+				isFormatCall     bool
+				formatStringNode ast.NodeID
+				numArgsProvided  int
+			)
+
+			switch node.Kind {
+			case ast.KindCallExpr:
+				if int(node.Left) < len(doc.Tree.Nodes) {
+					leftNode := doc.Tree.Nodes[node.Left]
+					if leftNode.Kind == ast.KindMemberExpr {
+						recID := leftNode.Left
+						propID := leftNode.Right
+						if int(recID) < len(doc.Tree.Nodes) && int(propID) < len(doc.Tree.Nodes) {
+							recNode := doc.Tree.Nodes[recID]
+							propNode := doc.Tree.Nodes[propID]
+
+							if recNode.Start <= recNode.End && recNode.End <= uint32(len(doc.Source)) &&
+								propNode.Start <= propNode.End && propNode.End <= uint32(len(doc.Source)) {
+
+								recBytes := doc.Source[recNode.Start:recNode.End]
+								propBytes := doc.Source[propNode.Start:propNode.End]
+
+								if bytes.Equal(recBytes, []byte("string")) && bytes.Equal(propBytes, []byte("format")) {
+									isFormatCall = true
+
+									if node.Count > 0 {
+										formatStringNode = doc.Tree.ExtraList[node.Extra]
+										numArgsProvided = int(node.Count) - 1
+									}
+								}
+							}
+						}
+					}
+				}
+			case ast.KindMethodCall:
+				if int(node.Left) < len(doc.Tree.Nodes) && int(node.Right) < len(doc.Tree.Nodes) {
+					recNode := doc.Tree.Nodes[node.Left]
+					propNode := doc.Tree.Nodes[node.Right]
+
+					if propNode.Start <= propNode.End && propNode.End <= uint32(len(doc.Source)) {
+						propBytes := doc.Source[propNode.Start:propNode.End]
+
+						if recNode.Kind == ast.KindString && bytes.Equal(propBytes, []byte("format")) {
+							isFormatCall = true
+
+							formatStringNode = node.Left
+							numArgsProvided = int(node.Count)
+						}
+					}
+				}
+			}
+
+			if isFormatCall && formatStringNode != ast.InvalidNode && int(formatStringNode) < len(doc.Tree.Nodes) {
+				fmtNode := doc.Tree.Nodes[formatStringNode]
+				if fmtNode.Kind == ast.KindString && fmtNode.Start <= fmtNode.End && fmtNode.End <= uint32(len(doc.Source)) {
+					var hasDynamicArgs bool
+
+					for j := uint16(0); j < node.Count; j++ {
+						if node.Extra+uint32(j) >= uint32(len(doc.Tree.ExtraList)) {
+							continue
+						}
+
+						argID := doc.Tree.ExtraList[node.Extra+uint32(j)]
+						if int(argID) < len(doc.Tree.Nodes) {
+							argKind := doc.Tree.Nodes[argID].Kind
+							if argKind == ast.KindVararg || argKind == ast.KindCallExpr || argKind == ast.KindMethodCall {
+								hasDynamicArgs = true
+
+								break
+							}
+						}
+					}
+
+					if !hasDynamicArgs {
+						fmtBytes := doc.Source[fmtNode.Start:fmtNode.End]
+
+						var (
+							expectedArgs int
+							inSpecifier  bool
+						)
+
+						for j := 0; j < len(fmtBytes); j++ {
+							c := fmtBytes[j]
+
+							if !inSpecifier {
+								if c == '%' {
+									inSpecifier = true
+								}
+							} else {
+								if c == '%' {
+									inSpecifier = false // %% escaped
+								} else if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+									expectedArgs++
+
+									inSpecifier = false
+								}
+							}
+						}
+
+						if expectedArgs != numArgsProvided {
+							msg := fmt.Sprintf("Format string expects %d argument(s), but got %d.", expectedArgs, numArgsProvided)
+
+							s.diagBuf = append(s.diagBuf, Diagnostic{
+								Range:    getNodeRange(doc.Tree, nodeID),
+								Severity: SeverityWarning,
+								Code:     "format-string",
+								Message:  msg,
+							})
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// 9. Duplicate Locals

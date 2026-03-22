@@ -66,6 +66,7 @@ function buildInitializationOptions() {
 		diagDuplicateLocal: lugoConfig.get("diagnostics.duplicateLocal") !== false,
 		diagSelfAssignment: lugoConfig.get("diagnostics.selfAssignment") !== false,
 		diagEmptyBlock: lugoConfig.get("diagnostics.emptyBlock") !== false,
+		diagFormatString: lugoConfig.get("diagnostics.formatString") !== false,
 		diagTypeCheck: lugoConfig.get("diagnostics.typeCheck") === true,
 
 		inlayParamHints: lugoConfig.get("inlayHints.parameterNames") !== false,
