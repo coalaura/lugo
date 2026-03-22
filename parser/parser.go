@@ -727,7 +727,7 @@ func (p *Parser) parseFunctionStmt() ast.NodeID {
 	for p.curr.Kind == token.Dot {
 		p.nextToken()
 
-		if p.curr.Kind != token.Ident {
+		if !p.isIdentOrKeyword() {
 			p.error("expected identifier")
 
 			break
@@ -746,7 +746,7 @@ func (p *Parser) parseFunctionStmt() ast.NodeID {
 	if p.curr.Kind == token.Colon {
 		p.nextToken()
 
-		if p.curr.Kind != token.Ident {
+		if !p.isIdentOrKeyword() {
 			p.error("expected identifier")
 		} else {
 			right := p.tree.AddNode(ast.Node{Kind: ast.KindIdent, Start: p.curr.Start, End: p.curr.End})
@@ -1006,7 +1006,7 @@ func (p *Parser) parseInfix(left ast.NodeID) ast.NodeID {
 	case token.Dot:
 		p.nextToken()
 
-		if p.curr.Kind != token.Ident {
+		if !p.isIdentOrKeyword() {
 			p.error("expected identifier after '.'")
 
 			return left
@@ -1040,12 +1040,11 @@ func (p *Parser) parseInfix(left ast.NodeID) ast.NodeID {
 			Left: left, Right: right,
 		})
 	case token.LParen, token.String, token.LBrace:
-
 		return p.parseCallArgs(left, opKind)
 	case token.Colon:
 		p.nextToken()
 
-		if p.curr.Kind != token.Ident {
+		if !p.isIdentOrKeyword() {
 			p.error("expected method name")
 
 			return left
@@ -1113,7 +1112,7 @@ func (p *Parser) parseTableConstructor() ast.NodeID {
 				Kind: ast.KindIndexField, Left: key, Right: val,
 				Start: fieldStart, End: p.prev.End,
 			})
-		} else if p.curr.Kind == token.Ident && p.peek.Kind == token.Assign {
+		} else if p.isIdentOrKeyword() && p.peek.Kind == token.Assign {
 			fieldStart := p.curr.Start
 
 			key := p.tree.AddNode(ast.Node{Kind: ast.KindIdent, Start: p.curr.Start, End: p.curr.End})
@@ -1291,4 +1290,8 @@ func (p *Parser) flushListStack(stackStart int) (extraStart uint32, count uint16
 	p.listStack = p.listStack[:stackStart]
 
 	return extraStart, count
+}
+
+func (p *Parser) isIdentOrKeyword() bool {
+	return p.curr.Kind == token.Ident || (p.curr.Kind >= token.And && p.curr.Kind <= token.While)
 }

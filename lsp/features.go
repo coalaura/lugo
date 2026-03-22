@@ -1161,120 +1161,132 @@ func (s *Server) handleSemanticTokensFull(req Request) {
 	for i := 1; i < len(doc.Tree.Nodes); i++ {
 		node := doc.Tree.Nodes[i]
 
-		if node.Kind != ast.KindIdent {
-			continue
-		}
-
-		identBytes := doc.Source[node.Start:node.End]
-
 		var (
-			tokenType uint32 = 0 // 0: variable
+			tokenType uint32 = 0xFFFFFFFF
 			modifiers uint32 = 0
 		)
 
-		defID := doc.Resolver.References[i]
-		isDecl := ast.NodeID(i) == defID
+		switch node.Kind {
+		case ast.KindNumber:
+			tokenType = 6
+		case ast.KindString:
+			tokenType = 7
+		case ast.KindTrue, ast.KindFalse, ast.KindNil:
+			tokenType = 8
+		case ast.KindIdent:
+			tokenType = 0
 
-		if isDecl {
-			modifiers |= 1 << 0 // declaration
-		}
+			identBytes := doc.Source[node.Start:node.End]
 
-		if defID == ast.InvalidNode {
-			if s.isKnownGlobal(identBytes) {
-				modifiers |= 1 << 3 // defaultLibrary
+			defID := doc.Resolver.References[i]
+			isDecl := ast.NodeID(i) == defID
+
+			if isDecl {
+				modifiers |= 1 << 0 // declaration
 			}
-		} else {
-			pNode := doc.Tree.Nodes[defID]
-			if pNode.Parent != ast.InvalidNode {
-				parentOfDef := doc.Tree.Nodes[pNode.Parent]
-				if parentOfDef.Kind == ast.KindFunctionExpr || parentOfDef.Kind == ast.KindFunctionStmt {
-					if parentOfDef.Left != defID && parentOfDef.Right != defID {
-						tokenType = 2 // parameter
-					}
-				}
-			}
-
-			if ast.Attr(doc.Tree.Nodes[defID].Extra) != ast.AttrNone {
-				parentOfDef := doc.Tree.Nodes[doc.Tree.Nodes[defID].Parent]
-				if parentOfDef.Kind == ast.KindNameList {
-					modifiers |= 1 << 1 // readonly
-				}
-			}
-		}
-
-		parentID := node.Parent
-		if parentID != ast.InvalidNode {
-			pNode := doc.Tree.Nodes[parentID]
-
-			if pNode.Kind == ast.KindMemberExpr && pNode.Right == ast.NodeID(i) {
-				tokenType = 1 // property
-			} else if pNode.Kind == ast.KindMethodCall && pNode.Right == ast.NodeID(i) {
-				tokenType = 4 // method
-			} else if pNode.Kind == ast.KindMethodName && pNode.Right == ast.NodeID(i) {
-				tokenType = 4 // method
-			} else if pNode.Kind == ast.KindRecordField && pNode.Left == ast.NodeID(i) {
-				tokenType = 1 // property
-			}
-		}
-
-		if tokenType == 0 || tokenType == 1 {
-			targetDoc := doc
-			targetDef := defID
 
 			if defID == ast.InvalidNode {
-				hash := ast.HashBytes(identBytes)
-				recHash := uint64(0)
 
-				if tokenType == 1 && parentID != ast.InvalidNode {
-					pNode := doc.Tree.Nodes[parentID]
-					recID := pNode.Left
-					recBytes := doc.Source[doc.Tree.Nodes[recID].Start:doc.Tree.Nodes[recID].End]
-					recHash = ast.HashBytes(recBytes)
+				if s.isKnownGlobal(identBytes) {
+					modifiers |= 1 << 3 // defaultLibrary
+				}
+			} else {
+				pNode := doc.Tree.Nodes[defID]
+				if pNode.Parent != ast.InvalidNode {
+					parentOfDef := doc.Tree.Nodes[pNode.Parent]
+					if parentOfDef.Kind == ast.KindFunctionExpr || parentOfDef.Kind == ast.KindFunctionStmt {
+						if parentOfDef.Left != defID && parentOfDef.Right != defID {
+							tokenType = 2 // parameter
+						}
+					}
 				}
 
-				if sym, ok := s.getGlobalSymbol(recHash, hash); ok {
-					if gDoc, ok := s.Documents[sym.URI]; ok {
-						targetDoc = gDoc
-						targetDef = sym.NodeID
+				if ast.Attr(doc.Tree.Nodes[defID].Extra) != ast.AttrNone {
+					parentOfDef := doc.Tree.Nodes[doc.Tree.Nodes[defID].Parent]
+					if parentOfDef.Kind == ast.KindNameList {
+						modifiers |= 1 << 1 // readonly
 					}
 				}
 			}
 
-			if targetDef != ast.InvalidNode {
-				valID := targetDoc.getAssignedValue(targetDef)
-				if valID != ast.InvalidNode {
-					vNode := targetDoc.Tree.Nodes[valID]
-					switch vNode.Kind {
-					case ast.KindFunctionExpr:
-						if tokenType == 1 {
-							tokenType = 4 // method
-						} else {
-							tokenType = 3 // function
-						}
-					case ast.KindTableExpr:
-						tokenType = 5 // class
+			parentID := node.Parent
+			if parentID != ast.InvalidNode {
+				pNode := doc.Tree.Nodes[parentID]
+
+				if pNode.Kind == ast.KindMemberExpr && pNode.Right == ast.NodeID(i) {
+					tokenType = 1 // property
+				} else if pNode.Kind == ast.KindMethodCall && pNode.Right == ast.NodeID(i) {
+					tokenType = 4 // method
+				} else if pNode.Kind == ast.KindMethodName && pNode.Right == ast.NodeID(i) {
+					tokenType = 4 // method
+				} else if pNode.Kind == ast.KindRecordField && pNode.Left == ast.NodeID(i) {
+					tokenType = 1 // property
+				}
+			}
+
+			if tokenType == 0 || tokenType == 1 {
+				targetDoc := doc
+				targetDef := defID
+
+				if defID == ast.InvalidNode {
+					hash := ast.HashBytes(identBytes)
+					recHash := uint64(0)
+
+					if tokenType == 1 && parentID != ast.InvalidNode {
+						pNode := doc.Tree.Nodes[parentID]
+						recID := pNode.Left
+						recBytes := doc.Source[doc.Tree.Nodes[recID].Start:doc.Tree.Nodes[recID].End]
+						recHash = ast.HashBytes(recBytes)
 					}
-				} else {
-					pID := targetDoc.Tree.Nodes[targetDef].Parent
-					if pID != ast.InvalidNode {
-						pNode := targetDoc.Tree.Nodes[pID]
-						if pNode.Kind == ast.KindFunctionStmt || pNode.Kind == ast.KindLocalFunction {
+
+					if sym, ok := s.getGlobalSymbol(recHash, hash); ok {
+						if gDoc, ok := s.Documents[sym.URI]; ok {
+							targetDoc = gDoc
+							targetDef = sym.NodeID
+						}
+					}
+				}
+
+				if targetDef != ast.InvalidNode {
+					valID := targetDoc.getAssignedValue(targetDef)
+					if valID != ast.InvalidNode {
+						vNode := targetDoc.Tree.Nodes[valID]
+						switch vNode.Kind {
+						case ast.KindFunctionExpr:
 							if tokenType == 1 {
 								tokenType = 4 // method
 							} else {
 								tokenType = 3 // function
 							}
+						case ast.KindTableExpr:
+							tokenType = 5 // class
+						}
+					} else {
+						pID := targetDoc.Tree.Nodes[targetDef].Parent
+						if pID != ast.InvalidNode {
+							pNode := targetDoc.Tree.Nodes[pID]
+							if pNode.Kind == ast.KindFunctionStmt || pNode.Kind == ast.KindLocalFunction {
+								if tokenType == 1 {
+									tokenType = 4 // method
+								} else {
+									tokenType = 3 // function
+								}
+							}
 						}
 					}
 				}
 			}
+
+			if defID != ast.InvalidNode {
+				isDep, _ := doc.HasDeprecatedTag(defID)
+				if isDep {
+					modifiers |= 1 << 2 // deprecated
+				}
+			}
 		}
 
-		if defID != ast.InvalidNode {
-			isDep, _ := doc.HasDeprecatedTag(defID)
-			if isDep {
-				modifiers |= 1 << 2 // deprecated
-			}
+		if tokenType == 0xFFFFFFFF {
+			continue
 		}
 
 		s.semTokensBuf = append(s.semTokensBuf, SemanticToken{

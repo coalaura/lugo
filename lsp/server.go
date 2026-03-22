@@ -338,6 +338,8 @@ func (s *Server) handleMessage(req Request) {
 		s.handleSemanticTokensFull(req)
 	case "textDocument/formatting":
 		s.handleFormatting(req)
+	case "textDocument/rangeFormatting":
+		s.handleRangeFormatting(req)
 	case "textDocument/foldingRange":
 		s.handleFoldingRange(req)
 	case "textDocument/codeLens":
@@ -372,14 +374,15 @@ func (s *Server) handleInitialize(req Request) {
 			RenameProvider: map[string]bool{
 				"prepareProvider": true,
 			},
-			ReferencesProvider:         true,
-			DocumentSymbolProvider:     true,
-			WorkspaceSymbolProvider:    true,
-			InlayHintProvider:          true,
-			FoldingRangeProvider:       true,
-			CallHierarchyProvider:      true,
-			DocumentHighlightProvider:  true,
-			DocumentFormattingProvider: true,
+			ReferencesProvider:              true,
+			DocumentSymbolProvider:          true,
+			WorkspaceSymbolProvider:         true,
+			InlayHintProvider:               true,
+			FoldingRangeProvider:            true,
+			CallHierarchyProvider:           true,
+			DocumentHighlightProvider:       true,
+			DocumentFormattingProvider:      true,
+			DocumentRangeFormattingProvider: true,
 			CodeActionProvider: map[string]any{
 				"codeActionKinds": []string{"quickfix", "refactor.rewrite"},
 				"resolveProvider": true,
@@ -395,7 +398,7 @@ func (s *Server) handleInitialize(req Request) {
 			},
 			SemanticTokensProvider: &SemanticTokensOptions{
 				Legend: SemanticTokensLegend{
-					TokenTypes:     []string{"variable", "property", "parameter", "function", "method", "class"},
+					TokenTypes:     []string{"variable", "property", "parameter", "function", "method", "class", "number", "string", "keyword"},
 					TokenModifiers: []string{"declaration", "readonly", "deprecated", "defaultLibrary"},
 				},
 				Full: true,

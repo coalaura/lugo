@@ -125,25 +125,26 @@ type InitializationOptions struct {
 }
 
 type ServerCapabilities struct {
-	CodeLensProvider           *CodeLensOptions       `json:"codeLensProvider,omitempty"`
-	SignatureHelpProvider      *SignatureHelpOptions  `json:"signatureHelpProvider,omitempty"`
-	CompletionProvider         *CompletionOptions     `json:"completionProvider,omitempty"`
-	SemanticTokensProvider     *SemanticTokensOptions `json:"semanticTokensProvider,omitempty"`
-	ExecuteCommandProvider     *ExecuteCommandOptions `json:"executeCommandProvider,omitempty"`
-	RenameProvider             any                    `json:"renameProvider"`
-	CodeActionProvider         any                    `json:"codeActionProvider"`
-	TextDocumentSync           int                    `json:"textDocumentSync"`
-	DefinitionProvider         bool                   `json:"definitionProvider"`
-	HoverProvider              bool                   `json:"hoverProvider"`
-	ReferencesProvider         bool                   `json:"referencesProvider"`
-	DocumentSymbolProvider     bool                   `json:"documentSymbolProvider"`
-	WorkspaceSymbolProvider    bool                   `json:"workspaceSymbolProvider"`
-	InlayHintProvider          bool                   `json:"inlayHintProvider"`
-	FoldingRangeProvider       bool                   `json:"foldingRangeProvider"`
-	LinkedEditingRangeProvider bool                   `json:"linkedEditingRangeProvider"`
-	CallHierarchyProvider      bool                   `json:"callHierarchyProvider"`
-	DocumentHighlightProvider  bool                   `json:"documentHighlightProvider,omitempty"`
-	DocumentFormattingProvider bool                   `json:"documentFormattingProvider,omitempty"`
+	CodeLensProvider                *CodeLensOptions       `json:"codeLensProvider,omitempty"`
+	SignatureHelpProvider           *SignatureHelpOptions  `json:"signatureHelpProvider,omitempty"`
+	CompletionProvider              *CompletionOptions     `json:"completionProvider,omitempty"`
+	SemanticTokensProvider          *SemanticTokensOptions `json:"semanticTokensProvider,omitempty"`
+	ExecuteCommandProvider          *ExecuteCommandOptions `json:"executeCommandProvider,omitempty"`
+	RenameProvider                  any                    `json:"renameProvider"`
+	CodeActionProvider              any                    `json:"codeActionProvider"`
+	TextDocumentSync                int                    `json:"textDocumentSync"`
+	DefinitionProvider              bool                   `json:"definitionProvider"`
+	HoverProvider                   bool                   `json:"hoverProvider"`
+	ReferencesProvider              bool                   `json:"referencesProvider"`
+	DocumentSymbolProvider          bool                   `json:"documentSymbolProvider"`
+	WorkspaceSymbolProvider         bool                   `json:"workspaceSymbolProvider"`
+	InlayHintProvider               bool                   `json:"inlayHintProvider"`
+	FoldingRangeProvider            bool                   `json:"foldingRangeProvider"`
+	LinkedEditingRangeProvider      bool                   `json:"linkedEditingRangeProvider"`
+	CallHierarchyProvider           bool                   `json:"callHierarchyProvider"`
+	DocumentHighlightProvider       bool                   `json:"documentHighlightProvider,omitempty"`
+	DocumentFormattingProvider      bool                   `json:"documentFormattingProvider,omitempty"`
+	DocumentRangeFormattingProvider bool                   `json:"documentRangeFormattingProvider,omitempty"`
 }
 
 type TextDocumentItem struct {
@@ -504,6 +505,12 @@ type CallHierarchyOutgoingCall struct {
 
 type DocumentFormattingParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Options      FormattingOptions      `json:"options"`
+}
+
+type DocumentRangeFormattingParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Range        Range                  `json:"range"`
 	Options      FormattingOptions      `json:"options"`
 }
 

@@ -50,6 +50,23 @@ func NewFormatter(indentSize int, useTabs bool, opinionated bool) *Formatter {
 	}
 }
 
+func (s *Server) formatDocument(uri string, options FormattingOptions, formatRange *Range) []TextEdit {
+	doc, ok := s.Documents[uri]
+	if !ok {
+		return nil
+	}
+
+	start := time.Now()
+
+	formatter := NewFormatter(options.TabSize, !options.InsertSpaces, s.FormatOpinionated)
+
+	edits := formatter.Format(doc, formatRange)
+
+	s.Log.Printf("Formatted document in %s (%d edits generated)\n", time.Since(start), len(edits))
+
+	return edits
+}
+
 func (s *Server) handleFormatting(req Request) {
 	if !s.FeatureFormatting {
 		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
@@ -64,53 +81,35 @@ func (s *Server) handleFormatting(req Request) {
 		return
 	}
 
-	uri := s.normalizeURI(params.TextDocument.URI)
+	changes := s.formatDocument(s.normalizeURI(params.TextDocument.URI), params.Options, nil)
 
-	doc, ok := s.Documents[uri]
-	if !ok {
+	WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: changes})
+}
+
+func (s *Server) handleRangeFormatting(req Request) {
+	if !s.FeatureFormatting {
 		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
 
 		return
 	}
 
-	start := time.Now()
+	var params DocumentRangeFormattingParams
 
-	formatter := NewFormatter(params.Options.TabSize, !params.Options.InsertSpaces, s.FormatOpinionated)
-	formatted := formatter.Format(doc.Source)
-
-	took := time.Since(start)
-
-	s.Log.Printf("Formatted document in %s\n", took)
-
-	if bytes.Equal(doc.Source, formatted) {
-		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
 		return
 	}
 
-	endLine, endCol := doc.Tree.Position(uint32(len(doc.Source)))
+	changes := s.formatDocument(s.normalizeURI(params.TextDocument.URI), params.Options, &params.Range)
 
-	changes := []TextEdit{
-		{
-			Range: Range{
-				Start: Position{Line: 0, Character: 0},
-				End:   Position{Line: endLine, Character: endCol},
-			},
-			NewText: string(formatted),
-		},
-	}
-
-	WriteMessage(s.Writer, Response{
-		RPC:    "2.0",
-		ID:     req.ID,
-		Result: changes,
-	})
+	WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: changes})
 }
 
 // Format iterates over the source's token stream and elegantly fixes whitespace.
 // It enforces blank lines between unrelated statements, strips trailing semicolons safely,
 // expands minified code, and strictly enforces Lua indentation rules.
-func (f *Formatter) Format(source []byte) []byte {
+func (f *Formatter) Format(doc *Document, formatRange *Range) []TextEdit {
+	source := doc.Source
 	lex := lexer.New(source)
 
 	tokens := make([]token.Token, 0, len(source)/4)
@@ -124,9 +123,20 @@ func (f *Formatter) Format(source []byte) []byte {
 		tokens = append(tokens, tok)
 	}
 
-	var out bytes.Buffer
+	var (
+		rangeStart uint32
+		rangeEnd   uint32
+	)
 
-	out.Grow(len(source) + len(source)/10)
+	if formatRange != nil {
+		rangeStart = doc.Tree.Offset(formatRange.Start.Line, formatRange.Start.Character)
+		rangeEnd = doc.Tree.Offset(formatRange.End.Line, formatRange.End.Character)
+	}
+
+	var (
+		edits      []TextEdit
+		gapBuilder bytes.Buffer
+	)
 
 	var (
 		stack             []Scope
@@ -263,6 +273,8 @@ func (f *Formatter) Format(source []byte) []byte {
 			}
 		}
 
+		gapBuilder.Reset()
+
 		if nl > 0 || forceNl {
 			if nl > 2 {
 				nl = 2
@@ -272,7 +284,7 @@ func (f *Formatter) Format(source []byte) []byte {
 				nl = 1
 			}
 
-			out.Write(bytes.Repeat([]byte{'\n'}, nl))
+			gapBuilder.Write(bytes.Repeat([]byte{'\n'}, nl))
 
 			isLineStart = true
 			lineIdx += nl
@@ -282,22 +294,48 @@ func (f *Formatter) Format(source []byte) []byte {
 			currentLineIndent = f.calculateLineIndent(stack, tokens, i, source, lineIdx)
 			if currentLineIndent > 0 {
 				if f.UseTabs {
-					out.Write(bytes.Repeat([]byte{'\t'}, currentLineIndent))
+					gapBuilder.Write(bytes.Repeat([]byte{'\t'}, currentLineIndent))
 				} else {
-					out.Write(bytes.Repeat([]byte{' '}, currentLineIndent*f.IndentSize))
+					gapBuilder.Write(bytes.Repeat([]byte{' '}, currentLineIndent*f.IndentSize))
 				}
 			}
 
 			isLineStart = false
 		} else if prevTok.Kind != 0 {
 			if f.needsSpace(prevTok.Kind, tok.Kind, prevPrev) {
-				out.WriteByte(' ')
+				gapBuilder.WriteByte(' ')
 			} else if (prevTok.Kind == token.LBrace || tok.Kind == token.RBrace) && bytes.ContainsRune(gap, ' ') {
-				out.WriteByte(' ')
+				gapBuilder.WriteByte(' ')
 			}
 		}
 
-		out.Write(source[tok.Start:tok.End])
+		newGap := gapBuilder.Bytes()
+
+		var gapStart uint32
+
+		if prevTok.Kind != 0 {
+			gapStart = prevTok.End
+		}
+
+		gapEnd := tok.Start
+		origGap := source[gapStart:gapEnd]
+
+		if !bytes.Equal(origGap, newGap) {
+			inRange := true
+
+			if formatRange != nil {
+				if gapEnd < rangeStart || gapStart > rangeEnd {
+					inRange = false
+				}
+			}
+
+			if inRange {
+				edits = append(edits, TextEdit{
+					Range:   getRange(doc.Tree, gapStart, gapEnd),
+					NewText: string(newGap),
+				})
+			}
+		}
 
 		popScope := func(kind int) {
 			for j := len(stack) - 1; j >= 0; j-- {
@@ -311,6 +349,10 @@ func (f *Formatter) Format(source []byte) []byte {
 
 		switch tok.Kind {
 		case token.End, token.Until, token.ElseIf, token.Else:
+			if f.isKeywordAsIdentifier(tokens, i) {
+				break
+			}
+
 			popScope(ScopeBlock)
 		case token.RBrace:
 			popScope(ScopeBrace)
@@ -332,6 +374,10 @@ func (f *Formatter) Format(source []byte) []byte {
 
 		switch tok.Kind {
 		case token.Do, token.Then, token.Repeat, token.Function, token.Else:
+			if f.isKeywordAsIdentifier(tokens, i) {
+				break
+			}
+
 			pushScope(ScopeBlock, false)
 		case token.LBrace:
 			pushScope(ScopeBrace, f.isComplexTable(tokens, i))
@@ -350,14 +396,62 @@ func (f *Formatter) Format(source []byte) []byte {
 		prevTok = tok
 	}
 
-	res := out.Bytes()
-	res = bytes.TrimRight(res, " \t\r\n")
+	var gapStart uint32
 
-	if len(res) > 0 {
-		res = append(res, '\n')
+	if len(tokens) > 0 {
+		gapStart = prevTok.End
 	}
 
-	return res
+	gapEnd := uint32(len(source))
+	origGap := source[gapStart:gapEnd]
+
+	var newGap []byte
+
+	if len(tokens) > 0 {
+		newGap = []byte("\n")
+	}
+
+	if !bytes.Equal(origGap, newGap) {
+		inRange := true
+
+		if formatRange != nil {
+			if gapEnd < rangeStart || gapStart > rangeEnd {
+				inRange = false
+			}
+		}
+
+		if inRange {
+			edits = append(edits, TextEdit{
+				Range:   getRange(doc.Tree, gapStart, gapEnd),
+				NewText: string(newGap),
+			})
+		}
+	}
+
+	return edits
+}
+
+func (f *Formatter) isKeywordAsIdentifier(tokens []token.Token, i int) bool {
+	tok := tokens[i]
+	if !f.isKeyword(tok.Kind) {
+		return false
+	}
+
+	if i > 0 {
+		prev := tokens[i-1].Kind
+		if prev == token.Dot || prev == token.Colon {
+			return true
+		}
+	}
+
+	if i+1 < len(tokens) {
+		next := tokens[i+1].Kind
+		if next == token.Assign {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (f *Formatter) calculateLineIndent(stack []Scope, tokens []token.Token, startIndex int, source []byte, currentLine int) int {
@@ -388,6 +482,9 @@ func (f *Formatter) calculateLineIndent(stack []Scope, tokens []token.Token, sta
 
 		switch tok.Kind {
 		case token.End, token.Until, token.ElseIf, token.Else, token.RBrace, token.RParen, token.RBrack:
+			if f.isKeywordAsIdentifier(tokens, i) {
+				break
+			}
 			currentDepth--
 
 			if currentDepth < minDepth {
@@ -397,6 +494,9 @@ func (f *Formatter) calculateLineIndent(stack []Scope, tokens []token.Token, sta
 
 		switch tok.Kind {
 		case token.Do, token.Then, token.Repeat, token.Function, token.Else, token.LBrace, token.LParen, token.LBrack:
+			if f.isKeywordAsIdentifier(tokens, i) {
+				break
+			}
 			currentDepth++
 		}
 	}
