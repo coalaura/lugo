@@ -4,6 +4,7 @@
 *.prof
 *.out
 !vscode/package.json
+!vscode/language-configuration.json
 !.vscode/launch.json
 node_modules
 bin

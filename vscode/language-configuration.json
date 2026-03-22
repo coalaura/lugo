@@ -1,0 +1,30 @@
+{
+	"$schema": "vscode://schemas/language-configuration",
+    "comments": {
+        "lineComment": "--",
+        "blockComment": ["--[[", "]]"]
+    },
+    "brackets": [
+        ["{", "}"],
+        ["[", "]"],
+        ["(", ")"]
+    ],
+    "autoClosingPairs": [
+        { "open": "{", "close": "}" },
+        { "open": "[", "close": "]" },
+        { "open": "(", "close": ")" },
+        { "open": "\"", "close": "\"", "notIn": ["string"] },
+        { "open": "'", "close": "'", "notIn": ["string"] }
+    ],
+    "surroundingPairs": [
+        { "open": "{", "close": "}" },
+        { "open": "[", "close": "]" },
+        { "open": "(", "close": ")" },
+        { "open": "\"", "close": "\"" },
+        { "open": "'", "close": "'" }
+    ],
+    "indentationRules": {
+        "increaseIndentPattern": "^((?!\\-\\-).)*(?:\\b(else|elseif|do|then|repeat)\\b|\\bfunction\\b\\s*(?:[a-zA-Z_.:0-9]+\\s*)?\\()|.*(\\{[^}\"']*|\\([^)\"']*|\\[[^\\]\"']*)$",
+        "decreaseIndentPattern": "^\\s*(elseif|else|end|until|\\}|\\)|\\])"
+    }
+}
