@@ -320,7 +320,16 @@ func (doc *Document) GetLocalsAt(offset uint32, yield func(name []byte, defID as
 				}
 			}
 		case ast.KindForNum:
-			if offset > doc.Tree.Nodes[node.Left].End {
+			var exprsEnd uint32
+
+			if node.Count > 0 {
+				lastExprID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
+				exprsEnd = doc.Tree.Nodes[lastExprID].End
+			} else {
+				exprsEnd = doc.Tree.Nodes[node.Left].End
+			}
+
+			if offset > exprsEnd {
 				identNode := doc.Tree.Nodes[node.Left]
 
 				if !yield(doc.Source[identNode.Start:identNode.End], node.Left) {
@@ -328,8 +337,10 @@ func (doc *Document) GetLocalsAt(offset uint32, yield func(name []byte, defID as
 				}
 			}
 		case ast.KindForIn:
-			nameList := doc.Tree.Nodes[node.Left]
-			if offset > nameList.End {
+			exprListID := ast.NodeID(node.Extra)
+			if exprListID != ast.InvalidNode && offset > doc.Tree.Nodes[exprListID].End {
+				nameList := doc.Tree.Nodes[node.Left]
+
 				for i := uint16(0); i < nameList.Count; i++ {
 					identID := doc.Tree.ExtraList[nameList.Extra+uint32(i)]
 					identNode := doc.Tree.Nodes[identID]

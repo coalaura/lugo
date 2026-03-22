@@ -203,6 +203,10 @@ func (t *Tree) NodeAt(offset uint32) NodeID {
 		check(node.Left)
 		check(node.Right)
 
+		if node.Kind == KindForIn {
+			check(NodeID(node.Extra))
+		}
+
 		if next == InvalidNode && node.Count > 0 {
 			if node.Kind == KindBlock || node.Kind == KindFile {
 				// Binary search, yay!
@@ -255,6 +259,10 @@ func (t *Tree) AddNode(n Node) NodeID {
 
 	if n.Right != InvalidNode {
 		t.Nodes[n.Right].Parent = id
+	}
+
+	if n.Kind == KindForIn && NodeID(n.Extra) != InvalidNode {
+		t.Nodes[n.Extra].Parent = id
 	}
 
 	for i := uint16(0); i < n.Count; i++ {
