@@ -208,6 +208,7 @@ func (s *Server) handleCodeAction(req Request) {
 		targetMethod      ast.NodeID = ast.InvalidNode
 		targetNestedIf    ast.NodeID = ast.InvalidNode
 		nestedIfTitle     string
+		targetMultiAssign ast.NodeID = ast.InvalidNode
 	)
 
 	cursorLine := params.Range.Start.Line
@@ -331,6 +332,35 @@ func (s *Server) handleCodeAction(req Request) {
 			}
 		}
 
+		// 4. Split Multiple Assignment
+		if (node.Kind == ast.KindLocalAssign || node.Kind == ast.KindAssign) && targetMultiAssign == ast.InvalidNode {
+			if int(node.Left) < len(doc.Tree.Nodes) {
+				lhsList := doc.Tree.Nodes[node.Left]
+				if lhsList.Count > 1 {
+					canSplit := true
+
+					if node.Right != ast.InvalidNode && int(node.Right) < len(doc.Tree.Nodes) {
+						rhsList := doc.Tree.Nodes[node.Right]
+						if rhsList.Count > lhsList.Count {
+							canSplit = false
+						} else if lhsList.Count > rhsList.Count && rhsList.Count > 0 && rhsList.Extra+uint32(rhsList.Count-1) < uint32(len(doc.Tree.ExtraList)) {
+							lastRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(rhsList.Count-1)]
+							if int(lastRhsID) < len(doc.Tree.Nodes) {
+								lastRhsNode := doc.Tree.Nodes[lastRhsID]
+								if lastRhsNode.Kind == ast.KindCallExpr || lastRhsNode.Kind == ast.KindMethodCall || lastRhsNode.Kind == ast.KindVararg {
+									canSplit = false
+								}
+							}
+						}
+					}
+
+					if canSplit {
+						targetMultiAssign = curr
+					}
+				}
+			}
+		}
+
 		curr = node.Parent
 	}
 
@@ -426,6 +456,20 @@ func (s *Server) handleCodeAction(req Request) {
 				"type":   "mergeNestedIf",
 				"uri":    uri,
 				"nodeId": float64(targetNestedIf),
+			},
+		})
+	}
+
+	// 6. Split Multiple Assignment
+	if targetMultiAssign != ast.InvalidNode {
+		actions = append(actions, CodeAction{
+			Title:       "Split into multiple assignments",
+			Kind:        "refactor.rewrite",
+			IsPreferred: false,
+			Data: map[string]any{
+				"type":   "splitMultiAssign",
+				"uri":    uri,
+				"nodeId": float64(targetMultiAssign),
 			},
 		})
 	}
@@ -646,6 +690,106 @@ func (s *Server) handleCodeActionResolve(req Request) {
 								},
 							}
 						}
+					}
+				}
+			} else if actionType == "splitMultiAssign" {
+				assignNode := doc.Tree.Nodes[nodeID]
+
+				if int(assignNode.Left) < len(doc.Tree.Nodes) {
+					lhsList := doc.Tree.Nodes[assignNode.Left]
+
+					var rhsList ast.Node
+
+					if assignNode.Right != ast.InvalidNode && int(assignNode.Right) < len(doc.Tree.Nodes) {
+						rhsList = doc.Tree.Nodes[assignNode.Right]
+					}
+
+					assignLine, _ := doc.Tree.Position(assignNode.Start)
+
+					var lineStart uint32
+
+					if int(assignLine) < len(doc.Tree.LineOffsets) {
+						lineStart = doc.Tree.LineOffsets[assignLine]
+					}
+
+					var indentBytes []byte
+
+					for i := lineStart; i < assignNode.Start && i < uint32(len(doc.Source)); i++ {
+						if doc.Source[i] == ' ' || doc.Source[i] == '\t' {
+							indentBytes = append(indentBytes, doc.Source[i])
+						} else {
+							break
+						}
+					}
+
+					indent := string(indentBytes)
+
+					var newText strings.Builder
+
+					isLocal := assignNode.Kind == ast.KindLocalAssign
+
+					for i := uint16(0); i < lhsList.Count; i++ {
+						if i > 0 {
+							newText.WriteString("\n")
+							newText.WriteString(indent)
+						}
+
+						if isLocal {
+							newText.WriteString("local ")
+						}
+
+						if lhsList.Extra+uint32(i) < uint32(len(doc.Tree.ExtraList)) {
+							lhsID := doc.Tree.ExtraList[lhsList.Extra+uint32(i)]
+							if int(lhsID) < len(doc.Tree.Nodes) {
+								lhsNode := doc.Tree.Nodes[lhsID]
+
+								if lhsNode.Start <= lhsNode.End && lhsNode.End <= uint32(len(doc.Source)) {
+									lhsText := ast.String(doc.Source[lhsNode.Start:lhsNode.End])
+									newText.WriteString(lhsText)
+
+									if isLocal {
+										attr := ast.Attr(lhsNode.Extra)
+
+										switch attr {
+										case ast.AttrConst:
+											newText.WriteString(" <const>")
+										case ast.AttrClose:
+											newText.WriteString(" <close>")
+										}
+									}
+								}
+							}
+						}
+
+						newText.WriteString(" = ")
+
+						if assignNode.Right != ast.InvalidNode && i < rhsList.Count && rhsList.Extra+uint32(i) < uint32(len(doc.Tree.ExtraList)) {
+							rhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(i)]
+							if int(rhsID) < len(doc.Tree.Nodes) {
+								rhsNode := doc.Tree.Nodes[rhsID]
+
+								if rhsNode.Start <= rhsNode.End && rhsNode.End <= uint32(len(doc.Source)) {
+									rhsText := ast.String(doc.Source[rhsNode.Start:rhsNode.End])
+
+									newText.WriteString(rhsText)
+								} else {
+									newText.WriteString("nil")
+								}
+							} else {
+								newText.WriteString("nil")
+							}
+						} else {
+							newText.WriteString("nil")
+						}
+					}
+
+					action.Edit = &WorkspaceEdit{
+						Changes: map[string][]TextEdit{
+							uri: {{
+								Range:   getNodeRange(doc.Tree, nodeID),
+								NewText: newText.String(),
+							}},
+						},
 					}
 				}
 			}
