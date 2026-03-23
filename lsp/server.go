@@ -78,11 +78,12 @@ type Server struct {
 	InlayImplicitSelf  bool
 
 	// Features
-	FeatureDocHighlight bool
-	FeatureHoverEval    bool
-	FeatureCodeLens     bool
-	FeatureFormatting   bool
-	FormatOpinionated   bool
+	FeatureDocHighlight   bool
+	FeatureHoverEval      bool
+	FeatureCodeLens       bool
+	FeatureFormatting     bool
+	FormatOpinionated     bool
+	SuggestFunctionParams bool
 }
 
 func NewServer(version string) *Server {
@@ -189,6 +190,7 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 	setCfg(&s.FeatureCodeLens, opts.FeatureCodeLens, nil)
 	setCfg(&s.FeatureFormatting, opts.FeatureFormatting, nil)
 	setCfg(&s.FormatOpinionated, opts.FormatOpinionated, nil)
+	setCfg(&s.SuggestFunctionParams, opts.SuggestFunctionParams, nil)
 
 	return needsReindex, needsRepublish
 }

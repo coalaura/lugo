@@ -78,6 +78,7 @@ function buildInitializationOptions() {
 		featureCodeLens: lugoConfig.get("features.codeLens") !== false,
 		featureFormatting: lugoConfig.get("features.formatting") !== false,
 		formatOpinionated: lugoConfig.get("features.formatOpinionated") === true,
+		suggestFunctionParams: lugoConfig.get("completion.suggestFunctionParams") !== false,
 	};
 }
 

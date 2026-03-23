@@ -117,11 +117,12 @@ type InitializationOptions struct {
 	InlaySuppressMatch bool `json:"inlaySuppressMatch"`
 	InlayImplicitSelf  bool `json:"inlayImplicitSelf"`
 
-	FeatureDocHighlight bool `json:"featureDocHighlight"`
-	FeatureHoverEval    bool `json:"featureHoverEval"`
-	FeatureCodeLens     bool `json:"featureCodeLens"`
-	FeatureFormatting   bool `json:"featureFormatting"`
-	FormatOpinionated   bool `json:"formatOpinionated"`
+	FeatureDocHighlight   bool `json:"featureDocHighlight"`
+	FeatureHoverEval      bool `json:"featureHoverEval"`
+	FeatureCodeLens       bool `json:"featureCodeLens"`
+	FeatureFormatting     bool `json:"featureFormatting"`
+	FormatOpinionated     bool `json:"formatOpinionated"`
+	SuggestFunctionParams bool `json:"suggestFunctionParams"`
 }
 
 type ServerCapabilities struct {
@@ -277,13 +278,22 @@ type CompletionList struct {
 	IsIncomplete bool             `json:"isIncomplete"`
 }
 
+type InsertTextFormat int
+
+const (
+	PlainTextTextFormat InsertTextFormat = 1
+	SnippetTextFormat   InsertTextFormat = 2
+)
+
 type CompletionItem struct {
-	Label         string              `json:"label"`
-	Detail        string              `json:"detail,omitempty"`
-	SortText      string              `json:"sortText,omitempty"`
-	Documentation *MarkupContent      `json:"documentation,omitempty"`
-	Tags          []CompletionItemTag `json:"tags,omitempty"`
-	Kind          CompletionItemKind  `json:"kind"`
+	Label            string              `json:"label"`
+	Detail           string              `json:"detail,omitempty"`
+	SortText         string              `json:"sortText,omitempty"`
+	Documentation    *MarkupContent      `json:"documentation,omitempty"`
+	Tags             []CompletionItemTag `json:"tags,omitempty"`
+	Kind             CompletionItemKind  `json:"kind"`
+	InsertText       string              `json:"insertText,omitempty"`
+	InsertTextFormat InsertTextFormat    `json:"insertTextFormat,omitempty"`
 }
 
 type SignatureHelpOptions struct {

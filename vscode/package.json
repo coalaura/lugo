@@ -284,6 +284,13 @@
                         "scope": "resource",
                         "markdownDescription": "Apply opinionated formatting tweaks (e.g., forcing blank lines between unrelated statements, before returns).",
                         "order": 29
+                    },
+                    "lugo.completion.suggestFunctionParams": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Automatically insert function parameters as snippets when autocompleting a function call.",
+                        "order": 30
                     }
                 }
             }

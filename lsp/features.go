@@ -409,7 +409,7 @@ func (s *Server) handleCompletion(req Request) {
 	items := make([]CompletionItem, 0, 64)
 	seen := make(map[string]bool)
 
-	addCompletion := func(label string, kind CompletionItemKind, detail string, isDep bool, sortText string) {
+	addCompletion := func(label string, kind CompletionItemKind, detail string, isDep bool, sortText string, insertText string, insertFormat InsertTextFormat) {
 		if label == "" || seen[label] {
 			return
 		}
@@ -423,17 +423,67 @@ func (s *Server) handleCompletion(req Request) {
 		}
 
 		items = append(items, CompletionItem{
-			Label:    label,
-			Kind:     kind,
-			Detail:   detail,
-			SortText: sortText,
-			Tags:     tags,
+			Label:            label,
+			Kind:             kind,
+			Detail:           detail,
+			SortText:         sortText,
+			Tags:             tags,
+			InsertText:       insertText,
+			InsertTextFormat: insertFormat,
 		})
+	}
+
+	buildFuncSnippet := func(label string, dDoc *Document, valID ast.NodeID, isMethod bool) (string, InsertTextFormat) {
+		if !s.SuggestFunctionParams || valID == ast.InvalidNode || dDoc == nil {
+			return label, PlainTextTextFormat
+		}
+
+		node := dDoc.Tree.Nodes[valID]
+		if node.Kind != ast.KindFunctionExpr {
+			return label, PlainTextTextFormat
+		}
+
+		var params []string
+
+		snippetIdx := 1
+
+		for i := uint16(0); i < node.Count; i++ {
+			if node.Extra+uint32(i) >= uint32(len(dDoc.Tree.ExtraList)) {
+				continue
+			}
+
+			pID := dDoc.Tree.ExtraList[node.Extra+uint32(i)]
+			if int(pID) >= len(dDoc.Tree.Nodes) {
+				continue
+			}
+
+			pNode := dDoc.Tree.Nodes[pID]
+			if pNode.Start > pNode.End || pNode.End > uint32(len(dDoc.Source)) {
+				continue
+			}
+
+			pName := ast.String(dDoc.Source[pNode.Start:pNode.End])
+
+			if isMethod && i == 0 && pName == "self" {
+				continue
+			}
+
+			if pName == "..." {
+				params = append(params, fmt.Sprintf("${%d:...}", snippetIdx))
+			} else {
+				params = append(params, fmt.Sprintf("${%d:%s}", snippetIdx, pName))
+			}
+
+			snippetIdx++
+		}
+
+		return fmt.Sprintf("%s(%s)", label, strings.Join(params, ", ")), SnippetTextFormat
 	}
 
 	var (
 		recName  []byte
 		isMember bool
+		isColon  bool
 	)
 
 	i := int(offset) - 1
@@ -462,6 +512,7 @@ func (s *Server) handleCompletion(req Request) {
 
 	if i >= 0 && (doc.Source[i] == '.' || doc.Source[i] == ':') {
 		isMember = true
+		isColon = doc.Source[i] == ':'
 
 		i--
 
@@ -546,15 +597,20 @@ func (s *Server) handleCompletion(req Request) {
 				node := doc.Tree.Nodes[fd.NodeID]
 
 				kind := FieldCompletion
+				label := ast.String(doc.Source[node.Start:node.End])
+				insertText := label
+				insertFormat := PlainTextTextFormat
 
 				valID := doc.getAssignedValue(fd.NodeID)
 				if valID != ast.InvalidNode && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
 					kind = FunctionCompletion
+
+					insertText, insertFormat = buildFuncSnippet(label, doc, valID, isColon)
 				}
 
 				isDep, _ := doc.HasDeprecatedTag(fd.NodeID)
 
-				addCompletion(ast.String(doc.Source[node.Start:node.End]), kind, "field", isDep, "1")
+				addCompletion(label, kind, "field", isDep, "1", insertText, insertFormat)
 			}
 		}
 
@@ -578,10 +634,15 @@ func (s *Server) handleCompletion(req Request) {
 					node := symDoc.Tree.Nodes[sym.NodeID]
 
 					kind := FieldCompletion
+					label := ast.String(symDoc.Source[node.Start:node.End])
+					insertText := label
+					insertFormat := PlainTextTextFormat
 
 					valID := symDoc.getAssignedValue(sym.NodeID)
 					if valID != ast.InvalidNode && symDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
 						kind = FunctionCompletion
+
+						insertText, insertFormat = buildFuncSnippet(label, symDoc, valID, isColon)
 					}
 
 					isDep, _ := symDoc.HasDeprecatedTag(sym.NodeID)
@@ -591,7 +652,7 @@ func (s *Server) handleCompletion(req Request) {
 						sortGroup = "1"
 					}
 
-					addCompletion(ast.String(symDoc.Source[node.Start:node.End]), kind, "field", isDep, sortGroup)
+					addCompletion(label, kind, "field", isDep, sortGroup, insertText, insertFormat)
 				}
 			}
 		}
@@ -600,13 +661,18 @@ func (s *Server) handleCompletion(req Request) {
 			isDep, _ := doc.HasDeprecatedTag(defID)
 
 			kind := VariableCompletion
+			label := ast.String(name)
+			insertText := label
+			insertFormat := PlainTextTextFormat
 
 			valID := doc.getAssignedValue(defID)
 			if valID != ast.InvalidNode && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
 				kind = FunctionCompletion
+
+				insertText, insertFormat = buildFuncSnippet(label, doc, valID, false)
 			}
 
-			addCompletion(ast.String(name), kind, "local", isDep, "0")
+			addCompletion(label, kind, "local", isDep, "0", insertText, insertFormat)
 
 			return true
 		})
@@ -618,11 +684,16 @@ func (s *Server) handleCompletion(req Request) {
 
 					if node.Kind == ast.KindIdent || node.Kind == ast.KindMethodName {
 						kind := VariableCompletion
+						label := ast.String(symDoc.Source[node.Start:node.End])
+						insertText := label
+						insertFormat := PlainTextTextFormat
 
 						valID := symDoc.getAssignedValue(sym.NodeID)
 
 						if valID != ast.InvalidNode && symDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
 							kind = FunctionCompletion
+
+							insertText, insertFormat = buildFuncSnippet(label, symDoc, valID, false)
 						}
 
 						isDep, _ := symDoc.HasDeprecatedTag(sym.NodeID)
@@ -632,14 +703,14 @@ func (s *Server) handleCompletion(req Request) {
 							sortGroup = "1"
 						}
 
-						addCompletion(ast.String(symDoc.Source[node.Start:node.End]), kind, "global", isDep, sortGroup)
+						addCompletion(label, kind, "global", isDep, sortGroup, insertText, insertFormat)
 					}
 				}
 			}
 		}
 
 		for _, kw := range luaKeywords {
-			addCompletion(kw, KeywordCompletion, "keyword", false, "3")
+			addCompletion(kw, KeywordCompletion, "keyword", false, "3", kw, PlainTextTextFormat)
 		}
 	}
 
