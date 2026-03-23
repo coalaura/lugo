@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"bytes"
 	"strings"
 
 	"github.com/coalaura/lugo/ast"
@@ -396,7 +397,10 @@ func isTerminal(tree *ast.Tree, id ast.NodeID) bool {
 			return false
 		}
 
-		var hasElse bool
+		var (
+			hasElse      bool
+			isExhaustive bool
+		)
 
 		for i := uint16(0); i < node.Count; i++ {
 			if node.Extra+uint32(i) >= uint32(len(tree.ExtraList)) {
@@ -415,6 +419,10 @@ func isTerminal(tree *ast.Tree, id ast.NodeID) bool {
 				if !isTerminal(tree, childNode.Right) {
 					return false
 				}
+
+				if !isExhaustive && isOppositeCondition(tree, node.Left, childNode.Left) {
+					isExhaustive = true
+				}
 			case ast.KindElse:
 				hasElse = true
 
@@ -424,8 +432,42 @@ func isTerminal(tree *ast.Tree, id ast.NodeID) bool {
 			}
 		}
 
-		return hasElse
+		return hasElse || isExhaustive
 	}
 
 	return false
+}
+
+func isOppositeCondition(tree *ast.Tree, a, b ast.NodeID) bool {
+	if a == ast.InvalidNode || b == ast.InvalidNode {
+		return false
+	}
+
+	checkNot := func(n, other ast.NodeID) bool {
+		node := tree.Nodes[n]
+		if node.Kind == ast.KindUnaryExpr {
+			src := tree.Source[node.Start:node.End]
+			if bytes.HasPrefix(src, []byte("not")) {
+				right := tree.Nodes[node.Right]
+
+				rightSrc := bytes.TrimSpace(tree.Source[right.Start:right.End])
+				otherSrc := bytes.TrimSpace(tree.Source[tree.Nodes[other].Start:tree.Nodes[other].End])
+
+				// Strip optional parentheses for comparison
+				if bytes.HasPrefix(rightSrc, []byte("(")) && bytes.HasSuffix(rightSrc, []byte(")")) {
+					rightSrc = bytes.TrimSpace(rightSrc[1 : len(rightSrc)-1])
+				}
+
+				if bytes.HasPrefix(otherSrc, []byte("(")) && bytes.HasSuffix(otherSrc, []byte(")")) {
+					otherSrc = bytes.TrimSpace(otherSrc[1 : len(otherSrc)-1])
+				}
+
+				return bytes.Equal(rightSrc, otherSrc)
+			}
+		}
+
+		return false
+	}
+
+	return checkNot(a, b) || checkNot(b, a)
 }

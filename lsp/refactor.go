@@ -133,6 +133,43 @@ func (s *Server) handleCodeAction(req Request) {
 					},
 				})
 			}
+		case "redundant-return":
+			if stmtIDFloat, ok := diag.Data.(float64); ok {
+				stmtID := ast.NodeID(stmtIDFloat)
+				actions = append(actions, CodeAction{
+					Title:       "Remove redundant return",
+					Kind:        "quickfix",
+					Diagnostics: []Diagnostic{diag},
+					IsPreferred: true,
+					Edit: &WorkspaceEdit{
+						Changes: map[string][]TextEdit{
+							uri: {
+								{
+									Range:   s.getStatementRemovalRange(doc, stmtID),
+									NewText: "",
+								},
+							},
+						},
+					},
+				})
+			}
+		case "redundant-value", "redundant-parameter":
+			actions = append(actions, CodeAction{
+				Title:       "Remove redundant items",
+				Kind:        "quickfix",
+				Diagnostics: []Diagnostic{diag},
+				IsPreferred: true,
+				Edit: &WorkspaceEdit{
+					Changes: map[string][]TextEdit{
+						uri: {
+							{
+								Range:   diag.Range,
+								NewText: "",
+							},
+						},
+					},
+				},
+			})
 		}
 	}
 

@@ -112,6 +112,9 @@ type InitializationOptions struct {
 	DiagEmptyBlock           bool `json:"diagEmptyBlock"`
 	DiagFormatString         bool `json:"diagFormatString"`
 	DiagTypeCheck            bool `json:"diagTypeCheck"`
+	DiagRedundantParameter   bool `json:"diagRedundantParameter"`
+	DiagRedundantValue       bool `json:"diagRedundantValue"`
+	DiagRedundantReturn      bool `json:"diagRedundantReturn"`
 
 	InlayParamHints    bool `json:"inlayParamHints"`
 	InlaySuppressMatch bool `json:"inlaySuppressMatch"`

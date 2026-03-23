@@ -71,6 +71,9 @@ type Server struct {
 	DiagEmptyBlock           bool
 	DiagFormatString         bool
 	DiagTypeCheck            bool
+	DiagRedundantParameter   bool
+	DiagRedundantValue       bool
+	DiagRedundantReturn      bool
 
 	// Inlay Hints
 	InlayParamHints    bool
@@ -180,6 +183,9 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 	setCfg(&s.DiagEmptyBlock, opts.DiagEmptyBlock, &needsRepublish)
 	setCfg(&s.DiagFormatString, opts.DiagFormatString, &needsRepublish)
 	setCfg(&s.DiagTypeCheck, opts.DiagTypeCheck, &needsRepublish)
+	setCfg(&s.DiagRedundantParameter, opts.DiagRedundantParameter, &needsRepublish)
+	setCfg(&s.DiagRedundantValue, opts.DiagRedundantValue, &needsRepublish)
+	setCfg(&s.DiagRedundantReturn, opts.DiagRedundantReturn, &needsRepublish)
 
 	setCfg(&s.InlayParamHints, opts.InlayParamHints, nil)
 	setCfg(&s.InlaySuppressMatch, opts.InlaySuppressMatch, nil)

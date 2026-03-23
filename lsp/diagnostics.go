@@ -567,8 +567,8 @@ func (s *Server) publishDiagnostics(uri string) {
 			}
 		}
 
-		// Unbalanced assignments
-		if s.DiagUnbalancedAssignment && (node.Kind == ast.KindLocalAssign || node.Kind == ast.KindAssign) {
+		// Unbalanced assignments & Redundant values
+		if (s.DiagUnbalancedAssignment || s.DiagRedundantValue) && (node.Kind == ast.KindLocalAssign || node.Kind == ast.KindAssign) {
 			lhsList := doc.Tree.Nodes[node.Left]
 			if node.Right != ast.InvalidNode {
 				rhsList := doc.Tree.Nodes[node.Right]
@@ -577,19 +577,33 @@ func (s *Server) publishDiagnostics(uri string) {
 					lastRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(rhsList.Count-1)]
 					lastRhsNode := doc.Tree.Nodes[lastRhsID]
 
-					if lastRhsNode.Kind != ast.KindCallExpr && lastRhsNode.Kind != ast.KindMethodCall && lastRhsNode.Kind != ast.KindVararg {
-						msg := "Assigning fewer values than variables; some variables will be initialized to nil."
+					isDynamic := lastRhsNode.Kind == ast.KindCallExpr || lastRhsNode.Kind == ast.KindMethodCall || lastRhsNode.Kind == ast.KindVararg
 
-						if rhsList.Count > lhsList.Count {
-							msg = "Assigning more values than variables; excess values will be discarded."
+					if !isDynamic || rhsList.Count > lhsList.Count {
+						if rhsList.Count > lhsList.Count && s.DiagRedundantValue {
+							firstRedundantID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count)]
+							prevRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count-1)]
+
+							startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRedundantID].Start, doc.Tree.Nodes[prevRhsID].End)
+
+							s.diagBuf = append(s.diagBuf, Diagnostic{
+								Range:    getRange(doc.Tree, startOff, lastRhsNode.End),
+								Severity: SeverityWarning,
+								Code:     "redundant-value",
+								Tags:     []DiagnosticTag{Unnecessary},
+								Message:  "Assigning more values than variables; excess values will be discarded.",
+							})
+						} else if lhsList.Count > rhsList.Count && s.DiagUnbalancedAssignment && !isDynamic {
+							firstUnbalancedID := doc.Tree.ExtraList[lhsList.Extra+uint32(rhsList.Count)]
+							lastLhsID := doc.Tree.ExtraList[lhsList.Extra+uint32(lhsList.Count-1)]
+
+							s.diagBuf = append(s.diagBuf, Diagnostic{
+								Range:    getRange(doc.Tree, doc.Tree.Nodes[firstUnbalancedID].Start, doc.Tree.Nodes[lastLhsID].End),
+								Severity: SeverityWarning,
+								Code:     "unbalanced-assignment",
+								Message:  "Assigning fewer values than variables; these variables will be initialized to nil.",
+							})
 						}
-
-						s.diagBuf = append(s.diagBuf, Diagnostic{
-							Range:    getRange(doc.Tree, doc.Tree.Nodes[node.Left].Start, doc.Tree.Nodes[node.Right].End),
-							Severity: SeverityWarning,
-							Code:     "unbalanced-assignment",
-							Message:  msg,
-						})
 					}
 				}
 			}
@@ -668,6 +682,111 @@ func (s *Server) publishDiagnostics(uri string) {
 					Code:     "index-non-table",
 					Message:  fmt.Sprintf("Attempt to index a non-table value (inferred type: %s).", t.Format()),
 				})
+			}
+		}
+
+		// Redundant Return
+		if s.DiagRedundantReturn && node.Kind == ast.KindReturn {
+			if node.Left == ast.InvalidNode || doc.Tree.Nodes[node.Left].Count == 0 {
+				pID := node.Parent
+				if pID != ast.InvalidNode {
+					pNode := doc.Tree.Nodes[pID]
+					if pNode.Kind == ast.KindBlock && pNode.Count > 0 && doc.Tree.ExtraList[pNode.Extra+uint32(pNode.Count-1)] == nodeID {
+						gpID := pNode.Parent
+						if gpID != ast.InvalidNode {
+							gpNode := doc.Tree.Nodes[gpID]
+							if gpNode.Kind == ast.KindFunctionExpr || gpNode.Kind == ast.KindFile {
+								s.diagBuf = append(s.diagBuf, Diagnostic{
+									Range:    getNodeRange(doc.Tree, nodeID),
+									Severity: SeverityWarning,
+									Code:     "redundant-return",
+									Tags:     []DiagnosticTag{Unnecessary},
+									Message:  "Redundant return statement. The function will exit here anyway.",
+									Data:     float64(nodeID),
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Redundant Parameter
+		if s.DiagRedundantParameter && (node.Kind == ast.KindCallExpr || node.Kind == ast.KindMethodCall) {
+			var funcIdentID ast.NodeID
+
+			if node.Kind == ast.KindMethodCall {
+				funcIdentID = node.Right
+			} else {
+				funcIdentID = node.Left
+				if int(funcIdentID) < len(doc.Tree.Nodes) && doc.Tree.Nodes[funcIdentID].Kind == ast.KindMemberExpr {
+					funcIdentID = doc.Tree.Nodes[funcIdentID].Right
+				}
+			}
+
+			if funcIdentID != ast.InvalidNode && int(funcIdentID) < len(doc.Tree.Nodes) {
+				ctx := s.resolveSymbolNode(uri, doc, funcIdentID)
+				if ctx != nil && ctx.TargetDefID != ast.InvalidNode && ctx.TargetDoc != nil {
+					valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
+					if valID != ast.InvalidNode && int(valID) < len(ctx.TargetDoc.Tree.Nodes) && ctx.TargetDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+						funcNode := ctx.TargetDoc.Tree.Nodes[valID]
+
+						var hasVararg bool
+
+						if funcNode.Count > 0 {
+							lastParamID := ctx.TargetDoc.Tree.ExtraList[funcNode.Extra+uint32(funcNode.Count-1)]
+							if ctx.TargetDoc.Tree.Nodes[lastParamID].Kind == ast.KindVararg {
+								hasVararg = true
+							}
+						}
+
+						if !hasVararg {
+							hasImplicitSelfCall := node.Kind == ast.KindMethodCall
+
+							var hasImplicitSelfDef bool
+
+							pDefID := ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Parent
+							if pDefID != ast.InvalidNode && int(pDefID) < len(ctx.TargetDoc.Tree.Nodes) && ctx.TargetDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
+								hasImplicitSelfDef = true
+							}
+
+							paramOffset := 0
+							if hasImplicitSelfCall && !hasImplicitSelfDef {
+								paramOffset = 1
+							} else if !hasImplicitSelfCall && hasImplicitSelfDef {
+								paramOffset = -1
+							}
+
+							expectedArgs := int(funcNode.Count) - paramOffset
+							if expectedArgs < 0 {
+								expectedArgs = 0
+							}
+
+							if int(node.Count) > expectedArgs {
+								firstRedundantID := doc.Tree.ExtraList[node.Extra+uint32(expectedArgs)]
+								lastArgID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
+
+								var limit uint32
+
+								if expectedArgs > 0 {
+									limit = doc.Tree.Nodes[doc.Tree.ExtraList[node.Extra+uint32(expectedArgs-1)]].End
+								} else {
+									limit = doc.Tree.Nodes[node.Left].End
+								}
+
+								startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRedundantID].Start, limit)
+
+								s.diagBuf = append(s.diagBuf, Diagnostic{
+									Range:    getRange(doc.Tree, startOff, doc.Tree.Nodes[lastArgID].End),
+									Severity: SeverityWarning,
+									Code:     "redundant-parameter",
+									Tags:     []DiagnosticTag{Unnecessary},
+									Message:  fmt.Sprintf("Function expects %d argument(s), but got %d. Excess arguments will be ignored.", expectedArgs, node.Count),
+								})
+							}
+						}
+					}
+				}
 			}
 		}
 

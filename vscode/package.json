@@ -222,6 +222,27 @@
                         "scope": "resource",
                         "markdownDescription": "Enable strict type checking for definitely-invalid operations (calling numbers, indexing nil, etc.). **Warning:** Lua is highly dynamic; this will produce false positives unless your codebase uses comprehensive LuaCATS `@type` annotations.",
                         "order": 21
+                    },
+                    "lugo.diagnostics.redundantParameter": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for passing more arguments to a function than it accepts.",
+                        "order": 22
+                    },
+                    "lugo.diagnostics.redundantValue": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for assigning more values than there are variables.",
+                        "order": 23
+                    },
+                    "lugo.diagnostics.redundantReturn": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for empty return statements at the very end of a function.",
+                        "order": 24
                     }
                 }
             },
@@ -234,63 +255,63 @@
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable inline parameter name hints for function and method calls.",
-                        "order": 22
+                        "order": 25
                     },
                     "lugo.inlayHints.suppressWhenArgumentMatchesName": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Suppress parameter name hints when the argument name exactly matches the parameter name (e.g., avoiding `pSource: pSource`).",
-                        "order": 23
+                        "order": 26
                     },
                     "lugo.inlayHints.implicitSelf": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable inline `self` hints for method definitions using the colon syntax.",
-                        "order": 24
+                        "order": 27
                     },
                     "lugo.features.documentHighlight": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable document highlights for variables and function/method calls.",
-                        "order": 25
+                        "order": 28
                     },
                     "lugo.features.hoverEvaluation": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Evaluate and display the result of constant expressions on hover (e.g., `1 + 2` suggests `3`).",
-                        "order": 26
+                        "order": 29
                     },
                     "lugo.features.codeLens": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable CodeLens annotations (e.g., reference counts) above function definitions.",
-                        "order": 27
+                        "order": 30
                     },
                     "lugo.features.formatting": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable the built-in Lua formatter for inline format fixing and document formatting.",
-                        "order": 28
+                        "order": 31
                     },
                     "lugo.features.formatOpinionated": {
                         "type": "boolean",
                         "default": false,
                         "scope": "resource",
                         "markdownDescription": "Apply opinionated formatting tweaks (e.g., forcing blank lines between unrelated statements, before returns).",
-                        "order": 29
+                        "order": 32
                     },
                     "lugo.completion.suggestFunctionParams": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Automatically insert function parameters as snippets when autocompleting a function call.",
-                        "order": 30
+                        "order": 33
                     }
                 }
             }

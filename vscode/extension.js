@@ -68,6 +68,9 @@ function buildInitializationOptions() {
 		diagEmptyBlock: lugoConfig.get("diagnostics.emptyBlock") !== false,
 		diagFormatString: lugoConfig.get("diagnostics.formatString") !== false,
 		diagTypeCheck: lugoConfig.get("diagnostics.typeCheck") === true,
+		diagRedundantParameter: lugoConfig.get("diagnostics.redundantParameter") !== false,
+		diagRedundantValue: lugoConfig.get("diagnostics.redundantValue") !== false,
+		diagRedundantReturn: lugoConfig.get("diagnostics.redundantReturn") !== false,
 
 		inlayParamHints: lugoConfig.get("inlayHints.parameterNames") !== false,
 		inlaySuppressMatch: lugoConfig.get("inlayHints.suppressWhenArgumentMatchesName") !== false,
