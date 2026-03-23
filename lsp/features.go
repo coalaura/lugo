@@ -628,8 +628,9 @@ func (s *Server) handleCompletion(req Request) {
 			validRecs[modHash] = true
 		}
 
-		for key, sym := range s.GlobalIndex {
-			if validRecs[key.ReceiverHash] && key.PropHash != 0 {
+		for key, syms := range s.GlobalIndex {
+			if validRecs[key.ReceiverHash] && key.PropHash != 0 && len(syms) > 0 {
+				sym := syms[0]
 				if symDoc, ok := s.Documents[sym.URI]; ok {
 					node := symDoc.Tree.Nodes[sym.NodeID]
 
@@ -677,8 +678,9 @@ func (s *Server) handleCompletion(req Request) {
 			return true
 		})
 
-		for key, sym := range s.GlobalIndex {
-			if key.ReceiverHash == 0 && key.PropHash != 0 {
+		for key, syms := range s.GlobalIndex {
+			if key.ReceiverHash == 0 && key.PropHash != 0 && len(syms) > 0 {
+				sym := syms[0]
 				if symDoc, ok := s.Documents[sym.URI]; ok {
 					node := symDoc.Tree.Nodes[sym.NodeID]
 
@@ -815,69 +817,24 @@ func (s *Server) handleSignatureHelp(req Request) {
 	}
 
 	ctx := s.resolveSymbolAt(uri, doc.Tree.Nodes[funcIdentID].Start)
-	if ctx == nil || ctx.TargetDoc == nil || ctx.TargetDefID == ast.InvalidNode {
+	if ctx == nil {
 		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
 
 		return
 	}
 
-	valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
-	if valID == ast.InvalidNode || int(valID) >= len(ctx.TargetDoc.Tree.Nodes) || ctx.TargetDoc.Tree.Nodes[valID].Kind != ast.KindFunctionExpr {
+	var defs []GlobalSymbol
+
+	if len(ctx.GlobalDefs) > 0 {
+		defs = ctx.GlobalDefs
+	} else if ctx.TargetDefID != ast.InvalidNode {
+		defs = []GlobalSymbol{{URI: ctx.TargetURI, NodeID: ctx.TargetDefID}}
+	}
+
+	if len(defs) == 0 {
 		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
 
 		return
-	}
-
-	luadoc := parseLuaDoc(ctx.TargetDoc.getCommentsAbove(ctx.TargetDefID))
-	funcNode := ctx.TargetDoc.Tree.Nodes[valID]
-
-	var (
-		paramsInfo []ParameterInformation
-		labels     []string
-	)
-
-	paramDocs := make(map[string]LuaDocParam)
-
-	for _, p := range luadoc.Params {
-		paramDocs[p.Name] = p
-	}
-
-	for i := uint16(0); i < funcNode.Count; i++ {
-		if funcNode.Extra+uint32(i) >= uint32(len(ctx.TargetDoc.Tree.ExtraList)) {
-			continue
-		}
-
-		pID := ctx.TargetDoc.Tree.ExtraList[funcNode.Extra+uint32(i)]
-		if pID == ast.InvalidNode || int(pID) >= len(ctx.TargetDoc.Tree.Nodes) {
-			continue
-		}
-
-		pNode := ctx.TargetDoc.Tree.Nodes[pID]
-		if pNode.Start > pNode.End || pNode.End > uint32(len(ctx.TargetDoc.Source)) {
-			continue
-		}
-
-		pName := ast.String(ctx.TargetDoc.Source[pNode.Start:pNode.End])
-
-		label := pName
-
-		var docContent *MarkupContent
-
-		if pDoc, ok := paramDocs[pName]; ok {
-			if pDoc.Type != "" {
-				label += ": " + pDoc.Type
-			}
-
-			if pDoc.Desc != "" {
-				docContent = &MarkupContent{Kind: "markdown", Value: pDoc.Desc}
-			}
-		}
-
-		labels = append(labels, label)
-		paramsInfo = append(paramsInfo, ParameterInformation{
-			Label:         label,
-			Documentation: docContent,
-		})
 	}
 
 	var activeParam int
@@ -903,24 +860,139 @@ func (s *Server) handleSignatureHelp(req Request) {
 		}
 	}
 
-	var funcDoc *MarkupContent
+	var (
+		signatures     []SignatureInformation
+		bestSigIndex   int
+		bestMatchScore int = -1
+	)
 
-	if luadoc.Description != "" {
-		funcDoc = &MarkupContent{Kind: "markdown", Value: luadoc.Description}
+	for _, def := range defs {
+		tDoc := s.Documents[def.URI]
+		if tDoc == nil {
+			continue
+		}
+
+		valID := tDoc.getAssignedValue(def.NodeID)
+		if valID == ast.InvalidNode || int(valID) >= len(tDoc.Tree.Nodes) || tDoc.Tree.Nodes[valID].Kind != ast.KindFunctionExpr {
+			continue
+		}
+
+		luadoc := parseLuaDoc(tDoc.getCommentsAbove(def.NodeID))
+		funcNode := tDoc.Tree.Nodes[valID]
+
+		var (
+			paramsInfo []ParameterInformation
+			labels     []string
+		)
+
+		paramDocs := make(map[string]LuaDocParam)
+
+		for _, p := range luadoc.Params {
+			paramDocs[p.Name] = p
+		}
+
+		hasImplicitSelfCall := callNode.Kind == ast.KindMethodCall
+
+		var hasImplicitSelfDef bool
+
+		pDefID := tDoc.Tree.Nodes[def.NodeID].Parent
+		if pDefID != ast.InvalidNode && int(pDefID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
+			hasImplicitSelfDef = true
+		}
+
+		var paramOffset int
+
+		if hasImplicitSelfCall && !hasImplicitSelfDef {
+			paramOffset = 1
+		} else if !hasImplicitSelfCall && hasImplicitSelfDef {
+			paramOffset = -1
+		}
+
+		for i := uint16(0); i < funcNode.Count; i++ {
+			if funcNode.Extra+uint32(i) >= uint32(len(tDoc.Tree.ExtraList)) {
+				continue
+			}
+
+			pID := tDoc.Tree.ExtraList[funcNode.Extra+uint32(i)]
+			if pID == ast.InvalidNode || int(pID) >= len(tDoc.Tree.Nodes) {
+				continue
+			}
+
+			pNode := tDoc.Tree.Nodes[pID]
+			if pNode.Start > pNode.End || pNode.End > uint32(len(tDoc.Source)) {
+				continue
+			}
+
+			pName := ast.String(tDoc.Source[pNode.Start:pNode.End])
+
+			if i == 0 && hasImplicitSelfCall && !hasImplicitSelfDef && pName == "self" {
+				continue
+			}
+
+			label := pName
+
+			var docContent *MarkupContent
+
+			if pDoc, ok := paramDocs[pName]; ok {
+				if pDoc.Type != "" {
+					label += ": " + pDoc.Type
+				}
+
+				if pDoc.Desc != "" {
+					docContent = &MarkupContent{Kind: "markdown", Value: pDoc.Desc}
+				}
+			}
+
+			labels = append(labels, label)
+			paramsInfo = append(paramsInfo, ParameterInformation{
+				Label:         label,
+				Documentation: docContent,
+			})
+		}
+
+		var funcDoc *MarkupContent
+
+		if luadoc.Description != "" {
+			funcDoc = &MarkupContent{Kind: "markdown", Value: luadoc.Description}
+		}
+
+		signatures = append(signatures, SignatureInformation{
+			Label:         ctx.DisplayName + "(" + strings.Join(labels, ", ") + ")",
+			Documentation: funcDoc,
+			Parameters:    paramsInfo,
+		})
+
+		expectedArgs := int(funcNode.Count) - paramOffset
+		if expectedArgs < 0 {
+			expectedArgs = 0
+		}
+
+		var score int
+
+		if expectedArgs == int(callNode.Count) {
+			score = 2
+		} else if expectedArgs > int(callNode.Count) {
+			score = 1
+		}
+
+		if score > bestMatchScore {
+			bestMatchScore = score
+			bestSigIndex = len(signatures) - 1
+		}
 	}
 
-	sigInfo := SignatureInformation{
-		Label:         ctx.DisplayName + "(" + strings.Join(labels, ", ") + ")",
-		Documentation: funcDoc,
-		Parameters:    paramsInfo,
+	if len(signatures) == 0 {
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+		return
 	}
 
 	WriteMessage(s.Writer, Response{
 		RPC: "2.0",
 		ID:  req.ID,
 		Result: SignatureHelp{
-			Signatures:      []SignatureInformation{sigInfo},
-			ActiveSignature: 0,
+			Signatures:      signatures,
+			ActiveSignature: bestSigIndex,
 			ActiveParameter: activeParam,
 		},
 	})
@@ -1310,7 +1382,8 @@ func (s *Server) handleSemanticTokensFull(req Request) {
 						recHash = ast.HashBytes(recBytes)
 					}
 
-					if sym, ok := s.getGlobalSymbol(recHash, hash); ok {
+					if syms, ok := s.getGlobalSymbols(recHash, hash); ok && len(syms) > 0 {
+						sym := syms[0]
 						if gDoc, ok := s.Documents[sym.URI]; ok {
 							targetDoc = gDoc
 							targetDef = sym.NodeID

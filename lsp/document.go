@@ -22,7 +22,6 @@ type Document struct {
 	Inferring          []bool
 	commentBuf         []byte
 	depBuf             []byte
-	ExportedGlobals    map[GlobalKey]ast.NodeID
 	ExportedGlobalDefs map[ast.NodeID]GlobalKey
 	IsMeta             bool
 	ExportedNode       ast.NodeID

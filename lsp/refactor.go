@@ -32,8 +32,8 @@ func (s *Server) handleCodeAction(req Request) {
 	}
 
 	var (
-		actions   []CodeAction
-		hasUnused bool
+		actions        []CodeAction
+		hasSafeFixDiag bool
 	)
 
 	uri := s.normalizeURI(params.TextDocument.URI)
@@ -47,8 +47,8 @@ func (s *Server) handleCodeAction(req Request) {
 
 	for _, diag := range params.Context.Diagnostics {
 		switch diag.Code {
-		case "unused-local", "unused-parameter", "unused-loop-var", "unused-vararg", "unused-function", "unreachable-code", "ambiguous-return":
-			hasUnused = true
+		case "unused-local", "unused-parameter", "unused-loop-var", "unused-vararg", "unused-function", "unreachable-code", "ambiguous-return", "self-assignment", "empty-block", "redundant-return", "redundant-value", "redundant-parameter":
+			hasSafeFixDiag = true
 		case "undefined-global":
 			if suggestion, ok := diag.Data.(string); ok && suggestion != "" {
 				actions = append(actions, CodeAction{
@@ -88,98 +88,19 @@ func (s *Server) handleCodeAction(req Request) {
 					},
 				},
 			})
-		case "self-assignment":
-			if stmtIDFloat, ok := diag.Data.(float64); ok {
-				stmtID := ast.NodeID(stmtIDFloat)
-				stmtNode := doc.Tree.Nodes[stmtID]
-
-				// Only provide a clean fix if it's a single assignment
-				if doc.Tree.Nodes[stmtNode.Left].Count == 1 {
-					actions = append(actions, CodeAction{
-						Title:       "Remove self-assignment",
-						Kind:        "quickfix",
-						Diagnostics: []Diagnostic{diag},
-						IsPreferred: true,
-						Edit: &WorkspaceEdit{
-							Changes: map[string][]TextEdit{
-								uri: {
-									{
-										Range:   s.getStatementRemovalRange(doc, stmtID),
-										NewText: "",
-									},
-								},
-							},
-						},
-					})
-				}
-			}
-		case "empty-block":
-			if doStmtIDFloat, ok := diag.Data.(float64); ok {
-				doStmtID := ast.NodeID(doStmtIDFloat)
-				actions = append(actions, CodeAction{
-					Title:       "Remove empty 'do' block",
-					Kind:        "quickfix",
-					Diagnostics: []Diagnostic{diag},
-					IsPreferred: true,
-					Edit: &WorkspaceEdit{
-						Changes: map[string][]TextEdit{
-							uri: {
-								{
-									Range:   s.getStatementRemovalRange(doc, doStmtID),
-									NewText: "",
-								},
-							},
-						},
-					},
-				})
-			}
-		case "redundant-return":
-			if stmtIDFloat, ok := diag.Data.(float64); ok {
-				stmtID := ast.NodeID(stmtIDFloat)
-				actions = append(actions, CodeAction{
-					Title:       "Remove redundant return",
-					Kind:        "quickfix",
-					Diagnostics: []Diagnostic{diag},
-					IsPreferred: true,
-					Edit: &WorkspaceEdit{
-						Changes: map[string][]TextEdit{
-							uri: {
-								{
-									Range:   s.getStatementRemovalRange(doc, stmtID),
-									NewText: "",
-								},
-							},
-						},
-					},
-				})
-			}
-		case "redundant-value", "redundant-parameter":
-			actions = append(actions, CodeAction{
-				Title:       "Remove redundant items",
-				Kind:        "quickfix",
-				Diagnostics: []Diagnostic{diag},
-				IsPreferred: true,
-				Edit: &WorkspaceEdit{
-					Changes: map[string][]TextEdit{
-						uri: {
-							{
-								Range:   diag.Range,
-								NewText: "",
-							},
-						},
-					},
-				},
-			})
 		}
 	}
 
-	if hasUnused && docOk {
-		allFixes := s.getSafeFixesForDocument(doc, nil)
+	allFixes := s.getSafeFixesForDocument(doc, nil)
 
-		var allEdits []TextEdit
+	var allEdits []TextEdit
 
+	if hasSafeFixDiag {
 		for _, diag := range params.Context.Diagnostics {
-			if diag.Code != "unused-local" && diag.Code != "unused-parameter" && diag.Code != "unused-loop-var" && diag.Code != "unused-vararg" && diag.Code != "unused-function" && diag.Code != "unreachable-code" && diag.Code != "ambiguous-return" {
+			switch diag.Code {
+			case "unused-local", "unused-parameter", "unused-loop-var", "unused-vararg", "unused-function", "unreachable-code", "ambiguous-return", "self-assignment", "empty-block", "redundant-return", "redundant-value", "redundant-parameter":
+				// Proceed
+			default:
 				continue
 			}
 
@@ -1622,8 +1543,101 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 		node := doc.Tree.Nodes[nodeID]
 
 		switch node.Kind {
+		case ast.KindDo:
+			if node.Left != ast.InvalidNode && doc.Tree.Nodes[node.Left].Count == 0 {
+				fixes = append(fixes, SafeFix{
+					Coverage: []ast.NodeID{nodeID},
+					Edits: []TextEdit{{
+						Range:   s.getStatementRemovalRange(doc, nodeID),
+						NewText: "",
+					}},
+					Title: "Remove empty 'do' block",
+				})
+			}
 		case ast.KindLocalAssign:
 			s.processListForFixes(doc, node.Left, node.Right, unusedDefs, deadStores, &fixes, true)
+
+			// Check for redundant values
+			lhsList := doc.Tree.Nodes[node.Left]
+
+			if node.Right != ast.InvalidNode {
+				rhsList := doc.Tree.Nodes[node.Right]
+
+				if lhsList.Count != rhsList.Count && rhsList.Count > 0 {
+					lastRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(rhsList.Count-1)]
+					lastRhsNode := doc.Tree.Nodes[lastRhsID]
+
+					isDynamic := lastRhsNode.Kind == ast.KindCallExpr || lastRhsNode.Kind == ast.KindMethodCall || lastRhsNode.Kind == ast.KindVararg
+
+					if !isDynamic || rhsList.Count > lhsList.Count {
+						if rhsList.Count > lhsList.Count {
+							firstRedundantID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count)]
+							prevRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count-1)]
+
+							startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRedundantID].Start, doc.Tree.Nodes[prevRhsID].End)
+
+							fixes = append(fixes, SafeFix{
+								Coverage: []ast.NodeID{nodeID},
+								Edits: []TextEdit{{
+									Range:   getRange(doc.Tree, startOff, lastRhsNode.End),
+									NewText: "",
+								}},
+								Title: "Remove redundant values",
+							})
+						}
+					}
+				}
+			}
+		case ast.KindAssign:
+			// Check for self-assignment
+			lhsList := doc.Tree.Nodes[node.Left]
+			if node.Right != ast.InvalidNode {
+				rhsList := doc.Tree.Nodes[node.Right]
+				if lhsList.Count == 1 && rhsList.Count == 1 {
+					lID := doc.Tree.ExtraList[lhsList.Extra]
+					rID := doc.Tree.ExtraList[rhsList.Extra]
+
+					lSource := doc.Source[doc.Tree.Nodes[lID].Start:doc.Tree.Nodes[lID].End]
+					rSource := doc.Source[doc.Tree.Nodes[rID].Start:doc.Tree.Nodes[rID].End]
+
+					if bytes.Equal(lSource, rSource) {
+						fixes = append(fixes, SafeFix{
+							Coverage: []ast.NodeID{nodeID},
+							Edits: []TextEdit{{
+								Range:   s.getStatementRemovalRange(doc, nodeID),
+								NewText: "",
+							}},
+							Title: "Remove self-assignment",
+						})
+					}
+				}
+
+				// Check for redundant values
+				if lhsList.Count != rhsList.Count && rhsList.Count > 0 {
+					lastRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(rhsList.Count-1)]
+					lastRhsNode := doc.Tree.Nodes[lastRhsID]
+
+					isDynamic := lastRhsNode.Kind == ast.KindCallExpr || lastRhsNode.Kind == ast.KindMethodCall || lastRhsNode.Kind == ast.KindVararg
+
+					if !isDynamic || rhsList.Count > lhsList.Count {
+						if rhsList.Count > lhsList.Count {
+							firstRedundantID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count)]
+							prevRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count-1)]
+
+							startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRedundantID].Start, doc.Tree.Nodes[prevRhsID].End)
+
+							fixes = append(fixes, SafeFix{
+								Coverage: []ast.NodeID{nodeID},
+								Edits: []TextEdit{{
+									Range:   getRange(doc.Tree, startOff, lastRhsNode.End),
+									NewText: "",
+								}},
+								Title: "Remove redundant values",
+							})
+						}
+					}
+				}
+			}
 		case ast.KindForIn:
 			s.processListForFixes(doc, node.Left, ast.InvalidNode, unusedDefs, deadStores, &fixes, false)
 		case ast.KindLocalFunction:
@@ -1684,7 +1698,146 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 						})
 					}
 				}
+			} else {
+				pID := node.Parent
+				if pID != ast.InvalidNode {
+					pNode := doc.Tree.Nodes[pID]
+					if pNode.Kind == ast.KindBlock && pNode.Count > 0 && doc.Tree.ExtraList[pNode.Extra+uint32(pNode.Count-1)] == nodeID {
+						gpID := pNode.Parent
+						if gpID != ast.InvalidNode {
+							gpNode := doc.Tree.Nodes[gpID]
+							if gpNode.Kind == ast.KindFunctionExpr || gpNode.Kind == ast.KindFile {
+								fixes = append(fixes, SafeFix{
+									Coverage: []ast.NodeID{nodeID},
+									Edits: []TextEdit{{
+										Range:   s.getStatementRemovalRange(doc, nodeID),
+										NewText: "",
+									}},
+									Title: "Remove redundant return",
+								})
+							}
+						}
+					}
+				}
 			}
+		case ast.KindCallExpr, ast.KindMethodCall:
+			var funcIdentID ast.NodeID
+
+			if node.Kind == ast.KindMethodCall {
+				funcIdentID = node.Right
+			} else {
+				funcIdentID = node.Left
+				if int(funcIdentID) < len(doc.Tree.Nodes) && doc.Tree.Nodes[funcIdentID].Kind == ast.KindMemberExpr {
+					funcIdentID = doc.Tree.Nodes[funcIdentID].Right
+				}
+			}
+
+			if funcIdentID != ast.InvalidNode && int(funcIdentID) < len(doc.Tree.Nodes) {
+				ctx := s.resolveSymbolNode(doc.URI, doc, funcIdentID)
+				if ctx != nil {
+					var defs []GlobalSymbol
+
+					if len(ctx.GlobalDefs) > 0 {
+						defs = ctx.GlobalDefs
+					} else if ctx.TargetDefID != ast.InvalidNode {
+						defs = []GlobalSymbol{{URI: ctx.TargetURI, NodeID: ctx.TargetDefID}}
+					}
+
+					var (
+						matchedAny           bool
+						maxExpectedArgs      int
+						maxExpectedArgsFound bool
+					)
+
+					for _, def := range defs {
+						tDoc := s.Documents[def.URI]
+						if tDoc == nil {
+							continue
+						}
+
+						valID := tDoc.getAssignedValue(def.NodeID)
+						if valID != ast.InvalidNode && int(valID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+							funcNode := tDoc.Tree.Nodes[valID]
+
+							var hasVararg bool
+
+							if funcNode.Count > 0 {
+								lastParamID := tDoc.Tree.ExtraList[funcNode.Extra+uint32(funcNode.Count-1)]
+								if tDoc.Tree.Nodes[lastParamID].Kind == ast.KindVararg {
+									hasVararg = true
+								}
+							}
+
+							if hasVararg {
+								matchedAny = true
+
+								break
+							}
+
+							hasImplicitSelfCall := node.Kind == ast.KindMethodCall
+
+							var hasImplicitSelfDef bool
+
+							pDefID := tDoc.Tree.Nodes[def.NodeID].Parent
+							if pDefID != ast.InvalidNode && int(pDefID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
+								hasImplicitSelfDef = true
+							}
+
+							var paramOffset int
+
+							if hasImplicitSelfCall && !hasImplicitSelfDef {
+								paramOffset = 1
+							} else if !hasImplicitSelfCall && hasImplicitSelfDef {
+								paramOffset = -1
+							}
+
+							expectedArgs := int(funcNode.Count) - paramOffset
+							if expectedArgs < 0 {
+								expectedArgs = 0
+							}
+
+							if int(node.Count) <= expectedArgs {
+								matchedAny = true
+
+								break
+							}
+
+							if !maxExpectedArgsFound || expectedArgs > maxExpectedArgs {
+								maxExpectedArgs = expectedArgs
+								maxExpectedArgsFound = true
+							}
+						}
+					}
+
+					if !matchedAny && maxExpectedArgsFound {
+						expectedArgs := maxExpectedArgs
+						if int(node.Count) > expectedArgs {
+							firstRedundantID := doc.Tree.ExtraList[node.Extra+uint32(expectedArgs)]
+							lastArgID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
+
+							var limit uint32
+
+							if expectedArgs > 0 {
+								limit = doc.Tree.Nodes[doc.Tree.ExtraList[node.Extra+uint32(expectedArgs-1)]].End
+							} else {
+								limit = doc.Tree.Nodes[node.Left].End
+							}
+
+							startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRedundantID].Start, limit)
+
+							fixes = append(fixes, SafeFix{
+								Coverage: []ast.NodeID{nodeID},
+								Edits: []TextEdit{{
+									Range:   getRange(doc.Tree, startOff, doc.Tree.Nodes[lastArgID].End),
+									NewText: "",
+								}},
+								Title: "Remove redundant parameters",
+							})
+						}
+					}
+				}
+			}
+
 		case ast.KindBlock, ast.KindFile:
 			var terminalFound bool
 

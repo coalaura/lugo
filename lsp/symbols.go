@@ -59,6 +59,7 @@ type SymbolContext struct {
 	RecDefID    ast.NodeID
 	IsProp      bool
 	IsGlobal    bool
+	GlobalDefs  []GlobalSymbol
 }
 
 func (s *Server) handleDefinition(req Request) {
@@ -81,15 +82,30 @@ func (s *Server) handleDefinition(req Request) {
 	offset := doc.Tree.Offset(params.Position.Line, params.Position.Character)
 	ctx := s.resolveSymbolAt(uri, offset)
 
-	if ctx != nil && ctx.TargetDefID != ast.InvalidNode {
-		loc := Location{
-			URI:   ctx.TargetURI,
-			Range: getNodeRange(ctx.TargetDoc.Tree, ctx.TargetDefID),
+	if ctx != nil {
+		var locs []Location
+
+		if len(ctx.GlobalDefs) > 0 {
+			for _, def := range ctx.GlobalDefs {
+				if tDoc, ok := s.Documents[def.URI]; ok {
+					locs = append(locs, Location{
+						URI:   def.URI,
+						Range: getNodeRange(tDoc.Tree, def.NodeID),
+					})
+				}
+			}
+		} else if ctx.TargetDefID != ast.InvalidNode {
+			locs = append(locs, Location{
+				URI:   ctx.TargetURI,
+				Range: getNodeRange(ctx.TargetDoc.Tree, ctx.TargetDefID),
+			})
 		}
 
-		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: []Location{loc}})
+		if len(locs) > 0 {
+			WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: locs})
 
-		return
+			return
+		}
 	}
 
 	WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
@@ -496,47 +512,53 @@ func (s *Server) handleWorkspaceSymbol(req Request) {
 		count   int
 	)
 
-	for key, sym := range s.GlobalIndex {
-		if !containsFold([]byte(sym.Name), queryLower) {
-			continue
-		}
+	for key, syms := range s.GlobalIndex {
+		for _, sym := range syms {
+			if !containsFold([]byte(sym.Name), queryLower) {
+				continue
+			}
 
-		doc, ok := s.Documents[sym.URI]
-		if !ok {
-			continue
-		}
+			doc, ok := s.Documents[sym.URI]
+			if !ok {
+				continue
+			}
 
-		kind := SymbolKindVariable
+			kind := SymbolKindVariable
 
-		valID := doc.getAssignedValue(sym.NodeID)
+			valID := doc.getAssignedValue(sym.NodeID)
 
-		if valID != ast.InvalidNode {
-			valKind := doc.Tree.Nodes[valID].Kind
-			if valKind == ast.KindFunctionExpr {
-				if key.ReceiverHash != 0 {
-					kind = SymbolKindMethod
-				} else {
-					kind = SymbolKindFunction
+			if valID != ast.InvalidNode {
+				valKind := doc.Tree.Nodes[valID].Kind
+				if valKind == ast.KindFunctionExpr {
+					if key.ReceiverHash != 0 {
+						kind = SymbolKindMethod
+					} else {
+						kind = SymbolKindFunction
+					}
+				} else if valKind == ast.KindTableExpr {
+					kind = SymbolKindClass
+				} else if key.ReceiverHash != 0 {
+					kind = SymbolKindField
 				}
-			} else if valKind == ast.KindTableExpr {
-				kind = SymbolKindClass
 			} else if key.ReceiverHash != 0 {
 				kind = SymbolKindField
 			}
-		} else if key.ReceiverHash != 0 {
-			kind = SymbolKindField
+
+			results = append(results, SymbolInformation{
+				Name: sym.Name,
+				Kind: kind,
+				Location: Location{
+					URI:   sym.URI,
+					Range: getNodeRange(doc.Tree, sym.NodeID),
+				},
+			})
+
+			count++
+
+			if count >= MaxWorkspaceResults {
+				break
+			}
 		}
-
-		results = append(results, SymbolInformation{
-			Name: sym.Name,
-			Kind: kind,
-			Location: Location{
-				URI:   sym.URI,
-				Range: getNodeRange(doc.Tree, sym.NodeID),
-			},
-		})
-
-		count++
 
 		if count >= MaxWorkspaceResults {
 			break
@@ -702,19 +724,128 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 			if exportedKey, exported := ctx.TargetDoc.ExportedGlobalDefs[defID]; exported {
 				ctx.IsGlobal = true
 				ctx.GKey = exportedKey
+
+				if gSyms, ok := s.getGlobalSymbols(ctx.GKey.ReceiverHash, ctx.GKey.PropHash); ok {
+					bestDefs := s.getBestDefsForContext(doc, nodeID, gSyms)
+					ctx.GlobalDefs = bestDefs
+				}
 			}
 		}
 	} else if gKey.PropHash != 0 {
-		if gSym, ok := s.getGlobalSymbol(gKey.ReceiverHash, gKey.PropHash); ok {
-			if gDoc, docOk := s.Documents[gSym.URI]; docOk {
-				ctx.TargetDoc = gDoc
-				ctx.TargetDefID = gSym.NodeID
-				ctx.TargetURI = gSym.URI
+		if gSyms, ok := s.getGlobalSymbols(gKey.ReceiverHash, gKey.PropHash); ok {
+			bestDefs := s.getBestDefsForContext(doc, nodeID, gSyms)
+			ctx.GlobalDefs = bestDefs
+
+			if len(bestDefs) > 0 {
+				if gDoc, docOk := s.Documents[bestDefs[0].URI]; docOk {
+					ctx.TargetDoc = gDoc
+					ctx.TargetDefID = bestDefs[0].NodeID
+					ctx.TargetURI = bestDefs[0].URI
+				}
 			}
 		}
 	}
 
 	return ctx
+}
+
+func (s *Server) getBestDefsForContext(doc *Document, identNodeID ast.NodeID, defs []GlobalSymbol) []GlobalSymbol {
+	if len(defs) <= 1 {
+		return defs
+	}
+
+	var (
+		activeCallArgs int = -1
+		isMethodCall   bool
+	)
+
+	pID := doc.Tree.Nodes[identNodeID].Parent
+	if pID != ast.InvalidNode && int(pID) < len(doc.Tree.Nodes) {
+		pNode := doc.Tree.Nodes[pID]
+		if pNode.Kind == ast.KindCallExpr && pNode.Left == identNodeID {
+			activeCallArgs = int(pNode.Count)
+		} else if pNode.Kind == ast.KindMethodCall && pNode.Right == identNodeID {
+			activeCallArgs = int(pNode.Count)
+			isMethodCall = true
+		} else if pNode.Kind == ast.KindMemberExpr {
+			gpID := pNode.Parent
+			if gpID != ast.InvalidNode && int(gpID) < len(doc.Tree.Nodes) {
+				gpNode := doc.Tree.Nodes[gpID]
+				if gpNode.Kind == ast.KindCallExpr && gpNode.Left == pID {
+					activeCallArgs = int(gpNode.Count)
+				}
+			}
+		}
+	}
+
+	if activeCallArgs >= 0 {
+		var (
+			bestDefs  []GlobalSymbol
+			bestScore int = -1
+		)
+
+		for _, def := range defs {
+			tDoc := s.Documents[def.URI]
+			if tDoc == nil {
+				continue
+			}
+
+			valID := tDoc.getAssignedValue(def.NodeID)
+			if valID != ast.InvalidNode && int(valID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+				funcNode := tDoc.Tree.Nodes[valID]
+
+				var hasImplicitSelfDef bool
+
+				pDefID := tDoc.Tree.Nodes[def.NodeID].Parent
+				if pDefID != ast.InvalidNode && int(pDefID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
+					hasImplicitSelfDef = true
+				}
+
+				var paramOffset int
+
+				if isMethodCall && !hasImplicitSelfDef {
+					paramOffset = 1
+				} else if !isMethodCall && hasImplicitSelfDef {
+					paramOffset = -1
+				}
+
+				expectedArgs := int(funcNode.Count) - paramOffset
+				if expectedArgs < 0 {
+					expectedArgs = 0
+				}
+
+				var score int
+
+				if expectedArgs == activeCallArgs {
+					score = 2
+				} else if expectedArgs > activeCallArgs {
+					score = 1
+				}
+
+				if funcNode.Count > 0 {
+					lastParamID := tDoc.Tree.ExtraList[funcNode.Extra+uint32(funcNode.Count-1)]
+					if tDoc.Tree.Nodes[lastParamID].Kind == ast.KindVararg {
+						if activeCallArgs >= expectedArgs-1 {
+							score = 2
+						}
+					}
+				}
+
+				if score > bestScore {
+					bestScore = score
+					bestDefs = []GlobalSymbol{def}
+				} else if score == bestScore {
+					bestDefs = append(bestDefs, def)
+				}
+			}
+		}
+
+		if len(bestDefs) > 0 {
+			return bestDefs
+		}
+	}
+
+	return defs
 }
 
 func (s *Server) getReferences(ctx *SymbolContext, includeDeclaration bool) []Location {
@@ -820,13 +951,13 @@ func (s *Server) iterateGlobalReferences(ctx *SymbolContext) iter.Seq[GlobalRefe
 	}
 }
 
-func (s *Server) getGlobalSymbol(recHash, propHash uint64) (GlobalSymbol, bool) {
+func (s *Server) getGlobalSymbols(recHash, propHash uint64) ([]GlobalSymbol, bool) {
 	currRec := recHash
 
 	for range 10 {
 		key := GlobalKey{ReceiverHash: currRec, PropHash: propHash}
-		if sym, exists := s.GlobalIndex[key]; exists {
-			return sym, true
+		if syms, exists := s.GlobalIndex[key]; exists && len(syms) > 0 {
+			return syms, true
 		}
 
 		if currRec == 0 {
@@ -841,104 +972,67 @@ func (s *Server) getGlobalSymbol(recHash, propHash uint64) (GlobalSymbol, bool) 
 		currRec = nextRec
 	}
 
-	return GlobalSymbol{}, false
+	return nil, false
 }
 
 func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, depth int, name string) {
 	if doc, ok := s.Documents[uri]; ok {
-		if doc.ExportedGlobals == nil {
-			doc.ExportedGlobals = make(map[GlobalKey]ast.NodeID)
+		if doc.ExportedGlobalDefs == nil {
 			doc.ExportedGlobalDefs = make(map[ast.NodeID]GlobalKey)
 		}
 
-		doc.ExportedGlobals[key] = nodeID
 		doc.ExportedGlobalDefs[nodeID] = key
 	}
 
-	if existing, exists := s.GlobalIndex[key]; exists {
-		if depth > existing.Depth {
-			return
-		}
+	syms := s.GlobalIndex[key]
 
-		// Prefer standard library definitions if depths are tied
-		if depth == existing.Depth && strings.HasPrefix(existing.URI, "std://") && !strings.HasPrefix(uri, "std://") {
+	for i, sym := range syms {
+		if sym.URI == uri && sym.NodeID == nodeID {
+			syms[i].Depth = depth
+			syms[i].Name = name
 			return
 		}
 	}
 
-	s.GlobalIndex[key] = GlobalSymbol{
+	s.GlobalIndex[key] = append(syms, GlobalSymbol{
 		URI:    uri,
 		NodeID: nodeID,
 		Depth:  depth,
 		Name:   name,
-	}
+	})
 }
 
 func (s *Server) removeDocumentGlobals(uri string, doc *Document) {
-	if doc.ExportedGlobals == nil {
+	if doc.ExportedGlobalDefs == nil {
 		return
 	}
 
-	for key := range doc.ExportedGlobals {
-		if sym, ok := s.GlobalIndex[key]; ok && sym.URI == uri {
-			delete(s.GlobalIndex, key)
+	for nodeID, key := range doc.ExportedGlobalDefs {
+		if syms, ok := s.GlobalIndex[key]; ok {
+			var newSyms []GlobalSymbol
 
-			var (
-				bestSym GlobalSymbol
-				found   bool
-			)
-
-			for otherURI, otherDoc := range s.Documents {
-				if otherURI == uri {
-					continue
-				}
-
-				if nodeID, exists := otherDoc.ExportedGlobals[key]; exists {
-					d := getASTDepth(otherDoc.Tree, nodeID)
-
-					isStd := strings.HasPrefix(otherURI, "std://")
-					bestIsStd := strings.HasPrefix(bestSym.URI, "std://")
-
-					var take bool
-
-					if !found {
-						take = true
-					} else if d < bestSym.Depth {
-						take = true
-					} else if d == bestSym.Depth {
-						if isStd && !bestIsStd {
-							take = true
-						} else if isStd == bestIsStd {
-							if otherURI > bestSym.URI || (otherURI == bestSym.URI && nodeID > bestSym.NodeID) {
-								take = true
-							}
-						}
-					}
-
-					if take {
-						bestSym = GlobalSymbol{
-							URI:    otherURI,
-							NodeID: nodeID,
-							Depth:  d,
-							Name:   sym.Name,
-						}
-						found = true
-					}
+			for _, sym := range syms {
+				if sym.URI != uri || sym.NodeID != nodeID {
+					newSyms = append(newSyms, sym)
 				}
 			}
 
-			if found {
-				s.GlobalIndex[key] = bestSym
+			if len(newSyms) > 0 {
+				s.GlobalIndex[key] = newSyms
+			} else {
+				delete(s.GlobalIndex, key)
 			}
 		}
 	}
 }
 
 func (s *Server) getGlobalAlias(hash uint64) uint64 {
-	sym, ok := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]
-	if !ok {
+	syms, ok := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]
+	if !ok || len(syms) == 0 {
 		return 0
 	}
+
+	sym := syms[0]
 
 	doc, ok := s.Documents[sym.URI]
 	if !ok {
@@ -1031,9 +1125,9 @@ func (s *Server) suggestGlobal(name string) string {
 	}
 
 	// Then check workspace globals
-	for key, sym := range s.GlobalIndex {
-		if key.ReceiverHash == 0 {
-			check(sym.Name)
+	for key, syms := range s.GlobalIndex {
+		if key.ReceiverHash == 0 && len(syms) > 0 {
+			check(syms[0].Name)
 		}
 	}
 

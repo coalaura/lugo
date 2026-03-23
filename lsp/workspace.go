@@ -449,7 +449,6 @@ func (s *Server) updateDocument(uri string, source []byte) {
 
 		s.removeDocumentGlobals(uri, doc)
 
-		clear(doc.ExportedGlobals)
 		clear(doc.ExportedGlobalDefs)
 
 		tree = existing.Tree
@@ -463,7 +462,6 @@ func (s *Server) updateDocument(uri string, source []byte) {
 			Source:             source,
 			Tree:               tree,
 			Resolver:           semantic.New(tree),
-			ExportedGlobals:    make(map[GlobalKey]ast.NodeID),
 			ExportedGlobalDefs: make(map[ast.NodeID]GlobalKey),
 		}
 

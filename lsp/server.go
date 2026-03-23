@@ -35,7 +35,7 @@ type Server struct {
 	visitedDirs   map[string]bool
 
 	// Global Index & Resolution
-	GlobalIndex       map[GlobalKey]GlobalSymbol
+	GlobalIndex       map[GlobalKey][]GlobalSymbol
 	KnownGlobals      map[string]bool
 	KnownGlobalGlobs  []string
 	LibraryPaths      []string
@@ -101,7 +101,7 @@ func NewServer(version string) *Server {
 		IsIndexing: true,
 
 		// Global Index
-		GlobalIndex: make(map[GlobalKey]GlobalSymbol),
+		GlobalIndex: make(map[GlobalKey][]GlobalSymbol),
 
 		// Shared Buffers
 		sharedParser: parser.New(nil, ast.NewTree(nil), 50),

@@ -145,12 +145,22 @@ func (s *Server) publishDiagnostics(uri string) {
 			hash := ast.HashBytes(identBytes)
 			key := GlobalKey{ReceiverHash: 0, PropHash: hash}
 
-			if sym, ok := s.GlobalIndex[key]; ok {
-				if symDoc, docOk := s.Documents[sym.URI]; docOk {
-					if isRootLevel(symDoc.Tree, sym.NodeID) {
-						continue
+			var isDefinedAtRoot bool
+
+			if syms, ok := s.GlobalIndex[key]; ok {
+				for _, sym := range syms {
+					if symDoc, docOk := s.Documents[sym.URI]; docOk {
+						if isRootLevel(symDoc.Tree, sym.NodeID) {
+							isDefinedAtRoot = true
+
+							break
+						}
 					}
 				}
+			}
+
+			if isDefinedAtRoot {
+				continue
 			}
 
 			s.diagBuf = append(s.diagBuf, Diagnostic{
@@ -287,7 +297,9 @@ func (s *Server) publishDiagnostics(uri string) {
 				} else {
 					hash := ast.HashBytes(nameBytes)
 
-					if sym, exists := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]; exists {
+					if syms, exists := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]; exists && len(syms) > 0 {
+						sym := syms[0]
+
 						var related []DiagnosticRelatedInformation
 
 						if symDoc, ok := s.Documents[sym.URI]; ok {
@@ -452,7 +464,8 @@ func (s *Server) publishDiagnostics(uri string) {
 			identBytes := doc.Source[doc.Tree.Nodes[refID].Start:doc.Tree.Nodes[refID].End]
 			hash := ast.HashBytes(identBytes)
 
-			if sym, ok := s.getGlobalSymbol(0, hash); ok && sym.NodeID != ast.InvalidNode {
+			if syms, ok := s.getGlobalSymbols(0, hash); ok && len(syms) > 0 && syms[0].NodeID != ast.InvalidNode {
+				sym := syms[0]
 				if symDoc, docOk := s.Documents[sym.URI]; docOk {
 					info := checkDep(symDoc, sym.NodeID)
 					if info.IsDep {
@@ -479,7 +492,8 @@ func (s *Server) publishDiagnostics(uri string) {
 		// Check unresolved global field accesses
 		for _, pf := range doc.Resolver.PendingFields {
 			if doc.Resolver.References[pf.PropNodeID] == ast.InvalidNode && pf.ReceiverHash != 0 {
-				if sym, ok := s.getGlobalSymbol(pf.ReceiverHash, pf.PropHash); ok && sym.NodeID != ast.InvalidNode {
+				if syms, ok := s.getGlobalSymbols(pf.ReceiverHash, pf.PropHash); ok && len(syms) > 0 && syms[0].NodeID != ast.InvalidNode {
+					sym := syms[0]
 					if symDoc, docOk := s.Documents[sym.URI]; docOk {
 						info := checkDep(symDoc, sym.NodeID)
 						if info.IsDep {
@@ -592,6 +606,7 @@ func (s *Server) publishDiagnostics(uri string) {
 								Code:     "redundant-value",
 								Tags:     []DiagnosticTag{Unnecessary},
 								Message:  "Assigning more values than variables; excess values will be discarded.",
+								Data:     float64(nodeID),
 							})
 						} else if lhsList.Count > rhsList.Count && s.DiagUnbalancedAssignment && !isDynamic {
 							firstUnbalancedID := doc.Tree.ExtraList[lhsList.Extra+uint32(rhsList.Count)]
@@ -726,27 +741,52 @@ func (s *Server) publishDiagnostics(uri string) {
 
 			if funcIdentID != ast.InvalidNode && int(funcIdentID) < len(doc.Tree.Nodes) {
 				ctx := s.resolveSymbolNode(uri, doc, funcIdentID)
-				if ctx != nil && ctx.TargetDefID != ast.InvalidNode && ctx.TargetDoc != nil {
-					valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
-					if valID != ast.InvalidNode && int(valID) < len(ctx.TargetDoc.Tree.Nodes) && ctx.TargetDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
-						funcNode := ctx.TargetDoc.Tree.Nodes[valID]
+				if ctx != nil {
+					var defs []GlobalSymbol
 
-						var hasVararg bool
+					if len(ctx.GlobalDefs) > 0 {
+						defs = ctx.GlobalDefs
+					} else if ctx.TargetDefID != ast.InvalidNode {
+						defs = []GlobalSymbol{{URI: ctx.TargetURI, NodeID: ctx.TargetDefID}}
+					}
 
-						if funcNode.Count > 0 {
-							lastParamID := ctx.TargetDoc.Tree.ExtraList[funcNode.Extra+uint32(funcNode.Count-1)]
-							if ctx.TargetDoc.Tree.Nodes[lastParamID].Kind == ast.KindVararg {
-								hasVararg = true
-							}
+					var (
+						matchedAny           bool
+						maxExpectedArgs      int
+						maxExpectedArgsFound bool
+					)
+
+					for _, def := range defs {
+						tDoc := s.Documents[def.URI]
+						if tDoc == nil {
+							continue
 						}
 
-						if !hasVararg {
+						valID := tDoc.getAssignedValue(def.NodeID)
+						if valID != ast.InvalidNode && int(valID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+							funcNode := tDoc.Tree.Nodes[valID]
+
+							var hasVararg bool
+
+							if funcNode.Count > 0 {
+								lastParamID := tDoc.Tree.ExtraList[funcNode.Extra+uint32(funcNode.Count-1)]
+								if tDoc.Tree.Nodes[lastParamID].Kind == ast.KindVararg {
+									hasVararg = true
+								}
+							}
+
+							if hasVararg {
+								matchedAny = true
+
+								break
+							}
+
 							hasImplicitSelfCall := node.Kind == ast.KindMethodCall
 
 							var hasImplicitSelfDef bool
 
-							pDefID := ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Parent
-							if pDefID != ast.InvalidNode && int(pDefID) < len(ctx.TargetDoc.Tree.Nodes) && ctx.TargetDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
+							pDefID := tDoc.Tree.Nodes[def.NodeID].Parent
+							if pDefID != ast.InvalidNode && int(pDefID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
 								hasImplicitSelfDef = true
 							}
 
@@ -762,28 +802,43 @@ func (s *Server) publishDiagnostics(uri string) {
 								expectedArgs = 0
 							}
 
-							if int(node.Count) > expectedArgs {
-								firstRedundantID := doc.Tree.ExtraList[node.Extra+uint32(expectedArgs)]
-								lastArgID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
+							if int(node.Count) <= expectedArgs {
+								matchedAny = true
 
-								var limit uint32
-
-								if expectedArgs > 0 {
-									limit = doc.Tree.Nodes[doc.Tree.ExtraList[node.Extra+uint32(expectedArgs-1)]].End
-								} else {
-									limit = doc.Tree.Nodes[node.Left].End
-								}
-
-								startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRedundantID].Start, limit)
-
-								s.diagBuf = append(s.diagBuf, Diagnostic{
-									Range:    getRange(doc.Tree, startOff, doc.Tree.Nodes[lastArgID].End),
-									Severity: SeverityWarning,
-									Code:     "redundant-parameter",
-									Tags:     []DiagnosticTag{Unnecessary},
-									Message:  fmt.Sprintf("Function expects %d argument(s), but got %d. Excess arguments will be ignored.", expectedArgs, node.Count),
-								})
+								break
 							}
+
+							if !maxExpectedArgsFound || expectedArgs > maxExpectedArgs {
+								maxExpectedArgs = expectedArgs
+								maxExpectedArgsFound = true
+							}
+						}
+					}
+
+					if !matchedAny && maxExpectedArgsFound {
+						expectedArgs := maxExpectedArgs
+						if int(node.Count) > expectedArgs {
+							firstRedundantID := doc.Tree.ExtraList[node.Extra+uint32(expectedArgs)]
+							lastArgID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
+
+							var limit uint32
+
+							if expectedArgs > 0 {
+								limit = doc.Tree.Nodes[doc.Tree.ExtraList[node.Extra+uint32(expectedArgs-1)]].End
+							} else {
+								limit = doc.Tree.Nodes[node.Left].End
+							}
+
+							startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRedundantID].Start, limit)
+
+							s.diagBuf = append(s.diagBuf, Diagnostic{
+								Range:    getRange(doc.Tree, startOff, doc.Tree.Nodes[lastArgID].End),
+								Severity: SeverityWarning,
+								Code:     "redundant-parameter",
+								Tags:     []DiagnosticTag{Unnecessary},
+								Message:  fmt.Sprintf("Function expects %d argument(s), but got %d. Excess arguments will be ignored.", expectedArgs, node.Count),
+								Data:     float64(nodeID),
+							})
 						}
 					}
 				}
