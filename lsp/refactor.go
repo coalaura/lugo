@@ -201,14 +201,21 @@ func (s *Server) handleCodeAction(req Request) {
 	}
 
 	var (
-		targetIf          ast.NodeID = ast.InvalidNode
-		targetCond        ast.NodeID = ast.InvalidNode
-		condTitle         string
-		targetTableInsert ast.NodeID = ast.InvalidNode
-		targetMethod      ast.NodeID = ast.InvalidNode
-		targetNestedIf    ast.NodeID = ast.InvalidNode
-		nestedIfTitle     string
-		targetMultiAssign ast.NodeID = ast.InvalidNode
+		targetIf            ast.NodeID = ast.InvalidNode
+		targetCond          ast.NodeID = ast.InvalidNode
+		condTitle           string
+		targetTableInsert   ast.NodeID = ast.InvalidNode
+		targetMethod        ast.NodeID = ast.InvalidNode
+		targetNestedIf      ast.NodeID = ast.InvalidNode
+		nestedIfTitle       string
+		targetMultiAssign   ast.NodeID = ast.InvalidNode
+		targetSwapIfElse    ast.NodeID = ast.InvalidNode
+		targetParen         ast.NodeID = ast.InvalidNode
+		targetForNum        ast.NodeID = ast.InvalidNode
+		forNumTable         string
+		targetIndexToMember ast.NodeID = ast.InvalidNode
+		indexToMemberStr    string
+		targetMemberToIndex ast.NodeID = ast.InvalidNode
 	)
 
 	cursorLine := params.Range.Start.Line
@@ -361,6 +368,76 @@ func (s *Server) handleCodeAction(req Request) {
 			}
 		}
 
+		// 5. Swap If/Else Branches
+		if node.Kind == ast.KindIf && targetSwapIfElse == ast.InvalidNode {
+			var hasElseIf, hasElse bool
+
+			for i := uint16(0); i < node.Count; i++ {
+				if node.Extra+uint32(i) < uint32(len(doc.Tree.ExtraList)) {
+					childID := doc.Tree.ExtraList[node.Extra+uint32(i)]
+					if int(childID) < len(doc.Tree.Nodes) {
+						child := doc.Tree.Nodes[childID]
+						if child.Kind == ast.KindElseIf {
+							hasElseIf = true
+						} else if child.Kind == ast.KindElse {
+							hasElse = true
+						}
+					}
+				}
+			}
+
+			if hasElse && !hasElseIf {
+				targetSwapIfElse = curr
+			}
+		}
+
+		// 6. Remove Redundant Parentheses
+		if node.Kind == ast.KindParenExpr && targetParen == ast.InvalidNode {
+			targetParen = curr
+		}
+
+		// 7. Convert for i=1, #t to ipairs
+		if node.Kind == ast.KindForNum && targetForNum == ast.InvalidNode {
+			if node.Count >= 2 && node.Extra+1 < uint32(len(doc.Tree.ExtraList)) {
+				initID := doc.Tree.ExtraList[node.Extra]
+				limitID := doc.Tree.ExtraList[node.Extra+1]
+
+				initVal, ok := doc.evalNode(initID, 0)
+				if ok && initVal.kind == ast.KindNumber && initVal.num == 1 {
+					if int(limitID) < len(doc.Tree.Nodes) {
+						limitNode := doc.Tree.Nodes[limitID]
+						if limitNode.Kind == ast.KindUnaryExpr {
+							limitSrc := doc.Source[limitNode.Start:limitNode.End]
+							if bytes.HasPrefix(limitSrc, []byte("#")) {
+								targetForNum = curr
+
+								forNumTable = string(bytes.TrimSpace(limitSrc[1:]))
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 8. Convert Index to Member (t["prop"] -> t.prop)
+		if node.Kind == ast.KindIndexExpr && targetIndexToMember == ast.InvalidNode {
+			if int(node.Right) < len(doc.Tree.Nodes) {
+				res, ok := doc.evalNode(node.Right, 0)
+				if ok && res.kind == ast.KindString {
+					if s.isValidIdentifier(res.str) {
+						targetIndexToMember = curr
+
+						indexToMemberStr = res.str
+					}
+				}
+			}
+		}
+
+		// 9. Convert Member to Index (t.prop -> t["prop"])
+		if node.Kind == ast.KindMemberExpr && targetMemberToIndex == ast.InvalidNode {
+			targetMemberToIndex = curr
+		}
+
 		curr = node.Parent
 	}
 
@@ -470,6 +547,78 @@ func (s *Server) handleCodeAction(req Request) {
 				"type":   "splitMultiAssign",
 				"uri":    uri,
 				"nodeId": float64(targetMultiAssign),
+			},
+		})
+	}
+
+	// 7. Swap If/Else Branches
+	if targetSwapIfElse != ast.InvalidNode {
+		actions = append(actions, CodeAction{
+			Title:       "Swap 'if' and 'else' branches",
+			Kind:        "refactor.rewrite",
+			IsPreferred: false,
+			Data: map[string]any{
+				"type":   "swapIfElse",
+				"uri":    uri,
+				"nodeId": float64(targetSwapIfElse),
+			},
+		})
+	}
+
+	// 8. Remove Redundant Parentheses
+	if targetParen != ast.InvalidNode {
+		actions = append(actions, CodeAction{
+			Title:       "Remove redundant parentheses",
+			Kind:        "refactor.rewrite",
+			IsPreferred: false,
+			Data: map[string]any{
+				"type":   "removeParen",
+				"uri":    uri,
+				"nodeId": float64(targetParen),
+			},
+		})
+	}
+
+	// 9. Convert for i=1, #t to ipairs
+	if targetForNum != ast.InvalidNode {
+		actions = append(actions, CodeAction{
+			Title:       "Convert to 'ipairs'",
+			Kind:        "refactor.rewrite",
+			IsPreferred: false,
+			Data: map[string]any{
+				"type":   "forNumToIpairs",
+				"uri":    uri,
+				"nodeId": float64(targetForNum),
+				"table":  forNumTable,
+			},
+		})
+	}
+
+	// 10. Convert Index to Member
+	if targetIndexToMember != ast.InvalidNode {
+		actions = append(actions, CodeAction{
+			Title:       "Convert to dot notation",
+			Kind:        "refactor.rewrite",
+			IsPreferred: false,
+			Data: map[string]any{
+				"type":   "indexToMember",
+				"uri":    uri,
+				"nodeId": float64(targetIndexToMember),
+				"prop":   indexToMemberStr,
+			},
+		})
+	}
+
+	// 11. Convert Member to Index
+	if targetMemberToIndex != ast.InvalidNode {
+		actions = append(actions, CodeAction{
+			Title:       "Convert to bracket notation",
+			Kind:        "refactor.rewrite",
+			IsPreferred: false,
+			Data: map[string]any{
+				"type":   "memberToIndex",
+				"uri":    uri,
+				"nodeId": float64(targetMemberToIndex),
 			},
 		})
 	}
@@ -790,6 +939,210 @@ func (s *Server) handleCodeActionResolve(req Request) {
 								NewText: newText.String(),
 							}},
 						},
+					}
+				}
+			} else if actionType == "swapIfElse" {
+				ifNode := doc.Tree.Nodes[nodeID]
+
+				var elseBlockID ast.NodeID
+
+				for i := uint16(0); i < ifNode.Count; i++ {
+					if ifNode.Extra+uint32(i) < uint32(len(doc.Tree.ExtraList)) {
+						childID := doc.Tree.ExtraList[ifNode.Extra+uint32(i)]
+						if int(childID) < len(doc.Tree.Nodes) && doc.Tree.Nodes[childID].Kind == ast.KindElse {
+							elseBlockID = childID
+
+							break
+						}
+					}
+				}
+
+				if elseBlockID != ast.InvalidNode {
+					elseNode := doc.Tree.Nodes[elseBlockID]
+					newCond := s.invertCondition(doc, ifNode.Left)
+
+					ifLine, _ := doc.Tree.Position(ifNode.Start)
+
+					var lineStart uint32
+
+					if int(ifLine) < len(doc.Tree.LineOffsets) {
+						lineStart = doc.Tree.LineOffsets[ifLine]
+					}
+
+					var indentBytes []byte
+
+					for i := lineStart; i < ifNode.Start && i < uint32(len(doc.Source)); i++ {
+						if doc.Source[i] == ' ' || doc.Source[i] == '\t' {
+							indentBytes = append(indentBytes, doc.Source[i])
+						} else {
+							break
+						}
+					}
+
+					indent := string(indentBytes)
+					innerIndent := indent + "\t"
+
+					if bytes.Contains(indentBytes, []byte("    ")) {
+						innerIndent = indent + "    "
+					} else if bytes.Contains(indentBytes, []byte("  ")) {
+						innerIndent = indent + "  "
+					}
+
+					var newText strings.Builder
+
+					newText.WriteString("if ")
+					newText.WriteString(newCond)
+					newText.WriteString(" then\n")
+
+					elseBody := s.flattenBlock(doc, elseNode.Left, innerIndent, 999)
+					if elseBody != "" {
+						newText.WriteString(innerIndent)
+						newText.WriteString(elseBody)
+						newText.WriteString("\n")
+					}
+
+					newText.WriteString(indent)
+					newText.WriteString("else\n")
+
+					thenBody := s.flattenBlock(doc, ifNode.Right, innerIndent, 999)
+					if thenBody != "" {
+						newText.WriteString(innerIndent)
+						newText.WriteString(thenBody)
+						newText.WriteString("\n")
+					}
+
+					newText.WriteString(indent)
+					newText.WriteString("end")
+
+					action.Edit = &WorkspaceEdit{
+						Changes: map[string][]TextEdit{
+							uri: {{
+								Range:   getNodeRange(doc.Tree, nodeID),
+								NewText: trimTrailingWhitespace(newText.String()),
+							}},
+						},
+					}
+				}
+			} else if actionType == "removeParen" {
+				parenNode := doc.Tree.Nodes[nodeID]
+
+				if parenNode.Left != ast.InvalidNode && int(parenNode.Left) < len(doc.Tree.Nodes) {
+					innerNode := doc.Tree.Nodes[parenNode.Left]
+
+					if innerNode.Start <= innerNode.End && innerNode.End <= uint32(len(doc.Source)) {
+						innerSrc := ast.String(doc.Source[innerNode.Start:innerNode.End])
+
+						action.Edit = &WorkspaceEdit{
+							Changes: map[string][]TextEdit{
+								uri: {{
+									Range:   getNodeRange(doc.Tree, nodeID),
+									NewText: innerSrc,
+								}},
+							},
+						}
+					}
+				}
+			} else if actionType == "forNumToIpairs" {
+				forNode := doc.Tree.Nodes[nodeID]
+
+				if int(forNode.Left) < len(doc.Tree.Nodes) {
+					identNode := doc.Tree.Nodes[forNode.Left]
+
+					if identNode.Start <= identNode.End && identNode.End <= uint32(len(doc.Source)) {
+						identName := ast.String(doc.Source[identNode.Start:identNode.End])
+						tableName, _ := data["table"].(string)
+
+						ifLine, _ := doc.Tree.Position(forNode.Start)
+
+						var lineStart uint32
+
+						if int(ifLine) < len(doc.Tree.LineOffsets) {
+							lineStart = doc.Tree.LineOffsets[ifLine]
+						}
+
+						var indentBytes []byte
+
+						for i := lineStart; i < forNode.Start && i < uint32(len(doc.Source)); i++ {
+							if doc.Source[i] == ' ' || doc.Source[i] == '\t' {
+								indentBytes = append(indentBytes, doc.Source[i])
+							} else {
+								break
+							}
+						}
+
+						indent := string(indentBytes)
+						innerIndent := indent + "\t"
+
+						if bytes.Contains(indentBytes, []byte("    ")) {
+							innerIndent = indent + "    "
+						} else if bytes.Contains(indentBytes, []byte("  ")) {
+							innerIndent = indent + "  "
+						}
+
+						var newText strings.Builder
+
+						newText.WriteString(fmt.Sprintf("for %s, v in ipairs(%s) do\n", identName, tableName))
+
+						body := s.flattenBlock(doc, forNode.Right, innerIndent, 999)
+						if body != "" {
+							newText.WriteString(innerIndent)
+							newText.WriteString(body)
+							newText.WriteString("\n")
+						}
+
+						newText.WriteString(indent)
+						newText.WriteString("end")
+
+						action.Edit = &WorkspaceEdit{
+							Changes: map[string][]TextEdit{
+								uri: {{
+									Range:   getNodeRange(doc.Tree, nodeID),
+									NewText: trimTrailingWhitespace(newText.String()),
+								}},
+							},
+						}
+					}
+				}
+			} else if actionType == "indexToMember" {
+				indexNode := doc.Tree.Nodes[nodeID]
+				propStr, _ := data["prop"].(string)
+
+				if int(indexNode.Left) < len(doc.Tree.Nodes) {
+					recNode := doc.Tree.Nodes[indexNode.Left]
+					if recNode.Start <= recNode.End && recNode.End <= uint32(len(doc.Source)) {
+						recStr := ast.String(doc.Source[recNode.Start:recNode.End])
+
+						action.Edit = &WorkspaceEdit{
+							Changes: map[string][]TextEdit{
+								uri: {{
+									Range:   getNodeRange(doc.Tree, nodeID),
+									NewText: recStr + "." + propStr,
+								}},
+							},
+						}
+					}
+				}
+			} else if actionType == "memberToIndex" {
+				memberNode := doc.Tree.Nodes[nodeID]
+
+				if int(memberNode.Left) < len(doc.Tree.Nodes) && int(memberNode.Right) < len(doc.Tree.Nodes) {
+					recNode := doc.Tree.Nodes[memberNode.Left]
+					propNode := doc.Tree.Nodes[memberNode.Right]
+
+					if recNode.Start <= recNode.End && recNode.End <= uint32(len(doc.Source)) &&
+						propNode.Start <= propNode.End && propNode.End <= uint32(len(doc.Source)) {
+
+						recStr := ast.String(doc.Source[recNode.Start:recNode.End])
+						propStr := ast.String(doc.Source[propNode.Start:propNode.End])
+
+						action.Edit = &WorkspaceEdit{
+							Changes: map[string][]TextEdit{
+								uri: {{
+									Range:   getNodeRange(doc.Tree, nodeID),
+									NewText: fmt.Sprintf("%s[\"%s\"]", recStr, propStr),
+								}},
+							},
+						}
 					}
 				}
 			}
@@ -2160,4 +2513,23 @@ func (s *Server) findCommaBefore(source []byte, start, limit uint32) uint32 {
 	}
 
 	return commaPos
+}
+
+func (s *Server) isValidIdentifier(name string) bool {
+	if len(name) == 0 {
+		return false
+	}
+
+	if !((name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z') || name[0] == '_') {
+		return false
+	}
+
+	for i := 1; i < len(name); i++ {
+		c := name[i]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+
+	return !slices.Contains(luaKeywords, name)
 }
