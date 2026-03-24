@@ -36,7 +36,7 @@ Lugo implements a comprehensive suite of modern Language Server Protocol feature
 * **Call Hierarchy:** Visually explore a tree of incoming and outgoing function calls.
 * **Document & Workspace Symbols:** Instant workspace-wide search (`Ctrl+T`) for fully qualified names (e.g., `OP.Math.Round`) and full VS Code "Outline" tree generation.
 * **Signature Help & Inlay Hints:** Real-time active-parameter tooltips and inline parameter name hints with smart implicit `self` offset calculation. Automatically suppresses hints when the argument matches the parameter name to reduce visual noise.
-* **Code Actions (Quick Fixes & Refactoring):** Fast automated fixes for common diagnostics (prefixing unused variables, adding `local`, fixing typos). Includes powerful **AST-aware refactorings**: invert conditions, recursively convert `if` chains to early returns, optimize `table.insert` to `t[#t+1]`, convert between dot/colon method signatures, and merge nested `if` statements. Includes **bulk Safe Fixes** (via command palette) to automatically clean up unused variables, parameters and assignments across the current file or your entire workspace securely without breaking side-effects.
+* **Code Actions (Quick Fixes & Refactoring):** Fast automated fixes for common diagnostics (prefixing unused variables, adding `local`, fixing typos). Includes powerful **AST-aware refactorings**: invert conditions, recursively convert `if` chains to early returns, optimize `table.insert` to `t[#t+1]`, convert between dot/colon method signatures, merge nested `if` statements, split multiple assignments, swap `if`/`else` branches, remove redundant parentheses, convert `for i=1, #t` to `ipairs`, and toggle between dot/bracket table indexing. Includes **bulk Safe Fixes** (via command palette) to automatically clean up unused variables, parameters and assignments across the current file or your entire workspace securely without breaking side-effects.
 * **Full Lua 5.4 Support:** Native parsing, type-inference, and semantic highlighting for `<const>` and `<close>` attributes, `goto` statements, and `::labels::`.
 * **File Watching:** Automatically synchronizes with workspace file creations, deletions, and external changes in real-time.
 * **Built-in Formatter:** A blazingly fast, AST-aware Lua formatter. Elegantly fixes whitespace, enforces indentation rules, strips trailing semicolons, expands minified code and optionally applies opinionated stylistic tweaks (like separating unrelated statements with blank lines).
@@ -49,11 +49,11 @@ Lugo performs workspace-wide analysis to catch bugs before runtime:
 * **Undefined Globals:** Detects typos with wildcard ignore support (e.g., `N_0x*`) and provides quick-fixes to the closest known global.
 * **Implicit Globals:** Warns when you forget the `local` keyword inside a function and provides a quick-fix to inject it.
 * **Unused Variables:** Granular detection for unused locals, functions, parameters and loop variables.
-* **Shadowing:** Warns when a local shadows an outer scope or global, providing a clickable link to the shadowed definition.
-* **Unreachable Code:** Detects dead code after `return`, `break` or `goto`.
+* **Shadowing:** Warns when a local or loop variable shadows an outer scope or global, providing a clickable link to the shadowed definition.
+* **Unreachable Code:** Detects dead code after `return`, `break` or `goto`, as well as statically unreachable `elseif` or `else` branches.
 * **Ambiguous Returns:** Catches Lua's infamous newline evaluation trap where expressions on the next line are accidentally returned.
-* **Redundant Code:** Warns about empty blocks (`do end`) and assigning a variable to itself (with quick-fixes to remove them).
-* **Sanity Checks:** Detects duplicate fields in table literals and unbalanced assignments (assigning fewer or more values than variables).
+* **Redundant Code:** Warns about empty blocks (`do end`), self-assignments, redundant parameters, redundant assignment values, and redundant returns (with quick-fixes to remove them).
+* **Sanity Checks:** Detects duplicate fields in table literals, unbalanced assignments, loop variable mutations, and incorrect vararg (`...`) usage.
 * **Type Checking:** Optionally catches strictly invalid operations like attempting to call a number or index a non-table.
 * **Format String Validation:** Warns when `string.format` is called with an incorrect number of arguments.
 * **Deprecation:** Warns when using symbols marked with `@deprecated`.
@@ -115,6 +115,13 @@ lspconfig.lugo.setup({
 		diagEmptyBlock = true,
 		diagFormatString = true,
 		diagTypeCheck = false, -- Set to true if using strict LuaCATS annotations
+		diagRedundantParameter = true,
+		diagRedundantValue = true,
+		diagRedundantReturn = true,
+		diagLoopVarMutation = true,
+		diagIncorrectVararg = true,
+		diagShadowingLoopVar = true,
+		diagUnreachableElse = true,
 
 		-- Inlay Hints
 		inlayParamHints = true,
@@ -126,7 +133,8 @@ lspconfig.lugo.setup({
 		featureHoverEval = true,
 		featureCodeLens = true,
 		featureFormatting = true,
-		formatOpinionated = false
+		formatOpinionated = false,
+		suggestFunctionParams = true
 	}
 })
 ```
@@ -158,9 +166,17 @@ You can configure Lugo via your VS Code `settings.json` (also available via the 
 * `lugo.diagnostics.emptyBlock`: Toggle hints for empty blocks (e.g., `do end`).
 * `lugo.diagnostics.formatString`: Toggle diagnostics for `string.format` argument counts.
 * `lugo.diagnostics.typeCheck`: Toggle strict type checking for operations like calling numbers or indexing non-tables.
+* `lugo.diagnostics.redundantParameter`: Toggle diagnostics for passing more arguments to a function than it accepts.
+* `lugo.diagnostics.redundantValue`: Toggle diagnostics for assigning more values than there are variables.
+* `lugo.diagnostics.redundantReturn`: Toggle diagnostics for empty return statements at the very end of a function.
+* `lugo.diagnostics.loopVarMutation`: Toggle diagnostics for mutating a loop variable inside the loop body.
+* `lugo.diagnostics.incorrectVararg`: Toggle diagnostics for using the vararg `...` expression outside of a vararg function.
+* `lugo.diagnostics.shadowingLoopVar`: Toggle diagnostics when a loop variable shadows an outer local or global variable.
+* `lugo.diagnostics.unreachableElse`: Toggle diagnostics for unreachable `elseif` or `else` branches.
 * `lugo.diagnostics.deprecated`: Toggle warnings for usage of `@deprecated` symbols.
 
 **Editor Features**
+* `lugo.completion.suggestFunctionParams`: Automatically insert function parameters as snippets when autocompleting a function call.
 * `lugo.inlayHints.parameterNames`: Enable inline parameter name hints for function and method calls.
 * `lugo.inlayHints.suppressWhenArgumentMatchesName`: Suppress parameter name hints when the argument name exactly matches the parameter name (e.g., avoiding `pSource: pSource`).
 * `lugo.inlayHints.implicitSelf`: Enable inline `self` hints for method definitions using the colon syntax.
