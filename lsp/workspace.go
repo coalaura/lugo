@@ -812,7 +812,7 @@ func (s *Server) compileIgnorePatterns() {
 			continue
 		}
 
-		if !strings.ContainsAny(cleanGlob, "*?[") {
+		if !strings.ContainsAny(cleanGlob, "*?") {
 			cleanPath := filepath.FromSlash(cleanGlob)
 
 			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{
@@ -820,9 +820,9 @@ func (s *Server) compileIgnorePatterns() {
 				SuffixPath:   string(filepath.Separator) + cleanPath,
 				HasSuffix:    cleanGlob,
 			})
-		} else if strings.HasPrefix(cleanGlob, "*") && !strings.ContainsAny(cleanGlob[1:], "*?[") {
+		} else if strings.HasPrefix(cleanGlob, "*") && !strings.ContainsAny(cleanGlob[1:], "*?") {
 			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{HasSuffix: cleanGlob[1:]})
-		} else if strings.HasSuffix(cleanGlob, "*") && !strings.ContainsAny(cleanGlob[:len(cleanGlob)-1], "*?[") {
+		} else if strings.HasSuffix(cleanGlob, "*") && !strings.ContainsAny(cleanGlob[:len(cleanGlob)-1], "*?") {
 			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{HasPrefix: cleanGlob[:len(cleanGlob)-1]})
 		} else {
 			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{MatchFallback: g})

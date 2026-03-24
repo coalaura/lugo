@@ -49,6 +49,102 @@ func (s *Server) handleCodeAction(req Request) {
 		switch diag.Code {
 		case "unused-local", "unused-parameter", "unused-loop-var", "unused-vararg", "unused-function", "unreachable-code", "ambiguous-return", "self-assignment", "empty-block", "redundant-return", "redundant-value", "redundant-parameter":
 			hasSafeFixDiag = true
+		case "used-ignored-var":
+			defIDFloat, ok := diag.Data.(float64)
+			if ok {
+				defID := ast.NodeID(defIDFloat)
+				if int(defID) < len(doc.Tree.Nodes) {
+					node := doc.Tree.Nodes[defID]
+					nameBytes := doc.Source[node.Start:node.End]
+
+					if len(nameBytes) > 1 && nameBytes[0] == '_' {
+						newNameBytes := nameBytes[1:]
+						newName := string(newNameBytes)
+
+						// 1. Check if the new name is a valid identifier (not a keyword)
+						if s.isValidIdentifier(newName) {
+							isSafe := true
+
+							// 2. Check if it shadows a known or workspace global
+							if s.isKnownGlobal(newNameBytes) {
+								isSafe = false
+							} else {
+								hash := ast.HashBytes(newNameBytes)
+
+								if syms, exists := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]; exists && len(syms) > 0 {
+									isSafe = false
+								}
+							}
+
+							// 3. Check for local collisions at the definition point (shadowing outer locals)
+							if isSafe {
+								doc.GetLocalsAt(node.Start, func(name []byte, id ast.NodeID) bool {
+									if bytes.Equal(name, newNameBytes) && id != defID {
+										isSafe = false
+
+										return false
+									}
+
+									return true
+								})
+							}
+
+							// 4. Check for local collisions at all reference points (shadowed by inner locals)
+							if isSafe {
+								for i, refDefID := range doc.Resolver.References {
+									if refDefID == defID && ast.NodeID(i) != defID {
+										refNode := doc.Tree.Nodes[i]
+
+										doc.GetLocalsAt(refNode.Start, func(name []byte, id ast.NodeID) bool {
+											if bytes.Equal(name, newNameBytes) && id != defID {
+												isSafe = false
+
+												return false
+											}
+
+											return true
+										})
+
+										if !isSafe {
+											break
+										}
+									}
+								}
+							}
+
+							if isSafe {
+								var edits []TextEdit
+
+								edits = append(edits, TextEdit{
+									Range:   getNodeRange(doc.Tree, defID),
+									NewText: newName,
+								})
+
+								for i, refDefID := range doc.Resolver.References {
+									if refDefID == defID && ast.NodeID(i) != defID {
+										edits = append(edits, TextEdit{
+											Range:   getNodeRange(doc.Tree, ast.NodeID(i)),
+											NewText: newName,
+										})
+									}
+								}
+
+								actions = append(actions, CodeAction{
+									Title:       fmt.Sprintf("Rename to '%s'", newName),
+									Kind:        "quickfix",
+									Diagnostics: []Diagnostic{diag},
+									IsPreferred: true,
+									Edit: &WorkspaceEdit{
+										Changes: map[string][]TextEdit{
+											uri: edits,
+										},
+									},
+								})
+							}
+						}
+					}
+				}
+			}
 		case "undefined-global":
 			if suggestion, ok := diag.Data.(string); ok && suggestion != "" {
 				actions = append(actions, CodeAction{

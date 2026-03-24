@@ -78,6 +78,7 @@ type Server struct {
 	DiagIncorrectVararg      bool
 	DiagShadowingLoopVar     bool
 	DiagUnreachableElse      bool
+	DiagUsedIgnoredVar       bool
 
 	// Inlay Hints
 	InlayParamHints    bool
@@ -194,6 +195,7 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 	setCfg(&s.DiagIncorrectVararg, opts.DiagIncorrectVararg, &needsRepublish)
 	setCfg(&s.DiagShadowingLoopVar, opts.DiagShadowingLoopVar, &needsRepublish)
 	setCfg(&s.DiagUnreachableElse, opts.DiagUnreachableElse, &needsRepublish)
+	setCfg(&s.DiagUsedIgnoredVar, opts.DiagUsedIgnoredVar, &needsRepublish)
 
 	setCfg(&s.InlayParamHints, opts.InlayParamHints, nil)
 	setCfg(&s.InlaySuppressMatch, opts.InlaySuppressMatch, nil)

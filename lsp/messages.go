@@ -119,6 +119,7 @@ type InitializationOptions struct {
 	DiagIncorrectVararg      bool `json:"diagIncorrectVararg"`
 	DiagShadowingLoopVar     bool `json:"diagShadowingLoopVar"`
 	DiagUnreachableElse      bool `json:"diagUnreachableElse"`
+	DiagUsedIgnoredVar       bool `json:"diagUsedIgnoredVar"`
 
 	InlayParamHints    bool `json:"inlayParamHints"`
 	InlaySuppressMatch bool `json:"inlaySuppressMatch"`

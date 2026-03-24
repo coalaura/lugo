@@ -75,6 +75,7 @@ function buildInitializationOptions() {
 		diagIncorrectVararg: lugoConfig.get("diagnostics.incorrectVararg") !== false,
 		diagShadowingLoopVar: lugoConfig.get("diagnostics.shadowingLoopVar") !== false,
 		diagUnreachableElse: lugoConfig.get("diagnostics.unreachableElse") !== false,
+		diagUsedIgnoredVar: lugoConfig.get("diagnostics.usedIgnoredVariable") !== false,
 
 		inlayParamHints: lugoConfig.get("inlayHints.parameterNames") !== false,
 		inlaySuppressMatch: lugoConfig.get("inlayHints.suppressWhenArgumentMatchesName") !== false,

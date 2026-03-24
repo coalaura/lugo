@@ -201,12 +201,23 @@ func (s *Server) publishDiagnostics(uri string) {
 			}
 
 			nameBytes := doc.Source[node.Start:node.End]
-
-			if len(nameBytes) > 0 && nameBytes[0] == '_' {
-				continue
-			}
+			isIgnoredVar := len(nameBytes) > 0 && nameBytes[0] == '_'
 
 			r := getNodeRange(doc.Tree, defID)
+
+			if actualReads[defID] > 0 && isIgnoredVar && s.DiagUsedIgnoredVar {
+				s.diagBuf = append(s.diagBuf, Diagnostic{
+					Range:    r,
+					Severity: SeverityWarning,
+					Code:     "used-ignored-var",
+					Message:  fmt.Sprintf("Variable '%s' is used but its name starts with '_' (conventionally reserved for unused variables).", ast.String(nameBytes)),
+					Data:     float64(defID),
+				})
+			}
+
+			if isIgnoredVar {
+				continue
+			}
 
 			if actualReads[defID] == 0 {
 				if ast.Attr(doc.Tree.Nodes[defID].Extra) == ast.AttrClose {
