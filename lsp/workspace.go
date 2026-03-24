@@ -548,6 +548,41 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		}
 	}
 
+	for _, c := range tree.Comments {
+		raw := tree.Source[c.Start:c.End]
+		if bytes.Contains(raw, []byte("@class")) || bytes.Contains(raw, []byte("@alias")) {
+			luadoc := parseLuaDoc(raw)
+
+			var typeName string
+
+			if luadoc.Class != nil && luadoc.Class.Name != "" {
+				typeName = luadoc.Class.Name
+			} else if luadoc.Alias != nil && luadoc.Alias.Name != "" {
+				typeName = luadoc.Alias.Name
+			}
+
+			if typeName != "" {
+				nameBytes := []byte(typeName)
+
+				var (
+					recHash  uint64
+					propHash uint64
+				)
+
+				lastDot := bytes.LastIndexByte(nameBytes, '.')
+				if lastDot != -1 {
+					recHash = ast.HashBytes(nameBytes[:lastDot])
+					propHash = ast.HashBytes(nameBytes[lastDot+1:])
+				} else {
+					recHash = 0
+					propHash = ast.HashBytes(nameBytes)
+				}
+
+				s.setGlobalSymbol(GlobalKey{ReceiverHash: recHash, PropHash: propHash}, uri, ast.InvalidNode, 0, typeName)
+			}
+		}
+	}
+
 	for _, defID := range res.GlobalDefs {
 		node := tree.Nodes[defID]
 		if node.Start == node.End {

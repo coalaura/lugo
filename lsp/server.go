@@ -116,6 +116,42 @@ func NewServer(version string) *Server {
 
 		// Configuration Defaults
 		MaxParseErrors: 50,
+
+		DiagUndefinedGlobals:     true,
+		DiagImplicitGlobals:      true,
+		DiagUnusedLocal:          true,
+		DiagUnusedFunction:       true,
+		DiagUnusedParameter:      true,
+		DiagUnusedLoopVar:        true,
+		DiagShadowing:            true,
+		DiagUnreachableCode:      true,
+		DiagAmbiguousReturns:     true,
+		DiagDeprecated:           true,
+		DiagDuplicateField:       true,
+		DiagUnbalancedAssignment: true,
+		DiagDuplicateLocal:       true,
+		DiagSelfAssignment:       true,
+		DiagEmptyBlock:           true,
+		DiagFormatString:         true,
+		DiagTypeCheck:            false,
+		DiagRedundantParameter:   true,
+		DiagRedundantValue:       true,
+		DiagRedundantReturn:      true,
+		DiagLoopVarMutation:      true,
+		DiagIncorrectVararg:      true,
+		DiagShadowingLoopVar:     true,
+		DiagUnreachableElse:      true,
+		DiagUsedIgnoredVar:       true,
+
+		InlayParamHints:    true,
+		InlaySuppressMatch: true,
+		InlayImplicitSelf:  true,
+
+		FeatureDocHighlight:   true,
+		FeatureHoverEval:      true,
+		FeatureCodeLens:       true,
+		FeatureFormatting:     true,
+		SuggestFunctionParams: true,
 	}
 }
 
