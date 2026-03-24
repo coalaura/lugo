@@ -49,7 +49,7 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
 
     - name: Set up Zig
       uses: goto-bus-stop/setup-zig@v2
@@ -63,7 +63,7 @@ jobs:
         cache: false
 
     - name: Cache Go build and modules
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: |
           ~/.cache/go-build
@@ -103,13 +103,13 @@ jobs:
         cp "$OUT_RELEASE" "$OUT_EXT"
 
     - name: Upload Release Artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: release_${{ matrix.goos }}_${{ matrix.goarch }}
         path: build/*
 
     - name: Upload Extension Artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: ext_${{ matrix.goos }}_${{ matrix.goarch }}
         path: ext_bin/*
@@ -119,10 +119,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
         node-version: '20'
 
@@ -130,14 +130,14 @@ jobs:
       run: npm install -g @vscode/vsce
 
     - name: Download Release Artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         pattern: release_*
         path: release_artifacts
         merge-multiple: true
 
     - name: Download Extension Artifacts (into /vscode/bin)
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         pattern: ext_*
         path: vscode/bin
