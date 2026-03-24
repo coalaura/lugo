@@ -173,7 +173,7 @@ func (s *Server) publishDiagnostics(uri string) {
 	}
 
 	// 4. Shadowing & Unused Variables
-	if s.DiagShadowing || s.DiagUnusedLocal || s.DiagUnusedFunction || s.DiagUnusedParameter || s.DiagUnusedLoopVar {
+	if s.DiagShadowing || s.DiagShadowingLoopVar || s.DiagUnusedLocal || s.DiagUnusedFunction || s.DiagUnusedParameter || s.DiagUnusedLoopVar {
 		actualReads := make([]int, len(doc.Tree.Nodes))
 
 		for refID, defID := range doc.Resolver.References {
@@ -286,13 +286,38 @@ func (s *Server) publishDiagnostics(uri string) {
 				}
 			}
 
-			if s.DiagShadowing {
+			var isLoopVar bool
+
+			pID := doc.Tree.Nodes[defID].Parent
+			if pID != ast.InvalidNode {
+				pNode := doc.Tree.Nodes[pID]
+				if pNode.Kind == ast.KindForNum && pNode.Left == defID {
+					isLoopVar = true
+				} else if pNode.Kind == ast.KindNameList {
+					gpID := pNode.Parent
+					if gpID != ast.InvalidNode && doc.Tree.Nodes[gpID].Kind == ast.KindForIn {
+						isLoopVar = true
+					}
+				}
+			}
+
+			shouldReportShadow := s.DiagShadowing
+			if isLoopVar {
+				shouldReportShadow = s.DiagShadowingLoopVar
+			}
+
+			if shouldReportShadow {
+				varType := "Local"
+				if isLoopVar {
+					varType = "Loop"
+				}
+
 				if s.isKnownGlobal(nameBytes) {
 					s.diagBuf = append(s.diagBuf, Diagnostic{
 						Range:    r,
 						Severity: SeverityWarning,
 						Code:     "shadow-global",
-						Message:  fmt.Sprintf("Local variable '%s' shadows a known global.", ast.String(nameBytes)),
+						Message:  fmt.Sprintf("%s variable '%s' shadows a known global.", varType, ast.String(nameBytes)),
 					})
 				} else {
 					hash := ast.HashBytes(nameBytes)
@@ -322,7 +347,7 @@ func (s *Server) publishDiagnostics(uri string) {
 							Range:              r,
 							Severity:           SeverityWarning,
 							Code:               "shadow-global",
-							Message:            fmt.Sprintf("Local variable '%s' shadows a global definition.", ast.String(nameBytes)),
+							Message:            fmt.Sprintf("%s variable '%s' shadows a global definition.", varType, ast.String(nameBytes)),
 							RelatedInformation: related,
 						})
 					}
@@ -332,8 +357,31 @@ func (s *Server) publishDiagnostics(uri string) {
 	}
 
 	// 5. Shadowing Outer Locals
-	if s.DiagShadowing {
+	if s.DiagShadowing || s.DiagShadowingLoopVar {
 		for _, pair := range doc.Resolver.ShadowedOuter {
+			var isLoopVar bool
+
+			pID := doc.Tree.Nodes[pair.Shadowing].Parent
+			if pID != ast.InvalidNode {
+				pNode := doc.Tree.Nodes[pID]
+				if pNode.Kind == ast.KindForNum && pNode.Left == pair.Shadowing {
+					isLoopVar = true
+				} else if pNode.Kind == ast.KindNameList {
+					gpID := pNode.Parent
+					if gpID != ast.InvalidNode && doc.Tree.Nodes[gpID].Kind == ast.KindForIn {
+						isLoopVar = true
+					}
+				}
+			}
+
+			if !s.DiagShadowing && !isLoopVar {
+				continue
+			}
+
+			if !s.DiagShadowingLoopVar && isLoopVar {
+				continue
+			}
+
 			node := doc.Tree.Nodes[pair.Shadowing]
 			nameBytes := doc.Source[node.Start:node.End]
 
@@ -347,11 +395,16 @@ func (s *Server) publishDiagnostics(uri string) {
 				Message: fmt.Sprintf("Outer local '%s' defined here", ast.String(nameBytes)),
 			})
 
+			varType := "Local"
+			if isLoopVar {
+				varType = "Loop"
+			}
+
 			s.diagBuf = append(s.diagBuf, Diagnostic{
 				Range:              getNodeRange(doc.Tree, pair.Shadowing),
 				Severity:           SeverityWarning,
 				Code:               "shadow-outer",
-				Message:            fmt.Sprintf("Local variable '%s' shadows a variable from an outer scope.", ast.String(nameBytes)),
+				Message:            fmt.Sprintf("%s variable '%s' shadows a variable from an outer scope.", varType, ast.String(nameBytes)),
 				RelatedInformation: related,
 			})
 		}
@@ -525,6 +578,43 @@ func (s *Server) publishDiagnostics(uri string) {
 		nodeID := ast.NodeID(i)
 		node := doc.Tree.Nodes[nodeID]
 
+		// Loop Variable Mutation
+		if s.DiagLoopVarMutation && (node.Kind == ast.KindAssign) {
+			lhsList := doc.Tree.Nodes[node.Left]
+
+			for j := uint16(0); j < lhsList.Count; j++ {
+				lhsID := doc.Tree.ExtraList[lhsList.Extra+uint32(j)]
+				if doc.Tree.Nodes[lhsID].Kind == ast.KindIdent {
+					defID := doc.Resolver.References[lhsID]
+					if defID != ast.InvalidNode {
+						pID := doc.Tree.Nodes[defID].Parent
+						if pID != ast.InvalidNode {
+							var isLoopVar bool
+
+							pNode := doc.Tree.Nodes[pID]
+							if pNode.Kind == ast.KindForNum && pNode.Left == defID {
+								isLoopVar = true
+							} else if pNode.Kind == ast.KindNameList {
+								gpID := pNode.Parent
+								if gpID != ast.InvalidNode && doc.Tree.Nodes[gpID].Kind == ast.KindForIn {
+									isLoopVar = true
+								}
+							}
+
+							if isLoopVar {
+								s.diagBuf = append(s.diagBuf, Diagnostic{
+									Range:    getNodeRange(doc.Tree, lhsID),
+									Severity: SeverityWarning,
+									Code:     "loop-var-mutation",
+									Message:  "Mutation of a loop variable. This can lead to unexpected behavior.",
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+
 		// Empty block
 		if s.DiagEmptyBlock && node.Kind == ast.KindBlock && node.Count == 0 {
 			if node.Parent != ast.InvalidNode && doc.Tree.Nodes[node.Parent].Kind != ast.KindFile {
@@ -543,6 +633,51 @@ func (s *Server) publishDiagnostics(uri string) {
 					Message:  "This block is empty.",
 					Data:     data,
 				})
+			}
+		}
+
+		// Incorrect Vararg Usage
+		if s.DiagIncorrectVararg && node.Kind == ast.KindVararg {
+			pID := node.Parent
+			if pID != ast.InvalidNode && doc.Tree.Nodes[pID].Kind != ast.KindFunctionExpr {
+				var (
+					isVarargFunc bool
+					foundFunc    bool
+				)
+
+				curr := pID
+
+				for curr != ast.InvalidNode {
+					n := doc.Tree.Nodes[curr]
+					if n.Kind == ast.KindFunctionExpr {
+						foundFunc = true
+
+						if n.Count > 0 {
+							lastParamID := doc.Tree.ExtraList[n.Extra+uint32(n.Count-1)]
+							if doc.Tree.Nodes[lastParamID].Kind == ast.KindVararg {
+								isVarargFunc = true
+							}
+						}
+
+						break
+					} else if n.Kind == ast.KindFile {
+						foundFunc = true
+						isVarargFunc = true
+
+						break
+					}
+
+					curr = n.Parent
+				}
+
+				if foundFunc && !isVarargFunc {
+					s.diagBuf = append(s.diagBuf, Diagnostic{
+						Range:    getNodeRange(doc.Tree, nodeID),
+						Severity: SeverityError,
+						Code:     "incorrect-vararg",
+						Message:  "Cannot use '...' outside a vararg function.",
+					})
+				}
 			}
 		}
 
@@ -618,6 +753,74 @@ func (s *Server) publishDiagnostics(uri string) {
 								Code:     "unbalanced-assignment",
 								Message:  "Assigning fewer values than variables; these variables will be initialized to nil.",
 							})
+						}
+					}
+				}
+			}
+		}
+
+		// Unreachable Elseif/Else
+		if s.DiagUnreachableElse && node.Kind == ast.KindIf {
+			var foundTruthy bool
+
+			if s.isStaticallyConstant(doc, node.Left) {
+				res, ok := doc.evalNode(node.Left, 0)
+				if ok {
+					isTruthy := res.kind != ast.KindFalse && res.kind != ast.KindNil
+					if isTruthy {
+						foundTruthy = true
+					} else {
+						s.diagBuf = append(s.diagBuf, Diagnostic{
+							Range:    getNodeRange(doc.Tree, node.Right),
+							Severity: SeverityWarning,
+							Code:     "unreachable-branch",
+							Tags:     []DiagnosticTag{Unnecessary},
+							Message:  "This branch is unreachable because the condition is always falsy.",
+						})
+					}
+				}
+			}
+
+			for j := uint16(0); j < node.Count; j++ {
+				if node.Extra+uint32(j) >= uint32(len(doc.Tree.ExtraList)) {
+					continue
+				}
+
+				childID := doc.Tree.ExtraList[node.Extra+uint32(j)]
+				if int(childID) >= len(doc.Tree.Nodes) {
+					continue
+				}
+
+				childNode := doc.Tree.Nodes[childID]
+
+				if foundTruthy {
+					s.diagBuf = append(s.diagBuf, Diagnostic{
+						Range:    getNodeRange(doc.Tree, childID),
+						Severity: SeverityWarning,
+						Code:     "unreachable-branch",
+						Tags:     []DiagnosticTag{Unnecessary},
+						Message:  "This branch is unreachable because a previous condition is always truthy.",
+					})
+
+					continue
+				}
+
+				if childNode.Kind == ast.KindElseIf {
+					if s.isStaticallyConstant(doc, childNode.Left) {
+						res, ok := doc.evalNode(childNode.Left, 0)
+						if ok {
+							isTruthy := res.kind != ast.KindFalse && res.kind != ast.KindNil
+							if isTruthy {
+								foundTruthy = true
+							} else {
+								s.diagBuf = append(s.diagBuf, Diagnostic{
+									Range:    getNodeRange(doc.Tree, childNode.Right),
+									Severity: SeverityWarning,
+									Code:     "unreachable-branch",
+									Tags:     []DiagnosticTag{Unnecessary},
+									Message:  "This branch is unreachable because the condition is always falsy.",
+								})
+							}
 						}
 					}
 				}
@@ -1163,6 +1366,27 @@ func (s *Server) isSideEffectFree(doc *Document, id ast.NodeID) bool {
 	}
 
 	return false
+}
+
+func (s *Server) isStaticallyConstant(doc *Document, id ast.NodeID) bool {
+	if id == ast.InvalidNode || int(id) >= len(doc.Tree.Nodes) {
+		return false
+	}
+
+	node := doc.Tree.Nodes[id]
+
+	switch node.Kind {
+	case ast.KindNumber, ast.KindString, ast.KindTrue, ast.KindFalse, ast.KindNil:
+		return true
+	case ast.KindUnaryExpr:
+		return s.isStaticallyConstant(doc, node.Right)
+	case ast.KindBinaryExpr:
+		return s.isStaticallyConstant(doc, node.Left) && s.isStaticallyConstant(doc, node.Right)
+	case ast.KindParenExpr:
+		return s.isStaticallyConstant(doc, node.Left)
+	default:
+		return false
+	}
 }
 
 func (s *Server) getRootDef(doc *Document, exprID ast.NodeID) ast.NodeID {

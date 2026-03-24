@@ -115,6 +115,10 @@ type InitializationOptions struct {
 	DiagRedundantParameter   bool `json:"diagRedundantParameter"`
 	DiagRedundantValue       bool `json:"diagRedundantValue"`
 	DiagRedundantReturn      bool `json:"diagRedundantReturn"`
+	DiagLoopVarMutation      bool `json:"diagLoopVarMutation"`
+	DiagIncorrectVararg      bool `json:"diagIncorrectVararg"`
+	DiagShadowingLoopVar     bool `json:"diagShadowingLoopVar"`
+	DiagUnreachableElse      bool `json:"diagUnreachableElse"`
 
 	InlayParamHints    bool `json:"inlayParamHints"`
 	InlaySuppressMatch bool `json:"inlaySuppressMatch"`

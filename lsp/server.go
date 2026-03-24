@@ -74,6 +74,10 @@ type Server struct {
 	DiagRedundantParameter   bool
 	DiagRedundantValue       bool
 	DiagRedundantReturn      bool
+	DiagLoopVarMutation      bool
+	DiagIncorrectVararg      bool
+	DiagShadowingLoopVar     bool
+	DiagUnreachableElse      bool
 
 	// Inlay Hints
 	InlayParamHints    bool
@@ -186,6 +190,10 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 	setCfg(&s.DiagRedundantParameter, opts.DiagRedundantParameter, &needsRepublish)
 	setCfg(&s.DiagRedundantValue, opts.DiagRedundantValue, &needsRepublish)
 	setCfg(&s.DiagRedundantReturn, opts.DiagRedundantReturn, &needsRepublish)
+	setCfg(&s.DiagLoopVarMutation, opts.DiagLoopVarMutation, &needsRepublish)
+	setCfg(&s.DiagIncorrectVararg, opts.DiagIncorrectVararg, &needsRepublish)
+	setCfg(&s.DiagShadowingLoopVar, opts.DiagShadowingLoopVar, &needsRepublish)
+	setCfg(&s.DiagUnreachableElse, opts.DiagUnreachableElse, &needsRepublish)
 
 	setCfg(&s.InlayParamHints, opts.InlayParamHints, nil)
 	setCfg(&s.InlaySuppressMatch, opts.InlaySuppressMatch, nil)
