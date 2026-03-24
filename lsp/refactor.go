@@ -61,86 +61,38 @@ func (s *Server) handleCodeAction(req Request) {
 						newNameBytes := nameBytes[1:]
 						newName := string(newNameBytes)
 
-						// 1. Check if the new name is a valid identifier (not a keyword)
-						if s.isValidIdentifier(newName) {
-							isSafe := true
+						if !s.isNameSafe(doc, defID, newNameBytes) {
+							newName = s.generateSafeName(doc, defID, newName, false)
+						}
 
-							// 2. Check if it shadows a known or workspace global
-							if s.isKnownGlobal(newNameBytes) {
-								isSafe = false
-							} else {
-								hash := ast.HashBytes(newNameBytes)
+						if newName != "" {
+							var edits []TextEdit
 
-								if syms, exists := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]; exists && len(syms) > 0 {
-									isSafe = false
+							edits = append(edits, TextEdit{
+								Range:   getNodeRange(doc.Tree, defID),
+								NewText: newName,
+							})
+
+							for i, refDefID := range doc.Resolver.References {
+								if refDefID == defID && ast.NodeID(i) != defID {
+									edits = append(edits, TextEdit{
+										Range:   getNodeRange(doc.Tree, ast.NodeID(i)),
+										NewText: newName,
+									})
 								}
 							}
 
-							// 3. Check for local collisions at the definition point (shadowing outer locals)
-							if isSafe {
-								doc.GetLocalsAt(node.Start, func(name []byte, id ast.NodeID) bool {
-									if bytes.Equal(name, newNameBytes) && id != defID {
-										isSafe = false
-
-										return false
-									}
-
-									return true
-								})
-							}
-
-							// 4. Check for local collisions at all reference points (shadowed by inner locals)
-							if isSafe {
-								for i, refDefID := range doc.Resolver.References {
-									if refDefID == defID && ast.NodeID(i) != defID {
-										refNode := doc.Tree.Nodes[i]
-
-										doc.GetLocalsAt(refNode.Start, func(name []byte, id ast.NodeID) bool {
-											if bytes.Equal(name, newNameBytes) && id != defID {
-												isSafe = false
-
-												return false
-											}
-
-											return true
-										})
-
-										if !isSafe {
-											break
-										}
-									}
-								}
-							}
-
-							if isSafe {
-								var edits []TextEdit
-
-								edits = append(edits, TextEdit{
-									Range:   getNodeRange(doc.Tree, defID),
-									NewText: newName,
-								})
-
-								for i, refDefID := range doc.Resolver.References {
-									if refDefID == defID && ast.NodeID(i) != defID {
-										edits = append(edits, TextEdit{
-											Range:   getNodeRange(doc.Tree, ast.NodeID(i)),
-											NewText: newName,
-										})
-									}
-								}
-
-								actions = append(actions, CodeAction{
-									Title:       fmt.Sprintf("Rename to '%s'", newName),
-									Kind:        "quickfix",
-									Diagnostics: []Diagnostic{diag},
-									IsPreferred: true,
-									Edit: &WorkspaceEdit{
-										Changes: map[string][]TextEdit{
-											uri: edits,
-										},
+							actions = append(actions, CodeAction{
+								Title:       fmt.Sprintf("Rename to '%s'", newName),
+								Kind:        "quickfix",
+								Diagnostics: []Diagnostic{diag},
+								IsPreferred: true,
+								Edit: &WorkspaceEdit{
+									Changes: map[string][]TextEdit{
+										uri: edits,
 									},
-								})
-							}
+								},
+							})
 						}
 					}
 				}
@@ -184,6 +136,47 @@ func (s *Server) handleCodeAction(req Request) {
 					},
 				},
 			})
+		case "shadow-global", "shadow-outer", "duplicate-local":
+			offset := doc.Tree.Offset(diag.Range.Start.Line, diag.Range.Start.Character)
+			defID := doc.Tree.NodeAt(offset)
+
+			if defID != ast.InvalidNode && int(defID) < len(doc.Tree.Nodes) && doc.Resolver.References[defID] == defID {
+				node := doc.Tree.Nodes[defID]
+				nameBytes := doc.Source[node.Start:node.End]
+				baseName := string(nameBytes)
+
+				safeName := s.generateSafeName(doc, defID, baseName, false)
+
+				if safeName != "" && safeName != baseName {
+					var edits []TextEdit
+
+					edits = append(edits, TextEdit{
+						Range:   getNodeRange(doc.Tree, defID),
+						NewText: safeName,
+					})
+
+					for i, refDefID := range doc.Resolver.References {
+						if refDefID == defID && ast.NodeID(i) != defID {
+							edits = append(edits, TextEdit{
+								Range:   getNodeRange(doc.Tree, ast.NodeID(i)),
+								NewText: safeName,
+							})
+						}
+					}
+
+					actions = append(actions, CodeAction{
+						Title:       fmt.Sprintf("Rename to '%s'", safeName),
+						Kind:        "quickfix",
+						Diagnostics: []Diagnostic{diag},
+						IsPreferred: true,
+						Edit: &WorkspaceEdit{
+							Changes: map[string][]TextEdit{
+								uri: edits,
+							},
+						},
+					})
+				}
+			}
 		}
 	}
 
@@ -2261,13 +2254,28 @@ func (s *Server) createRenameFix(doc *Document, id ast.NodeID) SafeFix {
 	node := doc.Tree.Nodes[id]
 	name := ast.String(doc.Source[node.Start:node.End])
 
+	safeName := s.generateSafeName(doc, id, name, true)
+
+	var edits []TextEdit
+
+	edits = append(edits, TextEdit{
+		Range:   getNodeRange(doc.Tree, id),
+		NewText: safeName,
+	})
+
+	for i, refDefID := range doc.Resolver.References {
+		if refDefID == id && ast.NodeID(i) != id {
+			edits = append(edits, TextEdit{
+				Range:   getNodeRange(doc.Tree, ast.NodeID(i)),
+				NewText: safeName,
+			})
+		}
+	}
+
 	return SafeFix{
 		Coverage: []ast.NodeID{id},
-		Edits: []TextEdit{{
-			Range:   getNodeRange(doc.Tree, id),
-			NewText: "_" + name,
-		}},
-		Title: "Prefix with '_'",
+		Edits:    edits,
+		Title:    fmt.Sprintf("Rename to '%s'", safeName),
 	}
 }
 
@@ -2799,6 +2807,121 @@ func (s *Server) findCommaBefore(source []byte, start, limit uint32) uint32 {
 	}
 
 	return commaPos
+}
+
+func (s *Server) isNameSafe(doc *Document, defID ast.NodeID, newNameBytes []byte) bool {
+	newName := string(newNameBytes)
+	if !s.isValidIdentifier(newName) {
+		return false
+	}
+
+	if s.isKnownGlobal(newNameBytes) {
+		return false
+	}
+
+	hash := ast.HashBytes(newNameBytes)
+	if syms, exists := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]; exists && len(syms) > 0 {
+		return false
+	}
+
+	node := doc.Tree.Nodes[defID]
+	isSafe := true
+
+	doc.GetLocalsAt(node.Start, func(name []byte, id ast.NodeID) bool {
+		if bytes.Equal(name, newNameBytes) && id != defID {
+			isSafe = false
+
+			return false
+		}
+
+		return true
+	})
+
+	if !isSafe {
+		return false
+	}
+
+	for i, refDefID := range doc.Resolver.References {
+		if refDefID == defID && ast.NodeID(i) != defID {
+			refNode := doc.Tree.Nodes[i]
+
+			doc.GetLocalsAt(refNode.Start, func(name []byte, id ast.NodeID) bool {
+				if bytes.Equal(name, newNameBytes) && id != defID {
+					isSafe = false
+
+					return false
+				}
+
+				return true
+			})
+
+			if !isSafe {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+func (s *Server) generateSafeName(doc *Document, defID ast.NodeID, baseName string, isIgnore bool) string {
+	if isIgnore {
+		candidates := []string{
+			"_" + baseName,
+			"_" + baseName + "_ignored",
+		}
+
+		for _, c := range candidates {
+			if s.isNameSafe(doc, defID, []byte(c)) {
+				return c
+			}
+		}
+
+		for i := 2; i < 100; i++ {
+			c := fmt.Sprintf("_%s_%d", baseName, i)
+			if s.isNameSafe(doc, defID, []byte(c)) {
+				return c
+			}
+		}
+
+		return "_" + baseName
+	}
+
+	titleBase := baseName
+	if len(baseName) > 0 {
+		titleBase = strings.ToUpper(baseName[:1]) + baseName[1:]
+	}
+
+	var candidates []string
+
+	pID := doc.Tree.Nodes[defID].Parent
+	if pID != ast.InvalidNode && int(pID) < len(doc.Tree.Nodes) {
+		if doc.Tree.Nodes[pID].Kind == ast.KindFunctionExpr {
+			candidates = append(candidates, "p"+titleBase)
+		}
+	}
+
+	candidates = append(candidates,
+		"new"+titleBase,
+		"local"+titleBase,
+		baseName+"Val",
+		baseName+"Copy",
+	)
+
+	for _, c := range candidates {
+		if s.isNameSafe(doc, defID, []byte(c)) {
+			return c
+		}
+	}
+
+	for i := 2; i < 100; i++ {
+		c := fmt.Sprintf("%s_%d", baseName, i)
+		if s.isNameSafe(doc, defID, []byte(c)) {
+			return c
+		}
+	}
+
+	return baseName + "_new"
 }
 
 func (s *Server) isValidIdentifier(name string) bool {
