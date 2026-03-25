@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/coalaura/lugo/ast"
@@ -2865,59 +2866,190 @@ func (s *Server) isNameSafe(doc *Document, defID ast.NodeID, newNameBytes []byte
 }
 
 func (s *Server) generateSafeName(doc *Document, defID ast.NodeID, baseName string, isIgnore bool) string {
-	if isIgnore {
-		candidates := []string{
-			"_" + baseName,
-			"_" + baseName + "_ignored",
+	buf := make([]byte, 0, len(baseName)+16)
+
+	check := func() string {
+		if s.isNameSafe(doc, defID, buf) {
+			return string(buf)
 		}
 
-		for _, c := range candidates {
-			if s.isNameSafe(doc, defID, []byte(c)) {
-				return c
-			}
+		return ""
+	}
+
+	if isIgnore {
+		buf = append(buf[:0], '_')
+		buf = append(buf, baseName...)
+
+		if res := check(); res != "" {
+			return res
+		}
+
+		buf = append(buf[:0], '_')
+		buf = append(buf, baseName...)
+		buf = append(buf, "_ignored"...)
+
+		if res := check(); res != "" {
+			return res
 		}
 
 		for i := 2; i < 100; i++ {
-			c := fmt.Sprintf("_%s_%d", baseName, i)
-			if s.isNameSafe(doc, defID, []byte(c)) {
-				return c
+			buf = append(buf[:0], '_')
+			buf = append(buf, baseName...)
+			buf = append(buf, '_')
+			buf = strconv.AppendInt(buf, int64(i), 10)
+
+			if res := check(); res != "" {
+				return res
 			}
 		}
 
 		return "_" + baseName
 	}
 
-	titleBase := baseName
-	if len(baseName) > 0 {
-		titleBase = strings.ToUpper(baseName[:1]) + baseName[1:]
+	var (
+		prefix   string
+		coreName string
+	)
+
+	if len(baseName) >= 2 && baseName[0] >= 'a' && baseName[0] <= 'z' && baseName[1] >= 'A' && baseName[1] <= 'Z' {
+		prefix = baseName[:1]
+		coreName = baseName[1:]
+	} else if len(baseName) >= 2 && baseName[0] == '_' {
+		prefix = "_"
+		coreName = baseName[1:]
+	} else {
+		coreName = baseName
 	}
 
-	var candidates []string
+	var (
+		hasUnderscore bool
+		hasLower      bool
+		hasUpper      bool
+		firstUpper    bool
+	)
+
+	if len(coreName) > 0 {
+		firstUpper = coreName[0] >= 'A' && coreName[0] <= 'Z'
+	}
+
+	for i := 0; i < len(coreName); i++ {
+		c := coreName[i]
+
+		if c == '_' {
+			hasUnderscore = true
+		} else if c >= 'a' && c <= 'z' {
+			hasLower = true
+		} else if c >= 'A' && c <= 'Z' {
+			hasUpper = true
+		}
+	}
+
+	isUpper := hasUpper && !hasLower
+	isSnake := hasUnderscore && !hasUpper
+	isCamel := !hasUnderscore && hasLower && hasUpper && !firstUpper
+	isPascal := !hasUnderscore && hasLower && hasUpper && firstUpper
+
+	buildCandidate := func(modLower, modPascal, modUpper string) string {
+		buf = buf[:0]
+		buf = append(buf, prefix...)
+
+		if isUpper {
+			buf = append(buf, modUpper...)
+
+			if len(coreName) > 0 && coreName[0] != '_' {
+				buf = append(buf, '_')
+			}
+
+			buf = append(buf, coreName...)
+		} else if isSnake || (hasUnderscore && !hasUpper) {
+			buf = append(buf, modLower...)
+
+			if len(coreName) > 0 && coreName[0] != '_' {
+				buf = append(buf, '_')
+			}
+
+			buf = append(buf, coreName...)
+		} else if isPascal || (prefix != "" && prefix != "_") {
+			buf = append(buf, modPascal...)
+			buf = append(buf, coreName...)
+		} else if isCamel {
+			buf = append(buf, modLower...)
+
+			if len(coreName) > 0 {
+				buf = append(buf, coreName[0]-32)
+				buf = append(buf, coreName[1:]...)
+			}
+		} else {
+			buf = append(buf, modLower...)
+			if len(coreName) > 0 {
+				c := coreName[0]
+
+				if c >= 'a' && c <= 'z' {
+					buf = append(buf, c-32)
+					buf = append(buf, coreName[1:]...)
+				} else {
+					buf = append(buf, '_')
+					buf = append(buf, coreName...)
+				}
+			}
+		}
+
+		return check()
+	}
 
 	pID := doc.Tree.Nodes[defID].Parent
 	if pID != ast.InvalidNode && int(pID) < len(doc.Tree.Nodes) {
 		if doc.Tree.Nodes[pID].Kind == ast.KindFunctionExpr {
-			candidates = append(candidates, "p"+titleBase)
+			if prefix != "p" {
+				if res := buildCandidate("p", "P", "P"); res != "" {
+					return res
+				}
+			}
 		}
 	}
 
-	candidates = append(candidates,
-		"new"+titleBase,
-		"local"+titleBase,
-		baseName+"Val",
-		baseName+"Copy",
-	)
+	if res := buildCandidate("new", "New", "NEW"); res != "" {
+		return res
+	}
 
-	for _, c := range candidates {
-		if s.isNameSafe(doc, defID, []byte(c)) {
-			return c
-		}
+	if res := buildCandidate("local", "Local", "LOCAL"); res != "" {
+		return res
+	}
+
+	buf = append(buf[:0], baseName...)
+
+	if isUpper {
+		buf = append(buf, "_VAL"...)
+	} else if isSnake {
+		buf = append(buf, "_val"...)
+	} else {
+		buf = append(buf, "Val"...)
+	}
+	if res := check(); res != "" {
+		return res
+	}
+
+	buf = append(buf[:0], baseName...)
+
+	if isUpper {
+		buf = append(buf, "_COPY"...)
+	} else if isSnake {
+		buf = append(buf, "_copy"...)
+	} else {
+		buf = append(buf, "Copy"...)
+	}
+
+	if res := check(); res != "" {
+		return res
 	}
 
 	for i := 2; i < 100; i++ {
-		c := fmt.Sprintf("%s_%d", baseName, i)
-		if s.isNameSafe(doc, defID, []byte(c)) {
-			return c
+		buf = append(buf[:0], baseName...)
+		buf = append(buf, '_')
+		buf = strconv.AppendInt(buf, int64(i), 10)
+
+		if res := check(); res != "" {
+			return res
 		}
 	}
 
