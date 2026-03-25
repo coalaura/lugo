@@ -210,6 +210,11 @@ func (s *Server) refreshWorkspace() {
 		clear(s.activeURIs)
 	}
 
+	clear(s.resourceCache)
+	clear(s.envCache)
+	clear(s.FiveMResources)
+	clear(s.FiveMResourceByName)
+
 	var (
 		total     int
 		indexed   int
@@ -242,6 +247,17 @@ func (s *Server) refreshWorkspace() {
 			total += len(doc.Source)
 
 			s.updateDocument(uri, doc.Source)
+		}
+	}
+
+	if s.FeatureFiveM {
+		for uri, doc := range s.Documents {
+			if strings.HasSuffix(uri, "/fxmanifest.lua") || strings.HasSuffix(uri, "/__resource.lua") {
+				res := s.parseFiveMManifest(doc)
+
+				s.FiveMResources[res.RootURI] = res
+				s.FiveMResourceByName[res.Name] = res
+			}
 		}
 	}
 
@@ -295,10 +311,6 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 
 	path = strings.ReplaceAll(path, "/", string(filepath.Separator))
 
-	if realPath, err := filepath.EvalSymlinks(path); err == nil {
-		path = realPath
-	}
-
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		s.Log.Warnf("%q not found\n", path)
 
@@ -314,11 +326,16 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 	var walk func(dir string)
 
 	walk = func(dir string) {
-		if s.visitedDirs[dir] {
+		realDir, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			realDir = dir
+		}
+
+		if s.visitedDirs[realDir] {
 			return
 		}
 
-		s.visitedDirs[dir] = true
+		s.visitedDirs[realDir] = true
 
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -337,23 +354,13 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 
 			// Check if its a symlink
 			if e.Type()&fs.ModeSymlink != 0 {
-				realPath, err := filepath.EvalSymlinks(fullPath)
+				stat, err := os.Stat(fullPath)
 				if err == nil {
-					stat, err := os.Stat(realPath)
-					if err == nil {
-						isDir = stat.IsDir()
-						name = stat.Name()
-
-						fullPath = realPath
-					} else {
-						*failed++
-
-						continue
-					}
+					isDir = stat.IsDir()
 				} else {
 					*failed++
 
-					continue // Broken symlink
+					continue
 				}
 			}
 
@@ -816,6 +823,13 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		}
 	}
 
+	if s.FeatureFiveM && (strings.HasSuffix(uri, "/fxmanifest.lua") || strings.HasSuffix(uri, "/__resource.lua")) {
+		res := s.parseFiveMManifest(doc)
+
+		s.FiveMResources[res.RootURI] = res
+		s.FiveMResourceByName[res.Name] = res
+	}
+
 	s.Documents[uri] = doc
 }
 
@@ -866,6 +880,10 @@ func (s *Server) compileIgnorePatterns() {
 }
 
 func (s *Server) isIgnored(fullPath, name string) bool {
+	if s.FeatureFiveM && (name == "fxmanifest.lua" || name == "__resource.lua") {
+		return false
+	}
+
 	for _, p := range s.compiledIgnores {
 		if p.HasSuffix != "" && strings.HasSuffix(name, p.HasSuffix) {
 			return true

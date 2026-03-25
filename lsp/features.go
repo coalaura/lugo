@@ -648,7 +648,22 @@ func (s *Server) handleCompletion(req Request) {
 
 		for key, syms := range s.GlobalIndex {
 			if validRecs[key.ReceiverHash] && key.PropHash != 0 && len(syms) > 0 {
-				sym := syms[0]
+				var visibleSym *GlobalSymbol
+
+				for _, sym := range syms {
+					if s.canSeeSymbol(uri, sym.URI) {
+						visibleSym = &sym
+
+						break
+					}
+				}
+
+				if visibleSym == nil {
+					continue
+				}
+
+				sym := *visibleSym
+
 				if symDoc, ok := s.Documents[sym.URI]; ok {
 					node := symDoc.Tree.Nodes[sym.NodeID]
 
@@ -698,7 +713,22 @@ func (s *Server) handleCompletion(req Request) {
 
 		for key, syms := range s.GlobalIndex {
 			if key.ReceiverHash == 0 && key.PropHash != 0 && len(syms) > 0 {
-				sym := syms[0]
+				var visibleSym *GlobalSymbol
+
+				for _, sym := range syms {
+					if s.canSeeSymbol(uri, sym.URI) {
+						visibleSym = &sym
+
+						break
+					}
+				}
+
+				if visibleSym == nil {
+					continue
+				}
+
+				sym := *visibleSym
+
 				if symDoc, ok := s.Documents[sym.URI]; ok {
 					node := symDoc.Tree.Nodes[sym.NodeID]
 
@@ -1400,7 +1430,7 @@ func (s *Server) handleSemanticTokensFull(req Request) {
 						recHash = ast.HashBytes(recBytes)
 					}
 
-					if syms, ok := s.getGlobalSymbols(recHash, hash); ok && len(syms) > 0 {
+					if syms, ok := s.getGlobalSymbols(uri, recHash, hash); ok && len(syms) > 0 {
 						sym := syms[0]
 						if gDoc, ok := s.Documents[sym.URI]; ok {
 							targetDoc = gDoc

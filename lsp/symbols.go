@@ -3,6 +3,7 @@ package lsp
 import (
 	"encoding/json"
 	"iter"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -725,15 +726,16 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 				ctx.IsGlobal = true
 				ctx.GKey = exportedKey
 
-				if gSyms, ok := s.getGlobalSymbols(ctx.GKey.ReceiverHash, ctx.GKey.PropHash); ok {
+				if gSyms, ok := s.getGlobalSymbols(uri, ctx.GKey.ReceiverHash, ctx.GKey.PropHash); ok {
 					bestDefs := s.getBestDefsForContext(doc, nodeID, gSyms)
 					ctx.GlobalDefs = bestDefs
 				}
 			}
 		}
 	} else if gKey.PropHash != 0 {
-		if gSyms, ok := s.getGlobalSymbols(gKey.ReceiverHash, gKey.PropHash); ok {
+		if gSyms, ok := s.getGlobalSymbols(uri, gKey.ReceiverHash, gKey.PropHash); ok {
 			bestDefs := s.getBestDefsForContext(doc, nodeID, gSyms)
+
 			ctx.GlobalDefs = bestDefs
 
 			if len(bestDefs) > 0 {
@@ -910,6 +912,10 @@ func (s *Server) iterateGlobalReferences(ctx *SymbolContext) iter.Seq[GlobalRefe
 		}
 
 		for dUri, dDoc := range s.Documents {
+			if !s.canSeeSymbol(dUri, ctx.TargetURI) {
+				continue
+			}
+
 			if ctx.GKey.ReceiverHash == 0 {
 				for _, id := range dDoc.Resolver.GlobalDefs {
 					if ast.HashBytes(dDoc.Source[dDoc.Tree.Nodes[id].Start:dDoc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
@@ -951,13 +957,23 @@ func (s *Server) iterateGlobalReferences(ctx *SymbolContext) iter.Seq[GlobalRefe
 	}
 }
 
-func (s *Server) getGlobalSymbols(recHash, propHash uint64) ([]GlobalSymbol, bool) {
+func (s *Server) getGlobalSymbols(sourceURI string, recHash, propHash uint64) ([]GlobalSymbol, bool) {
 	currRec := recHash
 
 	for range 10 {
 		key := GlobalKey{ReceiverHash: currRec, PropHash: propHash}
 		if syms, exists := s.GlobalIndex[key]; exists && len(syms) > 0 {
-			return syms, true
+			var filtered []GlobalSymbol
+
+			for _, sym := range syms {
+				if s.canSeeSymbol(sourceURI, sym.URI) {
+					filtered = append(filtered, sym)
+				}
+			}
+
+			if len(filtered) > 0 {
+				return filtered, true
+			}
 		}
 
 		if currRec == 0 {
@@ -1105,7 +1121,7 @@ func (s *Server) getGlobalPath(doc *Document, id ast.NodeID, depth int) []byte {
 	return nil
 }
 
-func (s *Server) suggestGlobal(name string) string {
+func (s *Server) suggestGlobal(sourceURI string, name string) string {
 	var (
 		bestMatch string
 		minDist   = 3
@@ -1127,11 +1143,203 @@ func (s *Server) suggestGlobal(name string) string {
 	// Then check workspace globals
 	for key, syms := range s.GlobalIndex {
 		if key.ReceiverHash == 0 && len(syms) > 0 {
-			check(syms[0].Name)
+			for _, sym := range syms {
+				if s.canSeeSymbol(sourceURI, sym.URI) {
+					check(sym.Name)
+
+					break
+				}
+			}
 		}
 	}
 
 	return bestMatch
+}
+
+func (s *Server) getResourceRoot(uri string) string {
+	if !s.FeatureFiveM {
+		return ""
+	}
+
+	if strings.HasPrefix(uri, "std://") {
+		return "std"
+	}
+
+	if root, ok := s.resourceCache[uri]; ok {
+		return root
+	}
+
+	// First check if it matches any known parsed FiveMResource
+	var bestRoot string
+
+	for root := range s.FiveMResources {
+		if strings.HasPrefix(uri, root+"/") || uri == root {
+			if len(root) > len(bestRoot) {
+				bestRoot = root
+			}
+		}
+	}
+
+	if bestRoot != "" {
+		s.resourceCache[uri] = bestRoot
+		return bestRoot
+	}
+
+	// Fallback to disk scan (for files opened outside the indexed workspace)
+	path := s.uriToPath(uri)
+	if path == "" {
+		return ""
+	}
+
+	dir := filepath.Dir(path)
+
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "fxmanifest.lua")); err == nil {
+			res := s.pathToURI(dir)
+			s.resourceCache[uri] = res
+
+			return res
+		}
+
+		if _, err := os.Stat(filepath.Join(dir, "__resource.lua")); err == nil {
+			res := s.pathToURI(dir)
+			s.resourceCache[uri] = res
+
+			return res
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+
+		dir = parent
+	}
+
+	s.resourceCache[uri] = ""
+
+	return ""
+}
+
+func (s *Server) canSeeSymbol(sourceURI, targetURI string) bool {
+	if !s.FeatureFiveM {
+		return true
+	}
+
+	if sourceURI == targetURI {
+		return true
+	}
+
+	if strings.HasPrefix(targetURI, "std://") {
+		return true
+	}
+
+	targetPath := strings.ToLower(s.uriToPath(targetURI))
+
+	for _, lib := range s.lowerLibraryPaths {
+		if strings.HasPrefix(targetPath, lib) {
+			return true
+		}
+	}
+
+	srcRoot := s.getResourceRoot(sourceURI)
+	tgtRoot := s.getResourceRoot(targetURI)
+
+	if srcRoot == "" && tgtRoot == "" {
+		return true
+	}
+
+	// Same resource check (with Client/Server separation)
+	if srcRoot == tgtRoot {
+		srcRes := s.FiveMResources[srcRoot]
+		if srcRes != nil {
+			srcEnv := s.getFileEnv(srcRes, sourceURI)
+			tgtEnv := s.getFileEnv(srcRes, targetURI)
+
+			srcIsManifest := strings.HasSuffix(sourceURI, "/fxmanifest.lua") || strings.HasSuffix(sourceURI, "/__resource.lua")
+			tgtIsManifest := strings.HasSuffix(targetURI, "/fxmanifest.lua") || strings.HasSuffix(targetURI, "/__resource.lua")
+
+			// Isolate unaccounted files
+			if (!srcIsManifest && srcEnv == EnvUnknown) || (!tgtIsManifest && tgtEnv == EnvUnknown) {
+				return false
+			}
+
+			if srcEnv == EnvClient && tgtEnv == EnvServer {
+				return false
+			}
+
+			if srcEnv == EnvServer && tgtEnv == EnvClient {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	// Cross-resource `@resource/file.lua` check
+	srcRes := s.FiveMResources[srcRoot]
+	if srcRes == nil {
+		return false
+	}
+
+	tgtRes := s.FiveMResources[tgtRoot]
+
+	var (
+		tgtName string
+		relPath string
+	)
+
+	if tgtRes != nil {
+		tgtName = tgtRes.Name
+		if len(targetURI) > len(tgtRes.RootURI) {
+			relPath = targetURI[len(tgtRes.RootURI)+1:]
+		}
+	} else if tgtRoot != "" {
+		parts := strings.Split(tgtRoot, "/")
+
+		tgtName = parts[len(parts)-1]
+		if len(targetURI) > len(tgtRoot) {
+			relPath = targetURI[len(tgtRoot)+1:]
+		}
+	}
+
+	if tgtName != "" && relPath != "" {
+		expectedInclude := "@" + tgtName + "/" + relPath
+
+		srcEnv := s.getFileEnv(srcRes, sourceURI)
+
+		var allowedIncludes []string
+
+		allowedIncludes = append(allowedIncludes, srcRes.SharedCrossIncludes...)
+
+		if srcEnv == EnvClient || srcEnv == EnvUnknown {
+			allowedIncludes = append(allowedIncludes, srcRes.ClientCrossIncludes...)
+		}
+
+		if srcEnv == EnvServer || srcEnv == EnvUnknown {
+			allowedIncludes = append(allowedIncludes, srcRes.ServerCrossIncludes...)
+		}
+
+		for _, inc := range allowedIncludes {
+			if strings.EqualFold(inc, expectedInclude) {
+				return true
+			}
+
+			if strings.Contains(inc, "*") {
+				prefix := "@" + tgtName + "/"
+
+				if len(inc) >= len(prefix) && strings.EqualFold(inc[:len(prefix)], prefix) {
+					globPattern := inc[len(prefix):]
+
+					if matchFiveMGlob(globPattern, relPath) {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 func (s *Server) isKnownGlobal(name []byte) bool {

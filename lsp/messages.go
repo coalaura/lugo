@@ -131,6 +131,7 @@ type InitializationOptions struct {
 	FeatureFormatting     bool `json:"featureFormatting"`
 	FormatOpinionated     bool `json:"formatOpinionated"`
 	SuggestFunctionParams bool `json:"suggestFunctionParams"`
+	FeatureFiveM          bool `json:"featureFiveM"`
 }
 
 type ServerCapabilities struct {

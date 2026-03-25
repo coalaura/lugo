@@ -26,13 +26,17 @@ type Server struct {
 	Log     *plain.Plain
 
 	// Workspace State
-	RootURI       string
-	lowerRootPath string
-	IsIndexing    bool
-	Documents     map[string]*Document
-	OpenFiles     map[string]bool
-	activeURIs    map[string]bool
-	visitedDirs   map[string]bool
+	RootURI             string
+	lowerRootPath       string
+	IsIndexing          bool
+	Documents           map[string]*Document
+	OpenFiles           map[string]bool
+	activeURIs          map[string]bool
+	visitedDirs         map[string]bool
+	resourceCache       map[string]string
+	envCache            map[string]FileEnv
+	FiveMResources      map[string]*FiveMResource
+	FiveMResourceByName map[string]*FiveMResource
 
 	// Global Index & Resolution
 	GlobalIndex       map[GlobalKey][]GlobalSymbol
@@ -44,10 +48,16 @@ type Server struct {
 	compiledIgnores   []IgnorePattern
 
 	// Shared Buffers & Parsers
-	sharedParser *parser.Parser
-	diagBuf      []Diagnostic
-	semTokensBuf []SemanticToken
-	semDataBuf   []uint32
+	sharedParser   *parser.Parser
+	diagBuf        []Diagnostic
+	semTokensBuf   []SemanticToken
+	semDataBuf     []uint32
+	actualReadsBuf []int
+	depCache       map[ast.NodeID]DepInfo
+	seenKeysBuf    map[uint64]ast.NodeID
+	unusedDefsBuf  []bool
+	deadStoresBuf  map[ast.NodeID]*DeadStoreInfo
+	suggestCache   map[string]string
 
 	// Configuration
 
@@ -92,6 +102,7 @@ type Server struct {
 	FeatureFormatting     bool
 	FormatOpinionated     bool
 	SuggestFunctionParams bool
+	FeatureFiveM          bool
 }
 
 func NewServer(version string) *Server {
@@ -101,18 +112,23 @@ func NewServer(version string) *Server {
 		Writer:  os.Stdout,
 
 		// Workspace State
-		Documents:  make(map[string]*Document),
-		OpenFiles:  make(map[string]bool),
-		IsIndexing: true,
+		Documents:           make(map[string]*Document),
+		OpenFiles:           make(map[string]bool),
+		IsIndexing:          true,
+		resourceCache:       make(map[string]string),
+		envCache:            make(map[string]FileEnv),
+		FiveMResources:      make(map[string]*FiveMResource),
+		FiveMResourceByName: make(map[string]*FiveMResource),
 
 		// Global Index
 		GlobalIndex: make(map[GlobalKey][]GlobalSymbol),
 
 		// Shared Buffers
-		sharedParser: parser.New(nil, ast.NewTree(nil), 50),
-		diagBuf:      make([]Diagnostic, 0, 1024),
-		semTokensBuf: make([]SemanticToken, 0, 4096),
-		semDataBuf:   make([]uint32, 0, 4096*5),
+		sharedParser:   parser.New(nil, ast.NewTree(nil), 50),
+		diagBuf:        make([]Diagnostic, 0, 1024),
+		semTokensBuf:   make([]SemanticToken, 0, 4096),
+		semDataBuf:     make([]uint32, 0, 4096*5),
+		actualReadsBuf: make([]int, 0, 4096),
 
 		// Configuration Defaults
 		MaxParseErrors: 50,
@@ -152,6 +168,7 @@ func NewServer(version string) *Server {
 		FeatureCodeLens:       true,
 		FeatureFormatting:     true,
 		SuggestFunctionParams: true,
+		FeatureFiveM:          true,
 	}
 }
 
@@ -243,6 +260,7 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 	setCfg(&s.FeatureFormatting, opts.FeatureFormatting, nil)
 	setCfg(&s.FormatOpinionated, opts.FormatOpinionated, nil)
 	setCfg(&s.SuggestFunctionParams, opts.SuggestFunctionParams, nil)
+	setCfg(&s.FeatureFiveM, opts.FeatureFiveM, &needsReindex)
 
 	return needsReindex, needsRepublish
 }

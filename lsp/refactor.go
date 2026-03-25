@@ -1358,6 +1358,10 @@ func (s *Server) handleRename(req Request) {
 
 	if ctx.IsGlobal {
 		for dUri, dDoc := range s.Documents {
+			if !s.canSeeSymbol(dUri, ctx.TargetURI) {
+				continue
+			}
+
 			if ctx.GKey.ReceiverHash == 0 {
 				for _, id := range dDoc.Resolver.GlobalDefs {
 					node := dDoc.Tree.Nodes[id]
@@ -1454,7 +1458,15 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 	}
 
 	if actualReads == nil {
-		actualReads = make([]int, len(doc.Tree.Nodes))
+		if cap(s.actualReadsBuf) < len(doc.Tree.Nodes) {
+			s.actualReadsBuf = make([]int, len(doc.Tree.Nodes))
+		} else {
+			s.actualReadsBuf = s.actualReadsBuf[:len(doc.Tree.Nodes)]
+
+			clear(s.actualReadsBuf)
+		}
+
+		actualReads = s.actualReadsBuf
 
 		for refID, defID := range doc.Resolver.References {
 			if defID != ast.InvalidNode && ast.NodeID(refID) != defID {
@@ -1465,8 +1477,23 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 		}
 	}
 
-	unusedDefs := make([]bool, len(doc.Tree.Nodes))
-	deadStores := make(map[ast.NodeID]*DeadStoreInfo)
+	if cap(s.unusedDefsBuf) < len(doc.Tree.Nodes) {
+		s.unusedDefsBuf = make([]bool, len(doc.Tree.Nodes))
+	} else {
+		s.unusedDefsBuf = s.unusedDefsBuf[:len(doc.Tree.Nodes)]
+
+		clear(s.unusedDefsBuf)
+	}
+
+	unusedDefs := s.unusedDefsBuf
+
+	if s.deadStoresBuf == nil {
+		s.deadStoresBuf = make(map[ast.NodeID]*DeadStoreInfo)
+	} else {
+		clear(s.deadStoresBuf)
+	}
+
+	deadStores := s.deadStoresBuf
 
 	for _, defID := range doc.Resolver.LocalDefs {
 		if actualReads[defID] == 0 {

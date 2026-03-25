@@ -60,6 +60,13 @@
                 "type": "object",
                 "title": "Lugo: Workspace & Environment",
                 "properties": {
+                    "lugo.fivem.enabled": {
+                        "type": "boolean",
+                        "default": false,
+                        "scope": "resource",
+                        "markdownDescription": "Enable FiveM support. Scopes globals and diagnostics to their respective resources (using `fxmanifest.lua` / `__resource.lua`).",
+                        "order": 0
+                    },
                     "lugo.workspace.libraryPaths": {
                         "type": "array",
                         "items": {

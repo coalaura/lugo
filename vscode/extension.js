@@ -87,6 +87,7 @@ function buildInitializationOptions() {
 		featureFormatting: lugoConfig.get("features.formatting") !== false,
 		formatOpinionated: lugoConfig.get("features.formatOpinionated") === true,
 		suggestFunctionParams: lugoConfig.get("completion.suggestFunctionParams") !== false,
+		featureFiveM: lugoConfig.get("fivem.enabled") === true,
 	};
 }
 

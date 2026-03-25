@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -42,9 +43,39 @@ func (s *Server) publishDiagnostics(uri string) {
 		return
 	}
 
+	if s.FeatureFiveM && (strings.HasSuffix(uri, "/fxmanifest.lua") || strings.HasSuffix(uri, "/__resource.lua")) {
+		WriteMessage(s.Writer, OutgoingNotification{
+			RPC:    "2.0",
+			Method: "textDocument/publishDiagnostics",
+			Params: PublishDiagnosticsParams{
+				URI:         uri,
+				Diagnostics: []Diagnostic{},
+			},
+		})
+
+		return
+	}
+
 	doc := s.Documents[uri]
 
 	s.diagBuf = s.diagBuf[:0]
+
+	if s.FeatureFiveM {
+		root := s.getResourceRoot(uri)
+		if root != "" {
+			if res := s.FiveMResources[root]; res != nil {
+				env := s.getFileEnv(res, uri)
+				if env == EnvUnknown && !strings.HasSuffix(uri, "/fxmanifest.lua") && !strings.HasSuffix(uri, "/__resource.lua") {
+					s.diagBuf = append(s.diagBuf, Diagnostic{
+						Range:    Range{Start: Position{Line: 0, Character: 0}, End: Position{Line: 0, Character: 0}},
+						Severity: SeverityWarning,
+						Code:     "unaccounted-file",
+						Message:  "This file is not referenced in the resource manifest (fxmanifest.lua). Its globals are isolated and it cannot access other files in the resource.",
+					})
+				}
+			}
+		}
+	}
 
 	// 1. Parse Errors
 	for _, err := range doc.Errors {
@@ -77,7 +108,13 @@ func (s *Server) publishDiagnostics(uri string) {
 
 	// 2. Undefined Globals
 	if s.DiagUndefinedGlobals {
-		suggestCache := make(map[string]string)
+		if s.suggestCache == nil {
+			s.suggestCache = make(map[string]string)
+		} else {
+			clear(s.suggestCache)
+		}
+
+		suggestCache := s.suggestCache
 
 		for _, refID := range doc.Resolver.GlobalRefs {
 			node := doc.Tree.Nodes[refID]
@@ -94,12 +131,24 @@ func (s *Server) publishDiagnostics(uri string) {
 			hash := ast.HashBytes(identBytes)
 			key := GlobalKey{ReceiverHash: 0, PropHash: hash}
 
-			if _, exists := s.GlobalIndex[key]; !exists {
+			var exists bool
+
+			if syms, ok := s.GlobalIndex[key]; ok {
+				for _, sym := range syms {
+					if s.canSeeSymbol(uri, sym.URI) {
+						exists = true
+
+						break
+					}
+				}
+			}
+
+			if !exists {
 				identStr := ast.String(identBytes)
 
 				suggestion, ok := suggestCache[identStr]
 				if !ok {
-					suggestion = s.suggestGlobal(identStr)
+					suggestion = s.suggestGlobal(uri, identStr)
 					suggestCache[identStr] = suggestion
 				}
 
@@ -149,6 +198,10 @@ func (s *Server) publishDiagnostics(uri string) {
 
 			if syms, ok := s.GlobalIndex[key]; ok {
 				for _, sym := range syms {
+					if !s.canSeeSymbol(uri, sym.URI) {
+						continue
+					}
+
 					if symDoc, docOk := s.Documents[sym.URI]; docOk {
 						if isRootLevel(symDoc.Tree, sym.NodeID) {
 							isDefinedAtRoot = true
@@ -174,7 +227,15 @@ func (s *Server) publishDiagnostics(uri string) {
 
 	// 4. Shadowing & Unused Variables
 	if s.DiagShadowing || s.DiagShadowingLoopVar || s.DiagUnusedLocal || s.DiagUnusedFunction || s.DiagUnusedParameter || s.DiagUnusedLoopVar {
-		actualReads := make([]int, len(doc.Tree.Nodes))
+		if cap(s.actualReadsBuf) < len(doc.Tree.Nodes) {
+			s.actualReadsBuf = make([]int, len(doc.Tree.Nodes))
+		} else {
+			s.actualReadsBuf = s.actualReadsBuf[:len(doc.Tree.Nodes)]
+
+			clear(s.actualReadsBuf)
+		}
+
+		actualReads := s.actualReadsBuf
 
 		for refID, defID := range doc.Resolver.References {
 			if defID != ast.InvalidNode && ast.NodeID(refID) != defID {
@@ -185,14 +246,6 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 
 		fixes := s.getSafeFixesForDocument(doc, actualReads)
-
-		fixMap := make([]string, len(doc.Tree.Nodes))
-
-		for _, f := range fixes {
-			for _, id := range f.Coverage {
-				fixMap[id] = f.Title
-			}
-		}
 
 		for _, defID := range doc.Resolver.LocalDefs {
 			node := doc.Tree.Nodes[defID]
@@ -263,7 +316,17 @@ func (s *Server) publishDiagnostics(uri string) {
 				} else {
 					msg = fmt.Sprintf("Unused %s '%s'.", category, ast.String(nameBytes))
 
-					if fixTitle := fixMap[defID]; fixTitle != "" {
+					var fixTitle string
+
+					for _, f := range fixes {
+						if slices.Contains(f.Coverage, defID) {
+							fixTitle = f.Title
+
+							break
+						}
+					}
+
+					if fixTitle != "" {
 						if fixTitle == "Prefix with '_'" {
 							msg += " Prefix with '_' to ignore."
 						} else {
@@ -334,7 +397,21 @@ func (s *Server) publishDiagnostics(uri string) {
 					hash := ast.HashBytes(nameBytes)
 
 					if syms, exists := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]; exists && len(syms) > 0 {
-						sym := syms[0]
+						var visibleSym *GlobalSymbol
+
+						for _, sym := range syms {
+							if s.canSeeSymbol(uri, sym.URI) {
+								visibleSym = &sym
+
+								break
+							}
+						}
+
+						if visibleSym == nil {
+							continue
+						}
+
+						sym := *visibleSym
 
 						var related []DiagnosticRelatedInformation
 
@@ -480,17 +557,25 @@ func (s *Server) publishDiagnostics(uri string) {
 
 	// 7. Deprecated
 	if s.DiagDeprecated {
-		depCache := make(map[ast.NodeID]DepInfo)
+		if s.depCache == nil {
+			s.depCache = make(map[ast.NodeID]DepInfo)
+		} else {
+			clear(s.depCache)
+		}
 
 		checkDep := func(d *Document, id ast.NodeID) DepInfo {
-			if info, ok := depCache[id]; ok && d == doc {
+			if info, ok := s.depCache[id]; ok && d == doc {
 				return info
 			}
+
 			isDep, msg := d.HasDeprecatedTag(id)
+
 			info := DepInfo{isDep, msg}
+
 			if d == doc {
-				depCache[id] = info
+				s.depCache[id] = info
 			}
+
 			return info
 		}
 
@@ -528,7 +613,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			identBytes := doc.Source[doc.Tree.Nodes[refID].Start:doc.Tree.Nodes[refID].End]
 			hash := ast.HashBytes(identBytes)
 
-			if syms, ok := s.getGlobalSymbols(0, hash); ok && len(syms) > 0 && syms[0].NodeID != ast.InvalidNode {
+			if syms, ok := s.getGlobalSymbols(uri, 0, hash); ok && len(syms) > 0 && syms[0].NodeID != ast.InvalidNode {
 				sym := syms[0]
 				if symDoc, docOk := s.Documents[sym.URI]; docOk {
 					info := checkDep(symDoc, sym.NodeID)
@@ -556,7 +641,7 @@ func (s *Server) publishDiagnostics(uri string) {
 		// Check unresolved global field accesses
 		for _, pf := range doc.Resolver.PendingFields {
 			if doc.Resolver.References[pf.PropNodeID] == ast.InvalidNode && pf.ReceiverHash != 0 {
-				if syms, ok := s.getGlobalSymbols(pf.ReceiverHash, pf.PropHash); ok && len(syms) > 0 && syms[0].NodeID != ast.InvalidNode {
+				if syms, ok := s.getGlobalSymbols(uri, pf.ReceiverHash, pf.PropHash); ok && len(syms) > 0 && syms[0].NodeID != ast.InvalidNode {
 					sym := syms[0]
 					if symDoc, docOk := s.Documents[sym.URI]; docOk {
 						info := checkDep(symDoc, sym.NodeID)
@@ -694,7 +779,13 @@ func (s *Server) publishDiagnostics(uri string) {
 
 		// Duplicate table fields
 		if s.DiagDuplicateField && node.Kind == ast.KindTableExpr {
-			seenKeys := make(map[uint64]ast.NodeID)
+			if s.seenKeysBuf == nil {
+				s.seenKeysBuf = make(map[uint64]ast.NodeID)
+			} else {
+				clear(s.seenKeysBuf)
+			}
+
+			seenKeys := s.seenKeysBuf
 
 			for j := uint16(0); j < node.Count; j++ {
 				fieldID := doc.Tree.ExtraList[node.Extra+uint32(j)]
