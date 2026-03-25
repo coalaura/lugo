@@ -132,21 +132,21 @@ func (doc *Document) InferType(id ast.NodeID) TypeSet {
 		return TypeSet{}
 	}
 
-	if int(id) < len(doc.TypeCache) {
-		if doc.TypeCache[id].Basics != TypeUnknown || doc.TypeCache[id].CustomName != "" || doc.TypeCache[id].DeclNode != ast.InvalidNode {
-			return doc.TypeCache[id]
+	if t, ok := doc.TypeCache[id]; ok {
+		if t.Basics != TypeUnknown || t.CustomName != "" || t.DeclNode != ast.InvalidNode {
+			return t
 		}
-
-		if doc.Inferring[id] {
-			return TypeSet{} // Cycle detected
-		}
-
-		doc.Inferring[id] = true
-
-		defer func() {
-			doc.Inferring[id] = false
-		}()
 	}
+
+	if doc.Inferring[id] {
+		return TypeSet{} // Cycle detected
+	}
+
+	doc.Inferring[id] = true
+
+	defer func() {
+		doc.Inferring[id] = false
+	}()
 
 	var t TypeSet
 
@@ -236,9 +236,7 @@ func (doc *Document) InferType(id ast.NodeID) TypeSet {
 		t = doc.inferCallExpr(node)
 	}
 
-	if int(id) < len(doc.TypeCache) {
-		doc.TypeCache[id] = t
-	}
+	doc.TypeCache[id] = t
 
 	return t
 }

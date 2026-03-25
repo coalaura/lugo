@@ -49,7 +49,7 @@ func (s *Server) handleHover(req Request) {
 		r = &parsedRange
 
 		if ctx.TargetURI != "" && ctx.TargetURI != uri {
-			fromFile = filepath.Base(ctx.TargetURI)
+			fromFile = filepath.Base(ctx.TargetDoc.Path)
 		}
 
 		if ctx.TargetDoc != nil && ctx.TargetDefID != ast.InvalidNode {
@@ -651,7 +651,7 @@ func (s *Server) handleCompletion(req Request) {
 				var visibleSym *GlobalSymbol
 
 				for _, sym := range syms {
-					if s.canSeeSymbol(uri, sym.URI) {
+					if tgtDoc, ok := s.Documents[sym.URI]; ok && s.canSeeSymbol(doc, tgtDoc) {
 						visibleSym = &sym
 
 						break
@@ -716,7 +716,7 @@ func (s *Server) handleCompletion(req Request) {
 				var visibleSym *GlobalSymbol
 
 				for _, sym := range syms {
-					if s.canSeeSymbol(uri, sym.URI) {
+					if tgtDoc, ok := s.Documents[sym.URI]; ok && s.canSeeSymbol(doc, tgtDoc) {
 						visibleSym = &sym
 
 						break
@@ -939,22 +939,7 @@ func (s *Server) handleSignatureHelp(req Request) {
 			paramDocs[p.Name] = p
 		}
 
-		hasImplicitSelfCall := callNode.Kind == ast.KindMethodCall
-
-		var hasImplicitSelfDef bool
-
-		pDefID := tDoc.Tree.Nodes[def.NodeID].Parent
-		if pDefID != ast.InvalidNode && int(pDefID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
-			hasImplicitSelfDef = true
-		}
-
-		var paramOffset int
-
-		if hasImplicitSelfCall && !hasImplicitSelfDef {
-			paramOffset = 1
-		} else if !hasImplicitSelfCall && hasImplicitSelfDef {
-			paramOffset = -1
-		}
+		paramOffset := getImplicitSelfOffset(callNode, tDoc, def.NodeID)
 
 		for i := uint16(0); i < funcNode.Count; i++ {
 			if funcNode.Extra+uint32(i) >= uint32(len(tDoc.Tree.ExtraList)) {
@@ -973,7 +958,7 @@ func (s *Server) handleSignatureHelp(req Request) {
 
 			pName := ast.String(tDoc.Source[pNode.Start:pNode.End])
 
-			if i == 0 && hasImplicitSelfCall && !hasImplicitSelfDef && pName == "self" {
+			if i == 0 && paramOffset == 1 && pName == "self" {
 				continue
 			}
 
@@ -1165,21 +1150,7 @@ func (s *Server) handleInlayHint(req Request) {
 			continue
 		}
 
-		hasImplicitSelfCall := node.Kind == ast.KindMethodCall
-
-		var hasImplicitSelfDef bool
-
-		pDefID := ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Parent
-		if pDefID != ast.InvalidNode && int(pDefID) < len(ctx.TargetDoc.Tree.Nodes) && ctx.TargetDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
-			hasImplicitSelfDef = true
-		}
-
-		paramOffset := 0
-		if hasImplicitSelfCall && !hasImplicitSelfDef {
-			paramOffset = 1 // e.g., table:func(arg) -> function table.func(self, arg)
-		} else if !hasImplicitSelfCall && hasImplicitSelfDef {
-			paramOffset = -1 // e.g., table.func(table, arg) -> function table:func(arg)
-		}
+		paramOffset := getImplicitSelfOffset(node, ctx.TargetDoc, ctx.TargetDefID)
 
 		funcNode := ctx.TargetDoc.Tree.Nodes[valID]
 
@@ -1430,7 +1401,7 @@ func (s *Server) handleSemanticTokensFull(req Request) {
 						recHash = ast.HashBytes(recBytes)
 					}
 
-					if syms, ok := s.getGlobalSymbols(uri, recHash, hash); ok && len(syms) > 0 {
+					if syms, ok := s.getGlobalSymbols(doc, recHash, hash); ok && len(syms) > 0 {
 						sym := syms[0]
 						if gDoc, ok := s.Documents[sym.URI]; ok {
 							targetDoc = gDoc
@@ -2049,7 +2020,7 @@ func (s *Server) buildCallHierarchyItemFromDef(uri string, doc *Document, defID 
 	var detail string
 
 	if uri != "" {
-		detail = filepath.Base(s.uriToPath(uri))
+		detail = filepath.Base(doc.Path)
 	}
 
 	var tags []SymbolTag

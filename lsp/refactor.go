@@ -1358,7 +1358,7 @@ func (s *Server) handleRename(req Request) {
 
 	if ctx.IsGlobal {
 		for dUri, dDoc := range s.Documents {
-			if !s.canSeeSymbol(dUri, ctx.TargetURI) {
+			if !s.canSeeSymbol(dDoc, ctx.TargetDoc) {
 				continue
 			}
 
@@ -1891,22 +1891,7 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 								break
 							}
 
-							hasImplicitSelfCall := node.Kind == ast.KindMethodCall
-
-							var hasImplicitSelfDef bool
-
-							pDefID := tDoc.Tree.Nodes[def.NodeID].Parent
-							if pDefID != ast.InvalidNode && int(pDefID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
-								hasImplicitSelfDef = true
-							}
-
-							var paramOffset int
-
-							if hasImplicitSelfCall && !hasImplicitSelfDef {
-								paramOffset = 1
-							} else if !hasImplicitSelfCall && hasImplicitSelfDef {
-								paramOffset = -1
-							}
+							paramOffset := getImplicitSelfOffset(node, tDoc, def.NodeID)
 
 							expectedArgs := int(funcNode.Count) - paramOffset
 							if expectedArgs < 0 {

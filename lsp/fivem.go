@@ -27,94 +27,6 @@ type FiveMResource struct {
 	SharedCrossIncludes []string
 }
 
-// matchFiveMGlob is a highly optimized, zero-allocation backtracking glob matcher.
-func matchFiveMGlob(pattern, path string) bool {
-	pLen, tLen := len(pattern), len(path)
-
-	var (
-		p int
-		t int
-	)
-
-	for p < pLen {
-		if pattern[p] == '*' {
-			isDouble := p+1 < pLen && pattern[p+1] == '*'
-			if isDouble {
-				p += 2
-
-				if p == pLen {
-					return true
-				}
-
-				for i := t; i <= tLen; i++ {
-					if matchFiveMGlob(pattern[p:], path[i:]) {
-						return true
-					}
-				}
-
-				return false
-			}
-
-			p++
-
-			if p == pLen {
-				return strings.IndexByte(path[t:], '/') == -1 && strings.IndexByte(path[t:], '\\') == -1
-			}
-
-			for i := t; i <= tLen; i++ {
-				if i > t && (path[i-1] == '/' || path[i-1] == '\\') {
-					break
-				}
-
-				if matchFiveMGlob(pattern[p:], path[i:]) {
-					return true
-				}
-			}
-
-			return false
-		} else if pattern[p] == '?' {
-			if t == tLen {
-				return false
-			}
-
-			p++
-			t++
-		} else {
-			if t == tLen {
-				return false
-			}
-
-			c1 := pattern[p]
-			c2 := path[t]
-
-			if c1 >= 'A' && c1 <= 'Z' {
-				c1 += 32
-			}
-
-			if c2 >= 'A' && c2 <= 'Z' {
-				c2 += 32
-			}
-
-			if c1 == '\\' {
-				c1 = '/'
-			}
-
-			if c2 == '\\' {
-				c2 = '/'
-			}
-
-			if c1 != c2 {
-				return false
-			}
-
-			p++
-			t++
-		}
-	}
-
-	return t == tLen
-}
-
 func unquoteLuaString(s string) string {
 	s = strings.TrimSpace(s)
 
@@ -223,23 +135,23 @@ func (s *Server) parseFiveMManifest(doc *Document) *FiveMResource {
 	return res
 }
 
-func (s *Server) getFileEnv(res *FiveMResource, uri string) FileEnv {
-	if env, ok := s.envCache[uri]; ok {
-		return env
+func (s *Server) getDocFileEnv(res *FiveMResource, doc *Document) FileEnv {
+	if doc.EnvResolved {
+		return doc.FiveMEnv
 	}
 
 	var relPath string
 
-	if len(uri) > len(res.RootURI) {
-		relPath = uri[len(res.RootURI)+1:]
+	if len(doc.URI) > len(res.RootURI) {
+		relPath = doc.URI[len(res.RootURI)+1:]
 	} else {
-		relPath = uri
+		relPath = doc.URI
 	}
 
 	var env FileEnv = EnvUnknown
 
 	for _, glob := range res.SharedGlobs {
-		if matchFiveMGlob(glob, relPath) {
+		if matchGlob(glob, relPath) {
 			env = EnvShared
 			break
 		}
@@ -249,7 +161,7 @@ func (s *Server) getFileEnv(res *FiveMResource, uri string) FileEnv {
 		var isClient bool
 
 		for _, glob := range res.ClientGlobs {
-			if matchFiveMGlob(glob, relPath) {
+			if matchGlob(glob, relPath) {
 				isClient = true
 
 				break
@@ -259,7 +171,7 @@ func (s *Server) getFileEnv(res *FiveMResource, uri string) FileEnv {
 		var isServer bool
 
 		for _, glob := range res.ServerGlobs {
-			if matchFiveMGlob(glob, relPath) {
+			if matchGlob(glob, relPath) {
 				isServer = true
 
 				break
@@ -275,7 +187,8 @@ func (s *Server) getFileEnv(res *FiveMResource, uri string) FileEnv {
 		}
 	}
 
-	s.envCache[uri] = env
+	doc.FiveMEnv = env
+	doc.EnvResolved = true
 
 	return env
 }

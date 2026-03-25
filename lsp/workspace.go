@@ -210,8 +210,6 @@ func (s *Server) refreshWorkspace() {
 		clear(s.activeURIs)
 	}
 
-	clear(s.resourceCache)
-	clear(s.envCache)
 	clear(s.FiveMResources)
 	clear(s.FiveMResourceByName)
 
@@ -472,6 +470,13 @@ func (s *Server) updateDocument(uri string, source []byte) {
 			ExportedGlobalDefs: make(map[ast.NodeID]GlobalKey),
 		}
 
+		doc.Path = s.uriToPath(uri)
+		doc.LowerPath = strings.ToLower(doc.Path)
+		doc.Dir = filepath.Dir(doc.Path)
+		doc.IsLibrary = s.checkIsLibrary(uri, doc.LowerPath)
+		doc.IsWorkspace = s.checkIsWorkspace(uri, doc.LowerPath)
+		doc.ModuleName = s.computeModuleName(uri, doc.Path, doc.LowerPath)
+
 		s.Documents[uri] = doc
 	}
 
@@ -483,18 +488,21 @@ func (s *Server) updateDocument(uri string, source []byte) {
 
 	rootID := p.Parse()
 
-	if cap(doc.TypeCache) >= len(tree.Nodes) {
-		doc.TypeCache = doc.TypeCache[:len(tree.Nodes)]
-		clear(doc.TypeCache)
-
-		doc.Inferring = doc.Inferring[:len(tree.Nodes)]
-		clear(doc.Inferring)
+	if doc.TypeCache == nil {
+		doc.TypeCache = make(map[ast.NodeID]TypeSet)
 	} else {
-		doc.TypeCache = make([]TypeSet, len(tree.Nodes))
-		doc.Inferring = make([]bool, len(tree.Nodes))
+		clear(doc.TypeCache)
+	}
+
+	if doc.Inferring == nil {
+		doc.Inferring = make(map[ast.NodeID]bool)
+	} else {
+		clear(doc.Inferring)
 	}
 
 	doc.IsMeta = false
+	doc.FiveMResolved = false
+	doc.EnvResolved = false
 
 	for _, c := range tree.Comments {
 		if bytes.Contains(tree.Source[c.Start:c.End], []byte("@meta")) {
@@ -520,6 +528,7 @@ func (s *Server) updateDocument(uri string, source []byte) {
 
 	res.Reset()
 	res.Resolve(rootID)
+	res.Cleanup()
 
 	doc.ExportedNode = ast.InvalidNode
 
@@ -714,7 +723,7 @@ func (s *Server) updateDocument(uri string, source []byte) {
 	}
 
 	if doc.ExportedNode != ast.InvalidNode {
-		modName := s.uriToModuleName(uri)
+		modName := doc.ModuleName
 		if modName == "" {
 			modName = "module"
 		}
@@ -912,6 +921,10 @@ func (s *Server) isIgnored(fullPath, name string) bool {
 }
 
 func (s *Server) isIgnoredURI(uri string) bool {
+	if doc, ok := s.Documents[uri]; ok {
+		return s.isIgnored(doc.Path, filepath.Base(doc.Path))
+	}
+
 	path := s.uriToPath(uri)
 
 	if path == "" {
@@ -921,18 +934,32 @@ func (s *Server) isIgnoredURI(uri string) bool {
 	return s.isIgnored(path, filepath.Base(path))
 }
 
-func (s *Server) isWorkspaceURI(uri string) bool {
-	if strings.HasPrefix(uri, "std:///") {
+func (s *Server) checkIsLibrary(uri, lowerPath string) bool {
+	if strings.HasPrefix(uri, "std://") {
+		return true
+	}
+
+	if lowerPath == "" {
 		return false
 	}
 
-	path := s.uriToPath(uri)
+	for _, libPath := range s.lowerLibraryPaths {
+		if strings.HasPrefix(lowerPath, libPath) {
+			return true
+		}
+	}
 
-	if path == "" {
+	return false
+}
+
+func (s *Server) checkIsWorkspace(uri, lowerPath string) bool {
+	if strings.HasPrefix(uri, "std://") {
 		return false
 	}
 
-	lowerPath := strings.ToLower(path)
+	if lowerPath == "" {
+		return false
+	}
 
 	for _, libPath := range s.lowerLibraryPaths {
 		if strings.HasPrefix(lowerPath, libPath) {
@@ -945,6 +972,14 @@ func (s *Server) isWorkspaceURI(uri string) bool {
 	}
 
 	return strings.HasPrefix(lowerPath, s.lowerRootPath)
+}
+
+func (s *Server) isWorkspaceURI(uri string) bool {
+	if doc, ok := s.Documents[uri]; ok {
+		return doc.IsWorkspace
+	}
+
+	return s.checkIsWorkspace(uri, strings.ToLower(s.uriToPath(uri)))
 }
 
 func (s *Server) uriToPath(uri string) string {
@@ -979,7 +1014,7 @@ func (s *Server) pathToURI(pathStr string) string {
 	return "file://" + filepath.ToSlash(cleanPath)
 }
 
-func (s *Server) uriToModuleName(uri string) string {
+func (s *Server) computeModuleName(uri, path, lowerPath string) string {
 	if strings.HasPrefix(uri, "std:///") {
 		name := uri[7:]
 
@@ -988,7 +1023,6 @@ func (s *Server) uriToModuleName(uri string) string {
 		return strings.ReplaceAll(name, "/", ".")
 	}
 
-	path := s.uriToPath(uri)
 	if path == "" {
 		return ""
 	}
@@ -996,16 +1030,15 @@ func (s *Server) uriToModuleName(uri string) string {
 	var bestRoot string
 
 	if s.RootURI != "" {
-		rootPath := s.uriToPath(s.RootURI)
-		if strings.HasPrefix(strings.ToLower(path), strings.ToLower(rootPath)) {
-			bestRoot = rootPath
+		if strings.HasPrefix(lowerPath, s.lowerRootPath) {
+			bestRoot = s.uriToPath(s.RootURI)
 		}
 	}
 
-	for _, lib := range s.LibraryPaths {
-		if strings.HasPrefix(strings.ToLower(path), strings.ToLower(lib)) {
+	for i, lib := range s.lowerLibraryPaths {
+		if strings.HasPrefix(lowerPath, lib) {
 			if len(lib) > len(bestRoot) {
-				bestRoot = lib
+				bestRoot = s.LibraryPaths[i]
 			}
 		}
 	}
@@ -1043,7 +1076,7 @@ func (s *Server) resolveModule(currentURI string, modName string) *Document {
 	}
 
 	for _, d := range s.Documents {
-		if s.uriToModuleName(d.URI) == modName {
+		if d.ModuleName == modName {
 			return d
 		}
 	}
@@ -1060,7 +1093,11 @@ func (s *Server) resolveModule(currentURI string, modName string) *Document {
 
 	currentDir := ""
 	if currentURI != "" {
-		currentDir = filepath.ToSlash(filepath.Dir(s.uriToPath(currentURI)))
+		if doc, ok := s.Documents[currentURI]; ok {
+			currentDir = filepath.ToSlash(doc.Dir)
+		} else {
+			currentDir = filepath.ToSlash(filepath.Dir(s.uriToPath(currentURI)))
+		}
 	}
 
 	var rootDir string
@@ -1069,12 +1106,12 @@ func (s *Server) resolveModule(currentURI string, modName string) *Document {
 		rootDir = filepath.ToSlash(s.uriToPath(s.RootURI))
 	}
 
-	for uri, d := range s.Documents {
-		if strings.HasPrefix(uri, "std://") {
+	for _, d := range s.Documents {
+		if strings.HasPrefix(d.URI, "std://") {
 			continue
 		}
 
-		path := filepath.ToSlash(s.uriToPath(uri))
+		path := filepath.ToSlash(d.Path)
 
 		if strings.HasSuffix(path, suffix1) || strings.HasSuffix(path, suffix2) {
 			score := 1

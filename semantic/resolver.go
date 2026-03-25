@@ -55,7 +55,6 @@ type Resolver struct {
 	scopeStarts []int
 
 	DuplicateLocals []ast.NodeID
-	UsageCount      []uint16
 	LocalDefs       []ast.NodeID
 	ShadowedOuter   []ShadowPair
 	Reassignments   []Reassignment
@@ -67,7 +66,6 @@ func New(tree *ast.Tree) *Resolver {
 	return &Resolver{
 		Tree:            tree,
 		References:      make([]ast.NodeID, len(tree.Nodes)),
-		UsageCount:      make([]uint16, len(tree.Nodes)),
 		LocalDefs:       make([]ast.NodeID, 0, 512),
 		ShadowedOuter:   make([]ShadowPair, 0, 64),
 		PendingFields:   make([]FieldRef, 0, 128),
@@ -94,28 +92,47 @@ func (r *Resolver) Reset() {
 		r.References = make([]ast.NodeID, nodeCount)
 	}
 
-	if cap(r.UsageCount) >= nodeCount {
-		r.UsageCount = r.UsageCount[:nodeCount]
-
-		clear(r.UsageCount)
-	} else {
-		r.UsageCount = make([]uint16, nodeCount)
-	}
-
 	r.GlobalDefs = r.GlobalDefs[:0]
 	r.GlobalRefs = r.GlobalRefs[:0]
 	r.FieldDefs = r.FieldDefs[:0]
 
-	clear(r.fieldMap)
+	if r.fieldMap == nil {
+		r.fieldMap = make(map[FieldKey]ast.NodeID, 512)
+	} else {
+		clear(r.fieldMap)
+	}
 
 	r.PendingFields = r.PendingFields[:0]
-	r.scopeStack = r.scopeStack[:0]
-	r.scopeStarts = r.scopeStarts[:0]
+
+	if r.scopeStack == nil {
+		r.scopeStack = make([]ast.NodeID, 0, 256)
+	} else {
+		r.scopeStack = r.scopeStack[:0]
+	}
+
+	if r.scopeStarts == nil {
+		r.scopeStarts = make([]int, 0, 64)
+	} else {
+		r.scopeStarts = r.scopeStarts[:0]
+	}
+
 	r.DuplicateLocals = r.DuplicateLocals[:0]
 	r.LocalDefs = r.LocalDefs[:0]
 	r.ShadowedOuter = r.ShadowedOuter[:0]
 	r.Reassignments = r.Reassignments[:0]
-	r.nameArena = r.nameArena[:0]
+
+	if r.nameArena == nil {
+		r.nameArena = make([]byte, 0, 2048)
+	} else {
+		r.nameArena = r.nameArena[:0]
+	}
+}
+
+func (r *Resolver) Cleanup() {
+	r.fieldMap = nil
+	r.scopeStack = nil
+	r.scopeStarts = nil
+	r.nameArena = nil
 }
 
 func (r *Resolver) Resolve(root ast.NodeID) {
@@ -245,7 +262,6 @@ func (r *Resolver) resolveReference(identID ast.NodeID, isDef bool) {
 
 		if bytes.Equal(targetSrc, r.Tree.Source[defNode.Start:defNode.End]) {
 			r.References[identID] = defID
-			r.UsageCount[defID]++
 
 			return
 		}

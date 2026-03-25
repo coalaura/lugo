@@ -15,16 +15,24 @@ type Document struct {
 	Server             *Server
 	Tree               *ast.Tree
 	Resolver           *semantic.Resolver
-	URI                string
+	TypeCache          map[ast.NodeID]TypeSet
+	Inferring          map[ast.NodeID]bool
+	ExportedGlobalDefs map[ast.NodeID]GlobalKey
 	Source             []byte
 	Errors             []parser.ParseError
-	TypeCache          []TypeSet
-	Inferring          []bool
-	commentBuf         []byte
-	depBuf             []byte
-	ExportedGlobalDefs map[ast.NodeID]GlobalKey
-	IsMeta             bool
+	URI                string
+	Path               string
+	LowerPath          string
+	Dir                string
+	ModuleName         string
+	FiveMRoot          string
 	ExportedNode       ast.NodeID
+	FiveMEnv           FileEnv
+	IsMeta             bool
+	IsLibrary          bool
+	IsWorkspace        bool
+	FiveMResolved      bool
+	EnvResolved        bool
 }
 
 func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {
@@ -224,9 +232,9 @@ func (doc *Document) getCommentsAbove(id ast.NodeID) []byte {
 		return nil
 	}
 
-	doc.commentBuf = doc.commentBuf[:0] // Pooling is great
+	doc.Server.sharedCommentBuf = doc.Server.sharedCommentBuf[:0] // Pooling is great
 
-	b := doc.commentBuf
+	b := doc.Server.sharedCommentBuf
 
 	for i := len(validComments) - 1; i >= 0; i-- {
 		c := validComments[i]
@@ -239,7 +247,7 @@ func (doc *Document) getCommentsAbove(id ast.NodeID) []byte {
 		}
 	}
 
-	doc.commentBuf = b
+	doc.Server.sharedCommentBuf = b
 
 	return bytes.TrimSpace(b)
 }
@@ -437,15 +445,15 @@ func (doc *Document) HasDeprecatedTag(id ast.NodeID) (bool, string) {
 				endIdx = len(rest)
 			}
 
-			doc.depBuf = doc.depBuf[:0]
+			doc.Server.sharedDepBuf = doc.Server.sharedDepBuf[:0]
 
-			msgBytes := cleanLuaCommentBytes(doc.depBuf, rest[:endIdx])
+			msgBytes := cleanLuaCommentBytes(doc.Server.sharedDepBuf, rest[:endIdx])
 
 			msg = string(bytes.TrimSpace(msgBytes))
 
 			found = true
 
-			doc.depBuf = msgBytes
+			doc.Server.sharedDepBuf = msgBytes
 
 			break
 		}

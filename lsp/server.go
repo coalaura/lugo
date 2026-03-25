@@ -20,21 +20,15 @@ import (
 const MaxWorkspaceResults = 100
 
 type Server struct {
-	Version string
-	Reader  *bufio.Reader
-	Writer  io.Writer
-	Log     *plain.Plain
+	Reader *bufio.Reader
+	Writer io.Writer
+	Log    *plain.Plain
 
 	// Workspace State
-	RootURI             string
-	lowerRootPath       string
-	IsIndexing          bool
 	Documents           map[string]*Document
 	OpenFiles           map[string]bool
 	activeURIs          map[string]bool
 	visitedDirs         map[string]bool
-	resourceCache       map[string]string
-	envCache            map[string]FileEnv
 	FiveMResources      map[string]*FiveMResource
 	FiveMResourceByName map[string]*FiveMResource
 
@@ -48,22 +42,28 @@ type Server struct {
 	compiledIgnores   []IgnorePattern
 
 	// Shared Buffers & Parsers
-	sharedParser   *parser.Parser
-	diagBuf        []Diagnostic
-	semTokensBuf   []SemanticToken
-	semDataBuf     []uint32
-	actualReadsBuf []int
-	depCache       map[ast.NodeID]DepInfo
-	seenKeysBuf    map[uint64]ast.NodeID
-	unusedDefsBuf  []bool
-	deadStoresBuf  map[ast.NodeID]*DeadStoreInfo
-	suggestCache   map[string]string
+	sharedParser     *parser.Parser
+	diagBuf          []Diagnostic
+	semTokensBuf     []SemanticToken
+	semDataBuf       []uint32
+	actualReadsBuf   []int
+	depCache         map[ast.NodeID]DepInfo
+	seenKeysBuf      map[uint64]ast.NodeID
+	unusedDefsBuf    []bool
+	deadStoresBuf    map[ast.NodeID]*DeadStoreInfo
+	suggestCache     map[string]string
+	visibilityCache  map[*Document]bool
+	sharedCommentBuf []byte
+	sharedDepBuf     []byte
 
-	// Configuration
+	Version       string
+	RootURI       string
+	lowerRootPath string
 
 	MaxParseErrors int
 
-	// Diagnostics
+	// Diagnostics & Features
+	IsIndexing               bool
 	DiagUndefinedGlobals     bool
 	DiagImplicitGlobals      bool
 	DiagUnusedLocal          bool
@@ -90,12 +90,10 @@ type Server struct {
 	DiagUnreachableElse      bool
 	DiagUsedIgnoredVar       bool
 
-	// Inlay Hints
 	InlayParamHints    bool
 	InlaySuppressMatch bool
 	InlayImplicitSelf  bool
 
-	// Features
 	FeatureDocHighlight   bool
 	FeatureHoverEval      bool
 	FeatureCodeLens       bool
@@ -115,8 +113,6 @@ func NewServer(version string) *Server {
 		Documents:           make(map[string]*Document),
 		OpenFiles:           make(map[string]bool),
 		IsIndexing:          true,
-		resourceCache:       make(map[string]string),
-		envCache:            make(map[string]FileEnv),
 		FiveMResources:      make(map[string]*FiveMResource),
 		FiveMResourceByName: make(map[string]*FiveMResource),
 
@@ -124,51 +120,16 @@ func NewServer(version string) *Server {
 		GlobalIndex: make(map[GlobalKey][]GlobalSymbol),
 
 		// Shared Buffers
-		sharedParser:   parser.New(nil, ast.NewTree(nil), 50),
-		diagBuf:        make([]Diagnostic, 0, 1024),
-		semTokensBuf:   make([]SemanticToken, 0, 4096),
-		semDataBuf:     make([]uint32, 0, 4096*5),
-		actualReadsBuf: make([]int, 0, 4096),
+		sharedParser:     parser.New(nil, ast.NewTree(nil), 50),
+		diagBuf:          make([]Diagnostic, 0, 1024),
+		semTokensBuf:     make([]SemanticToken, 0, 4096),
+		semDataBuf:       make([]uint32, 0, 4096*5),
+		actualReadsBuf:   make([]int, 0, 4096),
+		sharedCommentBuf: make([]byte, 0, 1024),
+		sharedDepBuf:     make([]byte, 0, 128),
 
 		// Configuration Defaults
 		MaxParseErrors: 50,
-
-		DiagUndefinedGlobals:     true,
-		DiagImplicitGlobals:      true,
-		DiagUnusedLocal:          true,
-		DiagUnusedFunction:       true,
-		DiagUnusedParameter:      true,
-		DiagUnusedLoopVar:        true,
-		DiagShadowing:            true,
-		DiagUnreachableCode:      true,
-		DiagAmbiguousReturns:     true,
-		DiagDeprecated:           true,
-		DiagDuplicateField:       true,
-		DiagUnbalancedAssignment: true,
-		DiagDuplicateLocal:       true,
-		DiagSelfAssignment:       true,
-		DiagEmptyBlock:           true,
-		DiagFormatString:         true,
-		DiagTypeCheck:            false,
-		DiagRedundantParameter:   true,
-		DiagRedundantValue:       true,
-		DiagRedundantReturn:      true,
-		DiagLoopVarMutation:      true,
-		DiagIncorrectVararg:      true,
-		DiagShadowingLoopVar:     true,
-		DiagUnreachableElse:      true,
-		DiagUsedIgnoredVar:       true,
-
-		InlayParamHints:    true,
-		InlaySuppressMatch: true,
-		InlayImplicitSelf:  true,
-
-		FeatureDocHighlight:   true,
-		FeatureHoverEval:      true,
-		FeatureCodeLens:       true,
-		FeatureFormatting:     true,
-		SuggestFunctionParams: true,
-		FeatureFiveM:          true,
 	}
 }
 

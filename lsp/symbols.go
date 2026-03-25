@@ -3,8 +3,6 @@ package lsp
 import (
 	"encoding/json"
 	"iter"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/coalaura/lugo/ast"
@@ -18,9 +16,9 @@ var luaKeywords = []string{
 
 type GlobalSymbol struct {
 	URI    string
+	Name   string
 	NodeID ast.NodeID
 	Depth  int
-	Name   string
 }
 
 type GlobalKey struct {
@@ -54,13 +52,13 @@ type SymbolContext struct {
 	IdentName   string
 	DisplayName string
 	TargetURI   string
+	GlobalDefs  []GlobalSymbol
 	GKey        GlobalKey
 	IdentNodeID ast.NodeID
 	TargetDefID ast.NodeID
 	RecDefID    ast.NodeID
 	IsProp      bool
 	IsGlobal    bool
-	GlobalDefs  []GlobalSymbol
 }
 
 func (s *Server) handleDefinition(req Request) {
@@ -365,22 +363,7 @@ func (s *Server) handleDocumentSymbol(req Request) {
 							targetFuncID = valID
 							targetDoc = ctx.TargetDoc
 
-							hasImplicitSelfCall := node.Kind == ast.KindMethodCall
-
-							var hasImplicitSelfDef bool
-
-							pDefID := ctx.TargetDoc.Tree.Nodes[ctx.TargetDefID].Parent
-							if pDefID != ast.InvalidNode && int(pDefID) < len(ctx.TargetDoc.Tree.Nodes) {
-								if ctx.TargetDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
-									hasImplicitSelfDef = true
-								}
-							}
-
-							if hasImplicitSelfCall && !hasImplicitSelfDef {
-								paramOffset = 1
-							} else if !hasImplicitSelfCall && hasImplicitSelfDef {
-								paramOffset = -1
-							}
+							paramOffset = getImplicitSelfOffset(node, ctx.TargetDoc, ctx.TargetDefID)
 						}
 					}
 				}
@@ -726,14 +709,14 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 				ctx.IsGlobal = true
 				ctx.GKey = exportedKey
 
-				if gSyms, ok := s.getGlobalSymbols(uri, ctx.GKey.ReceiverHash, ctx.GKey.PropHash); ok {
+				if gSyms, ok := s.getGlobalSymbols(doc, ctx.GKey.ReceiverHash, ctx.GKey.PropHash); ok {
 					bestDefs := s.getBestDefsForContext(doc, nodeID, gSyms)
 					ctx.GlobalDefs = bestDefs
 				}
 			}
 		}
 	} else if gKey.PropHash != 0 {
-		if gSyms, ok := s.getGlobalSymbols(uri, gKey.ReceiverHash, gKey.PropHash); ok {
+		if gSyms, ok := s.getGlobalSymbols(doc, gKey.ReceiverHash, gKey.PropHash); ok {
 			bestDefs := s.getBestDefsForContext(doc, nodeID, gSyms)
 
 			ctx.GlobalDefs = bestDefs
@@ -796,19 +779,12 @@ func (s *Server) getBestDefsForContext(doc *Document, identNodeID ast.NodeID, de
 			if valID != ast.InvalidNode && int(valID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
 				funcNode := tDoc.Tree.Nodes[valID]
 
-				var hasImplicitSelfDef bool
-
-				pDefID := tDoc.Tree.Nodes[def.NodeID].Parent
-				if pDefID != ast.InvalidNode && int(pDefID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
-					hasImplicitSelfDef = true
-				}
-
 				var paramOffset int
 
-				if isMethodCall && !hasImplicitSelfDef {
-					paramOffset = 1
-				} else if !isMethodCall && hasImplicitSelfDef {
-					paramOffset = -1
+				if isMethodCall {
+					paramOffset = getImplicitSelfOffset(ast.Node{Kind: ast.KindMethodCall}, tDoc, def.NodeID)
+				} else {
+					paramOffset = getImplicitSelfOffset(ast.Node{Kind: ast.KindCallExpr}, tDoc, def.NodeID)
 				}
 
 				expectedArgs := int(funcNode.Count) - paramOffset
@@ -912,7 +888,7 @@ func (s *Server) iterateGlobalReferences(ctx *SymbolContext) iter.Seq[GlobalRefe
 		}
 
 		for dUri, dDoc := range s.Documents {
-			if !s.canSeeSymbol(dUri, ctx.TargetURI) {
+			if !s.canSeeSymbol(dDoc, ctx.TargetDoc) {
 				continue
 			}
 
@@ -957,7 +933,7 @@ func (s *Server) iterateGlobalReferences(ctx *SymbolContext) iter.Seq[GlobalRefe
 	}
 }
 
-func (s *Server) getGlobalSymbols(sourceURI string, recHash, propHash uint64) ([]GlobalSymbol, bool) {
+func (s *Server) getGlobalSymbols(srcDoc *Document, recHash, propHash uint64) ([]GlobalSymbol, bool) {
 	currRec := recHash
 
 	for range 10 {
@@ -966,7 +942,7 @@ func (s *Server) getGlobalSymbols(sourceURI string, recHash, propHash uint64) ([
 			var filtered []GlobalSymbol
 
 			for _, sym := range syms {
-				if s.canSeeSymbol(sourceURI, sym.URI) {
+				if tgtDoc, ok := s.Documents[sym.URI]; ok && s.canSeeSymbol(srcDoc, tgtDoc) {
 					filtered = append(filtered, sym)
 				}
 			}
@@ -1121,13 +1097,30 @@ func (s *Server) getGlobalPath(doc *Document, id ast.NodeID, depth int) []byte {
 	return nil
 }
 
-func (s *Server) suggestGlobal(sourceURI string, name string) string {
+func (s *Server) suggestGlobal(srcDoc *Document, name string) string {
 	var (
 		bestMatch string
 		minDist   = 3
 	)
 
+	nameLen := len(name)
+
 	check := func(candidate string) {
+		if candidate == "" {
+			return
+		}
+
+		candLen := len(candidate)
+
+		diff := candLen - nameLen
+		if diff < 0 {
+			diff = -diff
+		}
+
+		if diff > 3 {
+			return
+		}
+
 		d := levenshteinFast(name, candidate, minDist-1)
 		if d < minDist {
 			minDist = d
@@ -1144,7 +1137,7 @@ func (s *Server) suggestGlobal(sourceURI string, name string) string {
 	for key, syms := range s.GlobalIndex {
 		if key.ReceiverHash == 0 && len(syms) > 0 {
 			for _, sym := range syms {
-				if s.canSeeSymbol(sourceURI, sym.URI) {
+				if tgtDoc, ok := s.Documents[sym.URI]; ok && s.canSeeSymbol(srcDoc, tgtDoc) {
 					check(sym.Name)
 
 					break
@@ -1156,110 +1149,64 @@ func (s *Server) suggestGlobal(sourceURI string, name string) string {
 	return bestMatch
 }
 
-func (s *Server) getResourceRoot(uri string) string {
+func (s *Server) getDocResourceRoot(doc *Document) string {
 	if !s.FeatureFiveM {
 		return ""
 	}
 
-	if strings.HasPrefix(uri, "std://") {
+	if doc.IsLibrary {
 		return "std"
 	}
 
-	if root, ok := s.resourceCache[uri]; ok {
-		return root
+	if doc.FiveMResolved {
+		return doc.FiveMRoot
 	}
 
-	// First check if it matches any known parsed FiveMResource
 	var bestRoot string
 
 	for root := range s.FiveMResources {
-		if strings.HasPrefix(uri, root+"/") || uri == root {
+		if strings.HasPrefix(doc.URI, root+"/") || doc.URI == root {
 			if len(root) > len(bestRoot) {
 				bestRoot = root
 			}
 		}
 	}
 
-	if bestRoot != "" {
-		s.resourceCache[uri] = bestRoot
-		return bestRoot
-	}
+	doc.FiveMRoot = bestRoot
+	doc.FiveMResolved = true
 
-	// Fallback to disk scan (for files opened outside the indexed workspace)
-	path := s.uriToPath(uri)
-	if path == "" {
-		return ""
-	}
-
-	dir := filepath.Dir(path)
-
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "fxmanifest.lua")); err == nil {
-			res := s.pathToURI(dir)
-			s.resourceCache[uri] = res
-
-			return res
-		}
-
-		if _, err := os.Stat(filepath.Join(dir, "__resource.lua")); err == nil {
-			res := s.pathToURI(dir)
-			s.resourceCache[uri] = res
-
-			return res
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-
-		dir = parent
-	}
-
-	s.resourceCache[uri] = ""
-
-	return ""
+	return bestRoot
 }
 
-func (s *Server) canSeeSymbol(sourceURI, targetURI string) bool {
+func (s *Server) canSeeSymbol(srcDoc, tgtDoc *Document) bool {
 	if !s.FeatureFiveM {
 		return true
 	}
 
-	if sourceURI == targetURI {
+	if srcDoc == tgtDoc {
 		return true
 	}
 
-	if strings.HasPrefix(targetURI, "std://") {
+	if tgtDoc.IsLibrary {
 		return true
 	}
 
-	targetPath := strings.ToLower(s.uriToPath(targetURI))
-
-	for _, lib := range s.lowerLibraryPaths {
-		if strings.HasPrefix(targetPath, lib) {
-			return true
-		}
-	}
-
-	srcRoot := s.getResourceRoot(sourceURI)
-	tgtRoot := s.getResourceRoot(targetURI)
+	srcRoot := s.getDocResourceRoot(srcDoc)
+	tgtRoot := s.getDocResourceRoot(tgtDoc)
 
 	if srcRoot == "" && tgtRoot == "" {
 		return true
 	}
 
-	// Same resource check (with Client/Server separation)
 	if srcRoot == tgtRoot {
 		srcRes := s.FiveMResources[srcRoot]
 		if srcRes != nil {
-			srcEnv := s.getFileEnv(srcRes, sourceURI)
-			tgtEnv := s.getFileEnv(srcRes, targetURI)
+			srcEnv := s.getDocFileEnv(srcRes, srcDoc)
+			tgtEnv := s.getDocFileEnv(srcRes, tgtDoc)
 
-			srcIsManifest := strings.HasSuffix(sourceURI, "/fxmanifest.lua") || strings.HasSuffix(sourceURI, "/__resource.lua")
-			tgtIsManifest := strings.HasSuffix(targetURI, "/fxmanifest.lua") || strings.HasSuffix(targetURI, "/__resource.lua")
+			srcIsManifest := strings.HasSuffix(srcDoc.URI, "/fxmanifest.lua") || strings.HasSuffix(srcDoc.URI, "/__resource.lua")
+			tgtIsManifest := strings.HasSuffix(tgtDoc.URI, "/fxmanifest.lua") || strings.HasSuffix(tgtDoc.URI, "/__resource.lua")
 
-			// Isolate unaccounted files
 			if (!srcIsManifest && srcEnv == EnvUnknown) || (!tgtIsManifest && tgtEnv == EnvUnknown) {
 				return false
 			}
@@ -1276,7 +1223,6 @@ func (s *Server) canSeeSymbol(sourceURI, targetURI string) bool {
 		return true
 	}
 
-	// Cross-resource `@resource/file.lua` check
 	srcRes := s.FiveMResources[srcRoot]
 	if srcRes == nil {
 		return false
@@ -1291,22 +1237,26 @@ func (s *Server) canSeeSymbol(sourceURI, targetURI string) bool {
 
 	if tgtRes != nil {
 		tgtName = tgtRes.Name
-		if len(targetURI) > len(tgtRes.RootURI) {
-			relPath = targetURI[len(tgtRes.RootURI)+1:]
+		if len(tgtDoc.URI) > len(tgtRes.RootURI) {
+			relPath = tgtDoc.URI[len(tgtRes.RootURI)+1:]
 		}
 	} else if tgtRoot != "" {
-		parts := strings.Split(tgtRoot, "/")
+		idx := strings.LastIndexByte(tgtRoot, '/')
+		if idx != -1 {
+			tgtName = tgtRoot[idx+1:]
+		} else {
+			tgtName = tgtRoot
+		}
 
-		tgtName = parts[len(parts)-1]
-		if len(targetURI) > len(tgtRoot) {
-			relPath = targetURI[len(tgtRoot)+1:]
+		if len(tgtDoc.URI) > len(tgtRoot) {
+			relPath = tgtDoc.URI[len(tgtRoot)+1:]
 		}
 	}
 
 	if tgtName != "" && relPath != "" {
 		expectedInclude := "@" + tgtName + "/" + relPath
 
-		srcEnv := s.getFileEnv(srcRes, sourceURI)
+		srcEnv := s.getDocFileEnv(srcRes, srcDoc)
 
 		var allowedIncludes []string
 
@@ -1331,7 +1281,7 @@ func (s *Server) canSeeSymbol(sourceURI, targetURI string) bool {
 				if len(inc) >= len(prefix) && strings.EqualFold(inc[:len(prefix)], prefix) {
 					globPattern := inc[len(prefix):]
 
-					if matchFiveMGlob(globPattern, relPath) {
+					if matchGlob(globPattern, relPath) {
 						return true
 					}
 				}
@@ -1343,18 +1293,14 @@ func (s *Server) canSeeSymbol(sourceURI, targetURI string) bool {
 }
 
 func (s *Server) isKnownGlobal(name []byte) bool {
-	if s.KnownGlobals[ast.String(name)] {
+	strName := ast.String(name)
+
+	if s.KnownGlobals[strName] {
 		return true
 	}
 
-	if len(s.KnownGlobalGlobs) == 0 {
-		return false
-	}
-
-	strName := ast.String(name)
-
 	for _, glob := range s.KnownGlobalGlobs {
-		if matched, _ := filepath.Match(glob, strName); matched {
+		if matchGlob(glob, strName) {
 			return true
 		}
 	}

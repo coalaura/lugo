@@ -233,6 +233,118 @@ func reindentNodeText(doc *Document, id ast.NodeID, targetIndent string) string 
 	return out.String()
 }
 
+func matchGlob(pattern, path string) bool {
+	pLen, tLen := len(pattern), len(path)
+
+	var (
+		p int
+		t int
+	)
+
+	for p < pLen {
+		if pattern[p] == '*' {
+			isDouble := p+1 < pLen && pattern[p+1] == '*'
+			if isDouble {
+				p += 2
+
+				if p == pLen {
+					return true
+				}
+
+				for i := t; i <= tLen; i++ {
+					if matchGlob(pattern[p:], path[i:]) {
+						return true
+					}
+				}
+
+				return false
+			}
+
+			p++
+
+			if p == pLen {
+				return strings.IndexByte(path[t:], '/') == -1 && strings.IndexByte(path[t:], '\\') == -1
+			}
+
+			for i := t; i <= tLen; i++ {
+				if i > t && (path[i-1] == '/' || path[i-1] == '\\') {
+					break
+				}
+
+				if matchGlob(pattern[p:], path[i:]) {
+					return true
+				}
+			}
+
+			return false
+		} else if pattern[p] == '?' {
+			if t == tLen {
+				return false
+			}
+
+			p++
+			t++
+		} else {
+			if t == tLen {
+				return false
+			}
+
+			c1 := pattern[p]
+			c2 := path[t]
+
+			if c1 >= 'A' && c1 <= 'Z' {
+				c1 += 32
+			}
+
+			if c2 >= 'A' && c2 <= 'Z' {
+				c2 += 32
+			}
+
+			if c1 == '\\' {
+				c1 = '/'
+			}
+
+			if c2 == '\\' {
+				c2 = '/'
+			}
+
+			if c1 != c2 {
+				return false
+			}
+
+			p++
+			t++
+		}
+	}
+
+	return t == tLen
+}
+
+func getImplicitSelfOffset(callNode ast.Node, targetDoc *Document, defID ast.NodeID) int {
+	if targetDoc == nil || defID == ast.InvalidNode || int(defID) >= len(targetDoc.Tree.Nodes) {
+		return 0
+	}
+
+	hasImplicitSelfCall := callNode.Kind == ast.KindMethodCall
+
+	var hasImplicitSelfDef bool
+
+	pDefID := targetDoc.Tree.Nodes[defID].Parent
+	if pDefID != ast.InvalidNode && int(pDefID) < len(targetDoc.Tree.Nodes) {
+		if targetDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
+			hasImplicitSelfDef = true
+		}
+	}
+
+	if hasImplicitSelfCall && !hasImplicitSelfDef {
+		return 1
+	} else if !hasImplicitSelfCall && hasImplicitSelfDef {
+		return -1
+	}
+
+	return 0
+}
+
 func getRange(tree *ast.Tree, start, end uint32) Range {
 	sLine, sCol := tree.Position(start)
 	eLine, eCol := tree.Position(end)

@@ -49,10 +49,6 @@ func TestResolver_LocalScope(t *testing.T) {
 	if res.References[refID] != defID {
 		t.Errorf("Reference did not resolve to correct local definition")
 	}
-
-	if res.UsageCount[defID] != 1 {
-		t.Errorf("Expected usage count of 1, got %d", res.UsageCount[defID])
-	}
 }
 
 func TestResolver_Shadowing(t *testing.T) {

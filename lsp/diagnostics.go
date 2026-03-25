@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/coalaura/lugo/ast"
+	"github.com/coalaura/lugo/token"
 )
 
 type DepInfo struct {
@@ -21,8 +21,8 @@ func (s *Server) publishWorkspaceDiagnostics() {
 
 	var diagCount int
 
-	for uri := range s.Documents {
-		if s.isWorkspaceURI(uri) || s.OpenFiles[uri] {
+	for uri, doc := range s.Documents {
+		if doc.IsWorkspace || s.OpenFiles[uri] {
 			s.publishDiagnostics(uri)
 
 			diagCount++
@@ -60,11 +60,29 @@ func (s *Server) publishDiagnostics(uri string) {
 
 	s.diagBuf = s.diagBuf[:0]
 
+	if s.visibilityCache == nil {
+		s.visibilityCache = make(map[*Document]bool, 128)
+	} else {
+		clear(s.visibilityCache)
+	}
+
+	canSee := func(tgtDoc *Document) bool {
+		if res, ok := s.visibilityCache[tgtDoc]; ok {
+			return res
+		}
+
+		res := s.canSeeSymbol(doc, tgtDoc)
+
+		s.visibilityCache[tgtDoc] = res
+
+		return res
+	}
+
 	if s.FeatureFiveM {
-		root := s.getResourceRoot(uri)
+		root := s.getDocResourceRoot(doc)
 		if root != "" {
 			if res := s.FiveMResources[root]; res != nil {
-				env := s.getFileEnv(res, uri)
+				env := s.getDocFileEnv(res, doc)
 				if env == EnvUnknown && !strings.HasSuffix(uri, "/fxmanifest.lua") && !strings.HasSuffix(uri, "/__resource.lua") {
 					s.diagBuf = append(s.diagBuf, Diagnostic{
 						Range:    Range{Start: Position{Line: 0, Character: 0}, End: Position{Line: 0, Character: 0}},
@@ -128,6 +146,10 @@ func (s *Server) publishDiagnostics(uri string) {
 				continue
 			}
 
+			if s.isGlobalGuarded(doc, refID, identBytes) {
+				continue
+			}
+
 			hash := ast.HashBytes(identBytes)
 			key := GlobalKey{ReceiverHash: 0, PropHash: hash}
 
@@ -135,7 +157,7 @@ func (s *Server) publishDiagnostics(uri string) {
 
 			if syms, ok := s.GlobalIndex[key]; ok {
 				for _, sym := range syms {
-					if s.canSeeSymbol(uri, sym.URI) {
+					if tgtDoc, ok := s.Documents[sym.URI]; ok && canSee(tgtDoc) {
 						exists = true
 
 						break
@@ -148,7 +170,7 @@ func (s *Server) publishDiagnostics(uri string) {
 
 				suggestion, ok := suggestCache[identStr]
 				if !ok {
-					suggestion = s.suggestGlobal(uri, identStr)
+					suggestion = s.suggestGlobal(doc, identStr)
 					suggestCache[identStr] = suggestion
 				}
 
@@ -198,11 +220,11 @@ func (s *Server) publishDiagnostics(uri string) {
 
 			if syms, ok := s.GlobalIndex[key]; ok {
 				for _, sym := range syms {
-					if !s.canSeeSymbol(uri, sym.URI) {
-						continue
-					}
-
 					if symDoc, docOk := s.Documents[sym.URI]; docOk {
+						if !canSee(symDoc) {
+							continue
+						}
+
 						if isRootLevel(symDoc.Tree, sym.NodeID) {
 							isDefinedAtRoot = true
 
@@ -244,8 +266,6 @@ func (s *Server) publishDiagnostics(uri string) {
 				}
 			}
 		}
-
-		fixes := s.getSafeFixesForDocument(doc, actualReads)
 
 		for _, defID := range doc.Resolver.LocalDefs {
 			node := doc.Tree.Nodes[defID]
@@ -316,24 +336,10 @@ func (s *Server) publishDiagnostics(uri string) {
 				} else {
 					msg = fmt.Sprintf("Unused %s '%s'.", category, ast.String(nameBytes))
 
-					var fixTitle string
-
-					for _, f := range fixes {
-						if slices.Contains(f.Coverage, defID) {
-							fixTitle = f.Title
-
-							break
-						}
-					}
-
-					if fixTitle != "" {
-						if fixTitle == "Prefix with '_'" {
-							msg += " Prefix with '_' to ignore."
-						} else {
-							msg += " It can be safely removed."
-						}
-					} else {
+					if category == "parameter" || category == "loop variable" {
 						msg += " Prefix with '_' to ignore."
+					} else {
+						msg += " Prefix with '_' to ignore or remove it."
 					}
 				}
 
@@ -400,7 +406,7 @@ func (s *Server) publishDiagnostics(uri string) {
 						var visibleSym *GlobalSymbol
 
 						for _, sym := range syms {
-							if s.canSeeSymbol(uri, sym.URI) {
+							if tgtDoc, ok := s.Documents[sym.URI]; ok && canSee(tgtDoc) {
 								visibleSym = &sym
 
 								break
@@ -419,7 +425,7 @@ func (s *Server) publishDiagnostics(uri string) {
 							var fromFile string
 
 							if sym.URI != uri {
-								fromFile = " in " + filepath.Base(s.uriToPath(sym.URI))
+								fromFile = " in " + filepath.Base(symDoc.Path)
 							}
 
 							related = append(related, DiagnosticRelatedInformation{
@@ -498,64 +504,7 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 	}
 
-	// 6. Unreachable Code & Ambiguous Returns
-	if s.DiagUnreachableCode || s.DiagAmbiguousReturns {
-		for i := 1; i < len(doc.Tree.Nodes); i++ {
-			node := doc.Tree.Nodes[i]
-
-			if s.DiagAmbiguousReturns && node.Kind == ast.KindReturn && node.Left != ast.InvalidNode {
-				exprList := doc.Tree.Nodes[node.Left]
-				if exprList.Count > 0 {
-					firstExprID := doc.Tree.ExtraList[exprList.Extra]
-					firstExprNode := doc.Tree.Nodes[firstExprID]
-
-					retLine, _ := doc.Tree.Position(node.Start)
-					exprLine, _ := doc.Tree.Position(firstExprNode.Start)
-
-					if exprLine > retLine {
-						lastExprID := doc.Tree.ExtraList[exprList.Extra+uint32(exprList.Count-1)]
-
-						s.diagBuf = append(s.diagBuf, Diagnostic{
-							Range:    getRange(doc.Tree, firstExprNode.Start, doc.Tree.Nodes[lastExprID].End),
-							Severity: SeverityWarning,
-							Code:     "ambiguous-return",
-							Message:  "Ambiguous return: expression on the next line is executed as the return value. Use 'return;' to separate statements.",
-							Data:     float64(i),
-						})
-					}
-				}
-			}
-
-			if s.DiagUnreachableCode && (node.Kind == ast.KindBlock || node.Kind == ast.KindFile) {
-				var terminalFound bool
-
-				for j := uint16(0); j < node.Count; j++ {
-					stmtID := doc.Tree.ExtraList[node.Extra+uint32(j)]
-
-					if terminalFound {
-						lastStmtID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
-
-						s.diagBuf = append(s.diagBuf, Diagnostic{
-							Range:    getRange(doc.Tree, doc.Tree.Nodes[stmtID].Start, doc.Tree.Nodes[lastStmtID].End),
-							Severity: SeverityWarning,
-							Code:     "unreachable-code",
-							Tags:     []DiagnosticTag{Unnecessary},
-							Message:  "Unreachable code detected.",
-							Data:     float64(stmtID),
-						})
-
-						break
-					}
-
-					if isTerminal(doc.Tree, stmtID) {
-						terminalFound = true
-					}
-				}
-			}
-		}
-	}
-
-	// 7. Deprecated
+	// 6. Deprecated
 	if s.DiagDeprecated {
 		if s.depCache == nil {
 			s.depCache = make(map[ast.NodeID]DepInfo)
@@ -613,7 +562,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			identBytes := doc.Source[doc.Tree.Nodes[refID].Start:doc.Tree.Nodes[refID].End]
 			hash := ast.HashBytes(identBytes)
 
-			if syms, ok := s.getGlobalSymbols(uri, 0, hash); ok && len(syms) > 0 && syms[0].NodeID != ast.InvalidNode {
+			if syms, ok := s.getGlobalSymbols(doc, 0, hash); ok && len(syms) > 0 && syms[0].NodeID != ast.InvalidNode {
 				sym := syms[0]
 				if symDoc, docOk := s.Documents[sym.URI]; docOk {
 					info := checkDep(symDoc, sym.NodeID)
@@ -641,7 +590,7 @@ func (s *Server) publishDiagnostics(uri string) {
 		// Check unresolved global field accesses
 		for _, pf := range doc.Resolver.PendingFields {
 			if doc.Resolver.References[pf.PropNodeID] == ast.InvalidNode && pf.ReceiverHash != 0 {
-				if syms, ok := s.getGlobalSymbols(uri, pf.ReceiverHash, pf.PropHash); ok && len(syms) > 0 && syms[0].NodeID != ast.InvalidNode {
+				if syms, ok := s.getGlobalSymbols(doc, pf.ReceiverHash, pf.PropHash); ok && len(syms) > 0 && syms[0].NodeID != ast.InvalidNode {
 					sym := syms[0]
 					if symDoc, docOk := s.Documents[sym.URI]; docOk {
 						info := checkDep(symDoc, sym.NodeID)
@@ -669,10 +618,60 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 	}
 
-	// 8. Syntax & Correctness Checks
+	// 7. Syntax, Correctness, Unreachable Code & Ambiguous Returns
 	for i := 1; i < len(doc.Tree.Nodes); i++ {
 		nodeID := ast.NodeID(i)
 		node := doc.Tree.Nodes[nodeID]
+
+		if s.DiagAmbiguousReturns && node.Kind == ast.KindReturn && node.Left != ast.InvalidNode {
+			exprList := doc.Tree.Nodes[node.Left]
+			if exprList.Count > 0 {
+				firstExprID := doc.Tree.ExtraList[exprList.Extra]
+				firstExprNode := doc.Tree.Nodes[firstExprID]
+
+				retLine, _ := doc.Tree.Position(node.Start)
+				exprLine, _ := doc.Tree.Position(firstExprNode.Start)
+
+				if exprLine > retLine {
+					lastExprID := doc.Tree.ExtraList[exprList.Extra+uint32(exprList.Count-1)]
+
+					s.diagBuf = append(s.diagBuf, Diagnostic{
+						Range:    getRange(doc.Tree, firstExprNode.Start, doc.Tree.Nodes[lastExprID].End),
+						Severity: SeverityWarning,
+						Code:     "ambiguous-return",
+						Message:  "Ambiguous return: expression on the next line is executed as the return value. Use 'return;' to separate statements.",
+						Data:     float64(i),
+					})
+				}
+			}
+		}
+
+		if s.DiagUnreachableCode && (node.Kind == ast.KindBlock || node.Kind == ast.KindFile) {
+			var terminalFound bool
+
+			for j := uint16(0); j < node.Count; j++ {
+				stmtID := doc.Tree.ExtraList[node.Extra+uint32(j)]
+
+				if terminalFound {
+					lastStmtID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
+
+					s.diagBuf = append(s.diagBuf, Diagnostic{
+						Range:    getRange(doc.Tree, doc.Tree.Nodes[stmtID].Start, doc.Tree.Nodes[lastStmtID].End),
+						Severity: SeverityWarning,
+						Code:     "unreachable-code",
+						Tags:     []DiagnosticTag{Unnecessary},
+						Message:  "Unreachable code detected.",
+						Data:     float64(stmtID),
+					})
+
+					break
+				}
+
+				if isTerminal(doc.Tree, stmtID) {
+					terminalFound = true
+				}
+			}
+		}
 
 		// Loop Variable Mutation
 		if s.DiagLoopVarMutation && (node.Kind == ast.KindAssign) {
@@ -1086,21 +1085,7 @@ func (s *Server) publishDiagnostics(uri string) {
 								break
 							}
 
-							hasImplicitSelfCall := node.Kind == ast.KindMethodCall
-
-							var hasImplicitSelfDef bool
-
-							pDefID := tDoc.Tree.Nodes[def.NodeID].Parent
-							if pDefID != ast.InvalidNode && int(pDefID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[pDefID].Kind == ast.KindMethodName {
-								hasImplicitSelfDef = true
-							}
-
-							paramOffset := 0
-							if hasImplicitSelfCall && !hasImplicitSelfDef {
-								paramOffset = 1
-							} else if !hasImplicitSelfCall && hasImplicitSelfDef {
-								paramOffset = -1
-							}
+							paramOffset := getImplicitSelfOffset(node, tDoc, def.NodeID)
 
 							expectedArgs := int(funcNode.Count) - paramOffset
 							if expectedArgs < 0 {
@@ -1358,6 +1343,230 @@ func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID)
 	}
 
 	return true
+}
+
+func (s *Server) isGlobalGuarded(doc *Document, refID ast.NodeID, nameBytes []byte) bool {
+	// 1. Check if the reference ITSELF is an existence check.
+	if s.isDirectExistenceCheck(doc, refID) {
+		return true
+	}
+
+	// 2. Walk up the AST to see if we are in a branch/RHS guarded by an existence check.
+	curr := refID
+
+	for curr != ast.InvalidNode {
+		pID := doc.Tree.Nodes[curr].Parent
+		if pID == ast.InvalidNode {
+			break
+		}
+
+		pNode := doc.Tree.Nodes[pID]
+
+		// Guarded by AND: `VAR and VAR.stuff`
+		if pNode.Kind == ast.KindBinaryExpr && token.Kind(pNode.Extra) == token.And {
+			if pNode.Right == curr {
+				if s.checksForGlobal(doc, pNode.Left, nameBytes) {
+					return true
+				}
+			}
+		}
+
+		// Guarded by IF / ELSEIF: `if VAR then VAR.stuff end`
+		if pNode.Kind == ast.KindIf || pNode.Kind == ast.KindElseIf {
+			if pNode.Right == curr { // We are in the THEN block
+				if s.checksForGlobal(doc, pNode.Left, nameBytes) {
+					return true
+				}
+			}
+		}
+
+		// Guarded by WHILE: `while VAR do VAR.stuff end`
+		if pNode.Kind == ast.KindWhile {
+			if pNode.Right == curr { // We are in the DO block
+				if s.checksForGlobal(doc, pNode.Left, nameBytes) {
+					return true
+				}
+			}
+		}
+
+		// Guarded by previous statements in a block: `while not VAR do Wait(0) end; VAR.stuff`
+		if pNode.Kind == ast.KindBlock || pNode.Kind == ast.KindFile {
+			idx := -1
+
+			for i := uint16(0); i < pNode.Count; i++ {
+				if doc.Tree.ExtraList[pNode.Extra+uint32(i)] == curr {
+					idx = int(i)
+					break
+				}
+			}
+
+			if idx > 0 {
+				for i := idx - 1; i >= 0; i-- {
+					prevStmtID := doc.Tree.ExtraList[pNode.Extra+uint32(i)]
+					prevStmt := doc.Tree.Nodes[prevStmtID]
+
+					// `while not VAR do ... end`
+					if prevStmt.Kind == ast.KindWhile {
+						if s.checksForGlobalNegative(doc, prevStmt.Left, nameBytes) {
+							return true
+						}
+					}
+
+					// `repeat ... until VAR`
+					if prevStmt.Kind == ast.KindRepeat {
+						if s.checksForGlobal(doc, prevStmt.Right, nameBytes) {
+							return true
+						}
+					}
+
+					// `if not VAR then return end`
+					if prevStmt.Kind == ast.KindIf {
+						if s.checksForGlobalNegative(doc, prevStmt.Left, nameBytes) {
+							if isTerminal(doc.Tree, prevStmt.Right) {
+								return true
+							}
+						}
+					}
+				}
+			}
+		}
+
+		curr = pID
+	}
+
+	return false
+}
+
+func (s *Server) isDirectExistenceCheck(doc *Document, refID ast.NodeID) bool {
+	pID := doc.Tree.Nodes[refID].Parent
+	if pID == ast.InvalidNode {
+		return false
+	}
+
+	pNode := doc.Tree.Nodes[pID]
+
+	if pNode.Kind == ast.KindParenExpr {
+		return s.isDirectExistenceCheck(doc, pID)
+	}
+
+	if (pNode.Kind == ast.KindIf || pNode.Kind == ast.KindElseIf || pNode.Kind == ast.KindWhile) && pNode.Left == refID {
+		return true
+	}
+
+	if pNode.Kind == ast.KindRepeat && pNode.Right == refID {
+		return true
+	}
+
+	if pNode.Kind == ast.KindUnaryExpr && pNode.Right == refID {
+		src := doc.Source[pNode.Start:pNode.End]
+		if bytes.HasPrefix(src, []byte("not")) {
+			return true
+		}
+	}
+
+	if pNode.Kind == ast.KindBinaryExpr {
+		op := token.Kind(pNode.Extra)
+
+		if op == token.And || op == token.Or {
+			return true
+		}
+
+		if op == token.Eq || op == token.NotEq {
+			otherID := pNode.Right
+			if pNode.Right == refID {
+				otherID = pNode.Left
+			}
+
+			if doc.Tree.Nodes[otherID].Kind == ast.KindNil {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (s *Server) checksForGlobal(doc *Document, condID ast.NodeID, nameBytes []byte) bool {
+	if condID == ast.InvalidNode {
+		return false
+	}
+
+	node := doc.Tree.Nodes[condID]
+
+	if node.Kind == ast.KindParenExpr {
+		return s.checksForGlobal(doc, node.Left, nameBytes)
+	}
+
+	if node.Kind == ast.KindIdent {
+		src := doc.Source[node.Start:node.End]
+		return bytes.Equal(src, nameBytes)
+	}
+
+	if node.Kind == ast.KindBinaryExpr {
+		op := token.Kind(node.Extra)
+
+		if op == token.NotEq {
+			lNode := doc.Tree.Nodes[node.Left]
+			rNode := doc.Tree.Nodes[node.Right]
+
+			if lNode.Kind == ast.KindIdent && rNode.Kind == ast.KindNil {
+				return bytes.Equal(doc.Source[lNode.Start:lNode.End], nameBytes)
+			}
+
+			if rNode.Kind == ast.KindIdent && lNode.Kind == ast.KindNil {
+				return bytes.Equal(doc.Source[rNode.Start:rNode.End], nameBytes)
+			}
+		}
+
+		if op == token.And {
+			return s.checksForGlobal(doc, node.Left, nameBytes)
+		}
+	}
+
+	return false
+}
+
+func (s *Server) checksForGlobalNegative(doc *Document, condID ast.NodeID, nameBytes []byte) bool {
+	if condID == ast.InvalidNode {
+		return false
+	}
+
+	node := doc.Tree.Nodes[condID]
+
+	if node.Kind == ast.KindParenExpr {
+		return s.checksForGlobalNegative(doc, node.Left, nameBytes)
+	}
+
+	if node.Kind == ast.KindUnaryExpr {
+		src := doc.Source[node.Start:node.End]
+
+		if bytes.HasPrefix(src, []byte("not")) {
+			return s.checksForGlobal(doc, node.Right, nameBytes)
+		}
+	}
+
+	if node.Kind == ast.KindBinaryExpr {
+		op := token.Kind(node.Extra)
+
+		if op == token.Eq {
+			lNode := doc.Tree.Nodes[node.Left]
+			rNode := doc.Tree.Nodes[node.Right]
+
+			if lNode.Kind == ast.KindIdent && rNode.Kind == ast.KindNil {
+				return bytes.Equal(doc.Source[lNode.Start:lNode.End], nameBytes)
+			}
+
+			if rNode.Kind == ast.KindIdent && lNode.Kind == ast.KindNil {
+				return bytes.Equal(doc.Source[rNode.Start:rNode.End], nameBytes)
+			}
+		}
+
+		if op == token.Or {
+			return s.checksForGlobalNegative(doc, node.Left, nameBytes)
+		}
+	}
+
+	return false
 }
 
 func (s *Server) isSideEffectFree(doc *Document, id ast.NodeID) bool {
