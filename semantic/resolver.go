@@ -164,7 +164,7 @@ func (r *Resolver) declare(identID ast.NodeID) {
 	name := r.source(identID)
 
 	// ignore "_" prefix
-	if len(name) > 0 && name[0] != '_' {
+	if len(name) > 0 && name[0] != '_' && !(len(name) > 2 && name[0] == '.' && name[1] == '.' && name[2] == '.') {
 		var scopeStart int
 
 		if len(r.scopeStarts) > 0 {
