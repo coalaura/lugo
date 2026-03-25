@@ -489,7 +489,7 @@ func cleanLuaCommentBytes(dst, raw []byte) []byte {
 
 		dst = append(dst, line...)
 
-		if len(raw) > 0 {
+		if len(raw) > 0 || len(line) == 0 {
 			dst = append(dst, '\n')
 		}
 	}

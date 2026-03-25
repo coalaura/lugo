@@ -229,11 +229,13 @@ func (s *Server) handleHover(req Request) {
 			}
 
 			if len(luadoc.Generics) > 0 {
+				docBuilder.WriteString("**Generics**\n\n")
+
 				for _, g := range luadoc.Generics {
-					docBuilder.WriteString("* `@generic` `" + g.Name + "`")
+					docBuilder.WriteString("* **`" + g.Name + "`**")
 
 					if g.Parent != "" {
-						docBuilder.WriteString(" : `" + g.Parent + "`")
+						docBuilder.WriteString(" : *`" + g.Parent + "`*")
 					}
 
 					docBuilder.WriteString("\n")
@@ -243,15 +245,19 @@ func (s *Server) handleHover(req Request) {
 			}
 
 			if len(luadoc.Params) > 0 {
+				docBuilder.WriteString("**Parameters**\n\n")
+
 				for _, p := range luadoc.Params {
-					docBuilder.WriteString("* `@param` `" + p.Name + "`")
+					docBuilder.WriteString("* **`" + p.Name + "`**")
 
 					if p.Type != "" {
-						docBuilder.WriteString(" `" + p.Type + "`")
+						docBuilder.WriteString(" *`" + p.Type + "`*")
 					}
 
 					if p.Desc != "" {
-						docBuilder.WriteString(" - " + p.Desc)
+						// Replace newlines with indented newlines for list alignment
+						desc := strings.ReplaceAll(p.Desc, "\n", "\n  ")
+						docBuilder.WriteString(" - " + desc)
 					}
 
 					docBuilder.WriteString("\n")
@@ -261,11 +267,22 @@ func (s *Server) handleHover(req Request) {
 			}
 
 			if len(luadoc.Returns) > 0 {
+				docBuilder.WriteString("**Returns**\n\n")
+
 				for _, ret := range luadoc.Returns {
-					docBuilder.WriteString("* `@return` `" + ret.Type + "`")
+					docBuilder.WriteString("* ")
+
+					if ret.Type != "" {
+						docBuilder.WriteString("*`" + ret.Type + "`*")
+					}
 
 					if ret.Desc != "" {
-						docBuilder.WriteString(" - " + ret.Desc)
+						if ret.Type != "" {
+							docBuilder.WriteString(" - ")
+						}
+
+						desc := strings.ReplaceAll(ret.Desc, "\n", "\n  ")
+						docBuilder.WriteString(desc)
 					}
 
 					docBuilder.WriteString("\n")
@@ -275,17 +292,18 @@ func (s *Server) handleHover(req Request) {
 			}
 
 			if len(luadoc.Fields) > 0 && matchedField == nil {
-				docBuilder.WriteString("**Fields**\n")
+				docBuilder.WriteString("**Fields**\n\n")
 
 				for _, f := range luadoc.Fields {
-					docBuilder.WriteString("* `" + f.Name + "`")
+					docBuilder.WriteString("* **`" + f.Name + "`**")
 
 					if f.Type != "" {
-						docBuilder.WriteString(" `" + f.Type + "`")
+						docBuilder.WriteString(" *`" + f.Type + "`*")
 					}
 
 					if f.Desc != "" {
-						docBuilder.WriteString(" - " + f.Desc)
+						desc := strings.ReplaceAll(f.Desc, "\n", "\n  ")
+						docBuilder.WriteString(" - " + desc)
 					}
 
 					docBuilder.WriteString("\n")
@@ -295,7 +313,7 @@ func (s *Server) handleHover(req Request) {
 			}
 
 			if len(luadoc.Overloads) > 0 {
-				docBuilder.WriteString("**Overloads**\n")
+				docBuilder.WriteString("**Overloads**\n\n")
 
 				for _, o := range luadoc.Overloads {
 					docBuilder.WriteString("```lua\n" + o + "\n```\n")
@@ -305,7 +323,7 @@ func (s *Server) handleHover(req Request) {
 			}
 
 			if len(luadoc.See) > 0 {
-				docBuilder.WriteString("**See also**\n")
+				docBuilder.WriteString("**See also**\n\n")
 
 				for _, see := range luadoc.See {
 					docBuilder.WriteString("* `" + see + "`\n")
@@ -319,7 +337,7 @@ func (s *Server) handleHover(req Request) {
 			hoverText = "```lua\n" + code + "\n```"
 
 			if docString != "" {
-				hoverText += "\n---\n" + docString
+				hoverText += "\n---\n\n" + docString
 			}
 
 			if fromFile != "" {
