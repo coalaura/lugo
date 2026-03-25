@@ -29,11 +29,6 @@
         "build": "esbuild ./extension.js --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18"
     },
     "contributes": {
-        "configurationDefaults": {
-            "[lua]": {
-                "editor.formatOnPaste": true
-            }
-        },
         "languages": [
             {
                 "id": "lua",
