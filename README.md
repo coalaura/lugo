@@ -38,6 +38,7 @@ Lugo implements a comprehensive suite of modern Language Server Protocol feature
 * **Signature Help & Inlay Hints:** Real-time active-parameter tooltips and inline parameter name hints with smart implicit `self` offset calculation. Automatically suppresses hints when the argument matches the parameter name to reduce visual noise.
 * **Code Actions (Quick Fixes & Refactoring):** Fast automated fixes for common diagnostics (prefixing unused variables, adding `local`, fixing typos). Includes powerful **AST-aware refactorings**: invert conditions, recursively convert `if` chains to early returns, optimize `table.insert` to `t[#t+1]`, convert between dot/colon method signatures, merge nested `if` statements, split multiple assignments, swap `if`/`else` branches, remove redundant parentheses, convert `for i=1, #t` to `ipairs`, and toggle between dot/bracket table indexing. Includes **bulk Safe Fixes** (via command palette) to automatically clean up unused variables, parameters and assignments across the current file or your entire workspace securely without breaking side-effects.
 * **Full Lua 5.4 Support:** Native parsing, type-inference, and semantic highlighting for `<const>` and `<close>` attributes, `goto` statements, and `::labels::`.
+* **FiveM Resource Isolation:** Native support for parsing `fxmanifest.lua` and `__resource.lua`. Lugo automatically isolates `client`, `server`, and `shared` environments, preventing cross-contamination of globals and providing warnings if a file isn't referenced in the manifest.
 * **File Watching:** Automatically synchronizes with workspace file creations, deletions, and external changes in real-time.
 * **Built-in Formatter:** A blazingly fast, AST-aware Lua formatter. Elegantly fixes whitespace, enforces indentation rules, strips trailing semicolons, expands minified code and optionally applies opinionated stylistic tweaks (like separating unrelated statements with blank lines).
 * **Folding Ranges:** Accurately fold functions, tables, control flow blocks and multi-line strings/comments.
@@ -56,6 +57,7 @@ Lugo performs workspace-wide analysis to catch bugs before runtime:
 * **Sanity Checks:** Detects duplicate fields in table literals, unbalanced assignments, loop variable mutations, and incorrect vararg (`...`) usage.
 * **Type Checking:** Optionally catches strictly invalid operations like attempting to call a number or index a non-table.
 * **Format String Validation:** Warns when `string.format` is called with an incorrect number of arguments.
+* **Used Ignored Variables:** Warns when a variable conventionally marked as ignored (prefixed with `_`) is actually used in the code, offering a quick-fix to safely rename it.
 * **Deprecation:** Warns when using symbols marked with `@deprecated`.
 
 ## Installation
@@ -122,6 +124,7 @@ lspconfig.lugo.setup({
 		diagIncorrectVararg = true,
 		diagShadowingLoopVar = true,
 		diagUnreachableElse = true,
+		diagUsedIgnoredVar = true,
 
 		-- Inlay Hints
 		inlayParamHints = true,
@@ -134,7 +137,8 @@ lspconfig.lugo.setup({
 		featureCodeLens = true,
 		featureFormatting = true,
 		formatOpinionated = false,
-		suggestFunctionParams = true
+		suggestFunctionParams = true,
+		featureFiveM = false -- Set to true if working on FiveM resources
 	}
 })
 ```
@@ -144,6 +148,7 @@ lspconfig.lugo.setup({
 You can configure Lugo via your VS Code `settings.json` (also available via the settings UI under **Extensions -> Lugo LSP**):
 
 **Workspace & Environment**
+* `lugo.fivem.enabled`: Enable FiveM support. Scopes globals and diagnostics to their respective resources (using `fxmanifest.lua` / `__resource.lua`).
 * `lugo.workspace.libraryPaths`: An array of absolute paths to external Lua libraries to index.
 * `lugo.workspace.ignoreGlobs`: Additional glob patterns to ignore during indexing. Inherits VS Code's `files.exclude` automatically.
 * `lugo.environment.knownGlobals`: Global variables to ignore when reporting undefined globals. Supports wildcards (e.g., `N_0x*`).
@@ -173,6 +178,7 @@ You can configure Lugo via your VS Code `settings.json` (also available via the 
 * `lugo.diagnostics.incorrectVararg`: Toggle diagnostics for using the vararg `...` expression outside of a vararg function.
 * `lugo.diagnostics.shadowingLoopVar`: Toggle diagnostics when a loop variable shadows an outer local or global variable.
 * `lugo.diagnostics.unreachableElse`: Toggle diagnostics for unreachable `elseif` or `else` branches.
+* `lugo.diagnostics.usedIgnoredVariable`: Toggle diagnostics for variables that are used but their name starts with `_`.
 * `lugo.diagnostics.deprecated`: Toggle warnings for usage of `@deprecated` symbols.
 
 **Editor Features**
