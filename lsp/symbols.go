@@ -744,20 +744,20 @@ func (s *Server) getBestDefsForContext(doc *Document, identNodeID ast.NodeID, de
 		isMethodCall   bool
 	)
 
-	pID := doc.Tree.Nodes[identNodeID].Parent
-	if pID != ast.InvalidNode && int(pID) < len(doc.Tree.Nodes) {
-		pNode := doc.Tree.Nodes[pID]
-		if pNode.Kind == ast.KindCallExpr && pNode.Left == identNodeID {
-			activeCallArgs = int(pNode.Count)
-		} else if pNode.Kind == ast.KindMethodCall && pNode.Right == identNodeID {
-			activeCallArgs = int(pNode.Count)
+	parentID := doc.Tree.Nodes[identNodeID].Parent
+	if parentID != ast.InvalidNode && int(parentID) < len(doc.Tree.Nodes) {
+		parentNode := doc.Tree.Nodes[parentID]
+		if parentNode.Kind == ast.KindCallExpr && parentNode.Left == identNodeID {
+			activeCallArgs = int(parentNode.Count)
+		} else if parentNode.Kind == ast.KindMethodCall && parentNode.Right == identNodeID {
+			activeCallArgs = int(parentNode.Count)
 			isMethodCall = true
-		} else if pNode.Kind == ast.KindMemberExpr {
-			gpID := pNode.Parent
-			if gpID != ast.InvalidNode && int(gpID) < len(doc.Tree.Nodes) {
-				gpNode := doc.Tree.Nodes[gpID]
-				if gpNode.Kind == ast.KindCallExpr && gpNode.Left == pID {
-					activeCallArgs = int(gpNode.Count)
+		} else if parentNode.Kind == ast.KindMemberExpr {
+			grandParentID := parentNode.Parent
+			if grandParentID != ast.InvalidNode && int(grandParentID) < len(doc.Tree.Nodes) {
+				grandParentNode := doc.Tree.Nodes[grandParentID]
+				if grandParentNode.Kind == ast.KindCallExpr && grandParentNode.Left == parentID {
+					activeCallArgs = int(grandParentNode.Count)
 				}
 			}
 		}

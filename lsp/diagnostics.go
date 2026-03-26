@@ -300,12 +300,12 @@ func (s *Server) publishDiagnostics(uri string) {
 				category := "local"
 				code := "unused-local"
 
-				pID := doc.Tree.Nodes[defID].Parent
+				parentID := doc.Tree.Nodes[defID].Parent
 
-				if pID != ast.InvalidNode {
-					pNode := doc.Tree.Nodes[pID]
+				if parentID != ast.InvalidNode {
+					parentNode := doc.Tree.Nodes[parentID]
 
-					switch pNode.Kind {
+					switch parentNode.Kind {
 					case ast.KindFunctionExpr:
 						category = "parameter"
 						code = "unused-parameter"
@@ -316,8 +316,8 @@ func (s *Server) publishDiagnostics(uri string) {
 						category = "function"
 						code = "unused-function"
 					case ast.KindNameList:
-						gpID := pNode.Parent
-						if gpID != ast.InvalidNode && doc.Tree.Nodes[gpID].Kind == ast.KindForIn {
+						grandParentID := parentNode.Parent
+						if grandParentID != ast.InvalidNode && doc.Tree.Nodes[grandParentID].Kind == ast.KindForIn {
 							category = "loop variable"
 							code = "unused-loop-var"
 						}
@@ -366,20 +366,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				}
 			}
 
-			var isLoopVar bool
-
-			pID := doc.Tree.Nodes[defID].Parent
-			if pID != ast.InvalidNode {
-				pNode := doc.Tree.Nodes[pID]
-				if pNode.Kind == ast.KindForNum && pNode.Left == defID {
-					isLoopVar = true
-				} else if pNode.Kind == ast.KindNameList {
-					gpID := pNode.Parent
-					if gpID != ast.InvalidNode && doc.Tree.Nodes[gpID].Kind == ast.KindForIn {
-						isLoopVar = true
-					}
-				}
-			}
+			isLoopVar := isLoopVariable(doc.Tree, defID)
 
 			shouldReportShadow := s.DiagShadowing
 			if isLoopVar {
@@ -453,20 +440,7 @@ func (s *Server) publishDiagnostics(uri string) {
 	// 5. Shadowing Outer Locals
 	if s.DiagShadowing || s.DiagShadowingLoopVar {
 		for _, pair := range doc.Resolver.ShadowedOuter {
-			var isLoopVar bool
-
-			pID := doc.Tree.Nodes[pair.Shadowing].Parent
-			if pID != ast.InvalidNode {
-				pNode := doc.Tree.Nodes[pID]
-				if pNode.Kind == ast.KindForNum && pNode.Left == pair.Shadowing {
-					isLoopVar = true
-				} else if pNode.Kind == ast.KindNameList {
-					gpID := pNode.Parent
-					if gpID != ast.InvalidNode && doc.Tree.Nodes[gpID].Kind == ast.KindForIn {
-						isLoopVar = true
-					}
-				}
-			}
+			isLoopVar := isLoopVariable(doc.Tree, pair.Shadowing)
 
 			if !s.DiagShadowing && !isLoopVar {
 				continue
@@ -681,30 +655,13 @@ func (s *Server) publishDiagnostics(uri string) {
 				lhsID := doc.Tree.ExtraList[lhsList.Extra+uint32(j)]
 				if doc.Tree.Nodes[lhsID].Kind == ast.KindIdent {
 					defID := doc.Resolver.References[lhsID]
-					if defID != ast.InvalidNode {
-						pID := doc.Tree.Nodes[defID].Parent
-						if pID != ast.InvalidNode {
-							var isLoopVar bool
-
-							pNode := doc.Tree.Nodes[pID]
-							if pNode.Kind == ast.KindForNum && pNode.Left == defID {
-								isLoopVar = true
-							} else if pNode.Kind == ast.KindNameList {
-								gpID := pNode.Parent
-								if gpID != ast.InvalidNode && doc.Tree.Nodes[gpID].Kind == ast.KindForIn {
-									isLoopVar = true
-								}
-							}
-
-							if isLoopVar {
-								s.diagBuf = append(s.diagBuf, Diagnostic{
-									Range:    getNodeRange(doc.Tree, lhsID),
-									Severity: SeverityWarning,
-									Code:     "loop-var-mutation",
-									Message:  "Mutation of a loop variable. This can lead to unexpected behavior.",
-								})
-							}
-						}
+					if isLoopVariable(doc.Tree, defID) {
+						s.diagBuf = append(s.diagBuf, Diagnostic{
+							Range:    getNodeRange(doc.Tree, lhsID),
+							Severity: SeverityWarning,
+							Code:     "loop-var-mutation",
+							Message:  "Mutation of a loop variable. This can lead to unexpected behavior.",
+						})
 					}
 				}
 			}
@@ -715,8 +672,8 @@ func (s *Server) publishDiagnostics(uri string) {
 			if node.Parent != ast.InvalidNode && doc.Tree.Nodes[node.Parent].Kind != ast.KindFile {
 				var data any
 
-				pNode := doc.Tree.Nodes[node.Parent]
-				if pNode.Kind == ast.KindDo {
+				parentNode := doc.Tree.Nodes[node.Parent]
+				if parentNode.Kind == ast.KindDo {
 					data = float64(node.Parent)
 				}
 
@@ -733,36 +690,36 @@ func (s *Server) publishDiagnostics(uri string) {
 
 		// Incorrect Vararg Usage
 		if s.DiagIncorrectVararg && node.Kind == ast.KindVararg {
-			pID := node.Parent
-			if pID != ast.InvalidNode && doc.Tree.Nodes[pID].Kind != ast.KindFunctionExpr {
+			parentID := node.Parent
+			if parentID != ast.InvalidNode && doc.Tree.Nodes[parentID].Kind != ast.KindFunctionExpr {
 				var (
 					isVarargFunc bool
 					foundFunc    bool
 				)
 
-				curr := pID
+				curr := parentID
 
 				for curr != ast.InvalidNode {
-					n := doc.Tree.Nodes[curr]
-					if n.Kind == ast.KindFunctionExpr {
+					currNode := doc.Tree.Nodes[curr]
+					if currNode.Kind == ast.KindFunctionExpr {
 						foundFunc = true
 
-						if n.Count > 0 {
-							lastParamID := doc.Tree.ExtraList[n.Extra+uint32(n.Count-1)]
+						if currNode.Count > 0 {
+							lastParamID := doc.Tree.ExtraList[currNode.Extra+uint32(currNode.Count-1)]
 							if doc.Tree.Nodes[lastParamID].Kind == ast.KindVararg {
 								isVarargFunc = true
 							}
 						}
 
 						break
-					} else if n.Kind == ast.KindFile {
+					} else if currNode.Kind == ast.KindFile {
 						foundFunc = true
 						isVarargFunc = true
 
 						break
 					}
 
-					curr = n.Parent
+					curr = currNode.Parent
 				}
 
 				if foundFunc && !isVarargFunc {
@@ -1007,14 +964,14 @@ func (s *Server) publishDiagnostics(uri string) {
 		// Redundant Return
 		if s.DiagRedundantReturn && node.Kind == ast.KindReturn {
 			if node.Left == ast.InvalidNode || doc.Tree.Nodes[node.Left].Count == 0 {
-				pID := node.Parent
-				if pID != ast.InvalidNode {
-					pNode := doc.Tree.Nodes[pID]
-					if pNode.Kind == ast.KindBlock && pNode.Count > 0 && doc.Tree.ExtraList[pNode.Extra+uint32(pNode.Count-1)] == nodeID {
-						gpID := pNode.Parent
-						if gpID != ast.InvalidNode {
-							gpNode := doc.Tree.Nodes[gpID]
-							if gpNode.Kind == ast.KindFunctionExpr || gpNode.Kind == ast.KindFile {
+				parentID := node.Parent
+				if parentID != ast.InvalidNode {
+					parentNode := doc.Tree.Nodes[parentID]
+					if parentNode.Kind == ast.KindBlock && parentNode.Count > 0 && doc.Tree.ExtraList[parentNode.Extra+uint32(parentNode.Count-1)] == nodeID {
+						grandParentID := parentNode.Parent
+						if grandParentID != ast.InvalidNode {
+							grandParentNode := doc.Tree.Nodes[grandParentID]
+							if grandParentNode.Kind == ast.KindFunctionExpr || grandParentNode.Kind == ast.KindFile {
 								s.diagBuf = append(s.diagBuf, Diagnostic{
 									Range:    getNodeRange(doc.Tree, nodeID),
 									Severity: SeverityWarning,
@@ -1287,11 +1244,11 @@ func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID)
 			return true
 		}
 
-		pNode := doc.Tree.Nodes[parentID]
+		parentNode := doc.Tree.Nodes[parentID]
 
-		switch pNode.Kind {
+		switch parentNode.Kind {
 		case ast.KindMemberExpr, ast.KindMethodName, ast.KindIndexExpr:
-			if pNode.Left == curr {
+			if parentNode.Left == curr {
 				if isLHSOfAssignment(doc, parentID) {
 					return true
 				}
@@ -1303,12 +1260,12 @@ func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID)
 
 			return true
 		case ast.KindLocalAssign, ast.KindAssign:
-			if pNode.Left == curr {
+			if parentNode.Left == curr {
 				return false
 			}
-			if pNode.Right == curr {
-				if int(pNode.Left) < len(doc.Tree.Nodes) {
-					lhsList := doc.Tree.Nodes[pNode.Left]
+			if parentNode.Right == curr {
+				if int(parentNode.Left) < len(doc.Tree.Nodes) {
+					lhsList := doc.Tree.Nodes[parentNode.Left]
 					if lhsList.Count == 1 && lhsList.Extra < uint32(len(doc.Tree.ExtraList)) {
 						lhsExprID := doc.Tree.ExtraList[lhsList.Extra]
 						if s.getRootDef(doc, lhsExprID) == defID {
@@ -1320,11 +1277,11 @@ func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID)
 
 			return true
 		case ast.KindExprList, ast.KindNameList:
-			if pNode.Kind == ast.KindExprList {
-				gpID := pNode.Parent
-				if gpID != ast.InvalidNode && int(gpID) < len(doc.Tree.Nodes) {
-					gpNode := doc.Tree.Nodes[gpID]
-					if (gpNode.Kind == ast.KindAssign || gpNode.Kind == ast.KindLocalAssign) && gpNode.Left == parentID {
+			if parentNode.Kind == ast.KindExprList {
+				grandParentID := parentNode.Parent
+				if grandParentID != ast.InvalidNode && int(grandParentID) < len(doc.Tree.Nodes) {
+					grandParentNode := doc.Tree.Nodes[grandParentID]
+					if (grandParentNode.Kind == ast.KindAssign || grandParentNode.Kind == ast.KindLocalAssign) && grandParentNode.Left == parentID {
 						return false
 					}
 				}
@@ -1355,54 +1312,47 @@ func (s *Server) isGlobalGuarded(doc *Document, refID ast.NodeID, nameBytes []by
 	curr := refID
 
 	for curr != ast.InvalidNode {
-		pID := doc.Tree.Nodes[curr].Parent
-		if pID == ast.InvalidNode {
+		parentID := doc.Tree.Nodes[curr].Parent
+		if parentID == ast.InvalidNode {
 			break
 		}
 
-		pNode := doc.Tree.Nodes[pID]
+		parentNode := doc.Tree.Nodes[parentID]
 
 		// Guarded by AND: `VAR and VAR.stuff`
-		if pNode.Kind == ast.KindBinaryExpr && token.Kind(pNode.Extra) == token.And {
-			if pNode.Right == curr {
-				if s.checksForGlobal(doc, pNode.Left, nameBytes) {
+		if parentNode.Kind == ast.KindBinaryExpr && token.Kind(parentNode.Extra) == token.And {
+			if parentNode.Right == curr {
+				if s.checksForGlobal(doc, parentNode.Left, nameBytes) {
 					return true
 				}
 			}
 		}
 
 		// Guarded by IF / ELSEIF: `if VAR then VAR.stuff end`
-		if pNode.Kind == ast.KindIf || pNode.Kind == ast.KindElseIf {
-			if pNode.Right == curr { // We are in the THEN block
-				if s.checksForGlobal(doc, pNode.Left, nameBytes) {
+		if parentNode.Kind == ast.KindIf || parentNode.Kind == ast.KindElseIf {
+			if parentNode.Right == curr { // We are in the THEN block
+				if s.checksForGlobal(doc, parentNode.Left, nameBytes) {
 					return true
 				}
 			}
 		}
 
 		// Guarded by WHILE: `while VAR do VAR.stuff end`
-		if pNode.Kind == ast.KindWhile {
-			if pNode.Right == curr { // We are in the DO block
-				if s.checksForGlobal(doc, pNode.Left, nameBytes) {
+		if parentNode.Kind == ast.KindWhile {
+			if parentNode.Right == curr { // We are in the DO block
+				if s.checksForGlobal(doc, parentNode.Left, nameBytes) {
 					return true
 				}
 			}
 		}
 
 		// Guarded by previous statements in a block: `while not VAR do Wait(0) end; VAR.stuff`
-		if pNode.Kind == ast.KindBlock || pNode.Kind == ast.KindFile {
-			idx := -1
-
-			for i := uint16(0); i < pNode.Count; i++ {
-				if doc.Tree.ExtraList[pNode.Extra+uint32(i)] == curr {
-					idx = int(i)
-					break
-				}
-			}
+		if parentNode.Kind == ast.KindBlock || parentNode.Kind == ast.KindFile {
+			idx := doc.Tree.IndexOfExtra(parentID, curr)
 
 			if idx > 0 {
 				for i := idx - 1; i >= 0; i-- {
-					prevStmtID := doc.Tree.ExtraList[pNode.Extra+uint32(i)]
+					prevStmtID := doc.Tree.ExtraList[parentNode.Extra+uint32(i)]
 					prevStmt := doc.Tree.Nodes[prevStmtID]
 
 					// `while not VAR do ... end`
@@ -1431,50 +1381,50 @@ func (s *Server) isGlobalGuarded(doc *Document, refID ast.NodeID, nameBytes []by
 			}
 		}
 
-		curr = pID
+		curr = parentID
 	}
 
 	return false
 }
 
 func (s *Server) isDirectExistenceCheck(doc *Document, refID ast.NodeID) bool {
-	pID := doc.Tree.Nodes[refID].Parent
-	if pID == ast.InvalidNode {
+	parentID := doc.Tree.Nodes[refID].Parent
+	if parentID == ast.InvalidNode {
 		return false
 	}
 
-	pNode := doc.Tree.Nodes[pID]
+	parentNode := doc.Tree.Nodes[parentID]
 
-	if pNode.Kind == ast.KindParenExpr {
-		return s.isDirectExistenceCheck(doc, pID)
+	if parentNode.Kind == ast.KindParenExpr {
+		return s.isDirectExistenceCheck(doc, parentID)
 	}
 
-	if (pNode.Kind == ast.KindIf || pNode.Kind == ast.KindElseIf || pNode.Kind == ast.KindWhile) && pNode.Left == refID {
+	if (parentNode.Kind == ast.KindIf || parentNode.Kind == ast.KindElseIf || parentNode.Kind == ast.KindWhile) && parentNode.Left == refID {
 		return true
 	}
 
-	if pNode.Kind == ast.KindRepeat && pNode.Right == refID {
+	if parentNode.Kind == ast.KindRepeat && parentNode.Right == refID {
 		return true
 	}
 
-	if pNode.Kind == ast.KindUnaryExpr && pNode.Right == refID {
-		src := doc.Source[pNode.Start:pNode.End]
+	if parentNode.Kind == ast.KindUnaryExpr && parentNode.Right == refID {
+		src := doc.Source[parentNode.Start:parentNode.End]
 		if bytes.HasPrefix(src, []byte("not")) {
 			return true
 		}
 	}
 
-	if pNode.Kind == ast.KindBinaryExpr {
-		op := token.Kind(pNode.Extra)
+	if parentNode.Kind == ast.KindBinaryExpr {
+		op := token.Kind(parentNode.Extra)
 
 		if op == token.And || op == token.Or {
 			return true
 		}
 
 		if op == token.Eq || op == token.NotEq {
-			otherID := pNode.Right
-			if pNode.Right == refID {
-				otherID = pNode.Left
+			otherID := parentNode.Right
+			if parentNode.Right == refID {
+				otherID = parentNode.Left
 			}
 
 			if doc.Tree.Nodes[otherID].Kind == ast.KindNil {

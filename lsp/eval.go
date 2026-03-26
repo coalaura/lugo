@@ -11,10 +11,10 @@ import (
 )
 
 type evalResult struct {
-	kind ast.NodeKind
-	num  float64
-	str  string
-	b    bool
+	kind    ast.NodeKind
+	num     float64
+	str     string
+	boolVal bool
 }
 
 // FindEvaluableParent climbs the AST from the cursor to find the highest
@@ -221,17 +221,17 @@ func (doc *Document) evalNode(id ast.NodeID, depth int) (evalResult, bool) {
 	case ast.KindNumber:
 		raw := ast.String(doc.Source[node.Start:node.End])
 
-		f, err := strconv.ParseFloat(raw, 64)
+		floatVal, err := strconv.ParseFloat(raw, 64)
 		if err != nil {
 			// Fallback for hex/octal ints
 			if i, err2 := strconv.ParseInt(raw, 0, 64); err2 == nil {
-				f = float64(i)
+				floatVal = float64(i)
 			} else {
 				return evalResult{}, false
 			}
 		}
 
-		return evalResult{kind: ast.KindNumber, num: f}, true
+		return evalResult{kind: ast.KindNumber, num: floatVal}, true
 	case ast.KindString:
 		raw := ast.String(doc.Source[node.Start:node.End])
 		if len(raw) >= 2 && (raw[0] == '\'' || raw[0] == '"') {
@@ -258,9 +258,9 @@ func (doc *Document) evalNode(id ast.NodeID, depth int) (evalResult, bool) {
 
 		return evalResult{}, false
 	case ast.KindTrue:
-		return evalResult{kind: ast.KindTrue, b: true}, true
+		return evalResult{kind: ast.KindTrue, boolVal: true}, true
 	case ast.KindFalse:
-		return evalResult{kind: ast.KindFalse, b: false}, true
+		return evalResult{kind: ast.KindFalse, boolVal: false}, true
 	case ast.KindNil:
 		return evalResult{kind: ast.KindNil}, true
 	case ast.KindParenExpr:
@@ -287,16 +287,17 @@ func (doc *Document) evalNode(id ast.NodeID, depth int) (evalResult, bool) {
 		} else if bytes.HasPrefix(src, []byte("~")) && right.kind == ast.KindNumber {
 			return evalResult{kind: ast.KindNumber, num: float64(^int64(right.num))}, true
 		} else if bytes.HasPrefix(src, []byte("not")) {
-			b := true
+			isTruthy := true
+
 			if right.kind == ast.KindFalse || right.kind == ast.KindNil {
-				b = false
+				isTruthy = false
 			}
 
-			if b {
-				return evalResult{kind: ast.KindFalse, b: false}, true
+			if isTruthy {
+				return evalResult{kind: ast.KindFalse, boolVal: false}, true
 			}
 
-			return evalResult{kind: ast.KindTrue, b: true}, true
+			return evalResult{kind: ast.KindTrue, boolVal: true}, true
 		} else if bytes.HasPrefix(src, []byte("#")) && right.kind == ast.KindString {
 			return evalResult{kind: ast.KindNumber, num: float64(len(right.str))}, true
 		}
@@ -319,18 +320,18 @@ func (doc *Document) evalNode(id ast.NodeID, depth int) (evalResult, bool) {
 func applyOp(left, right evalResult, op token.Kind) (evalResult, bool) {
 	if op == token.Concat {
 		var (
-			s1 string
-			s2 string
+			str1 string
+			str2 string
 		)
 
 		switch left.kind {
 		case ast.KindString:
-			s1 = left.str
+			str1 = left.str
 		case ast.KindNumber:
 			if left.num == math.Trunc(left.num) {
-				s1 = strconv.FormatInt(int64(left.num), 10)
+				str1 = strconv.FormatInt(int64(left.num), 10)
 			} else {
-				s1 = strconv.FormatFloat(left.num, 'g', 14, 64)
+				str1 = strconv.FormatFloat(left.num, 'g', 14, 64)
 			}
 		default:
 			return evalResult{}, false
@@ -338,18 +339,18 @@ func applyOp(left, right evalResult, op token.Kind) (evalResult, bool) {
 
 		switch right.kind {
 		case ast.KindString:
-			s2 = right.str
+			str2 = right.str
 		case ast.KindNumber:
 			if right.num == math.Trunc(right.num) {
-				s2 = strconv.FormatInt(int64(right.num), 10)
+				str2 = strconv.FormatInt(int64(right.num), 10)
 			} else {
-				s2 = strconv.FormatFloat(right.num, 'g', 14, 64)
+				str2 = strconv.FormatFloat(right.num, 'g', 14, 64)
 			}
 		default:
 			return evalResult{}, false
 		}
 
-		return evalResult{kind: ast.KindString, str: s1 + s2}, true
+		return evalResult{kind: ast.KindString, str: str1 + str2}, true
 	}
 
 	if left.kind == ast.KindNumber && right.kind == ast.KindNumber {
@@ -395,26 +396,26 @@ func applyOp(left, right evalResult, op token.Kind) (evalResult, bool) {
 		case token.ShiftRight:
 			return evalResult{kind: numKind, num: float64(int64(left.num) >> int64(right.num))}, true
 		case token.Eq:
-			return evalResult{kind: ast.KindTrue, b: left.num == right.num}, true
+			return evalResult{kind: ast.KindTrue, boolVal: left.num == right.num}, true
 		case token.NotEq:
-			return evalResult{kind: ast.KindTrue, b: left.num != right.num}, true
+			return evalResult{kind: ast.KindTrue, boolVal: left.num != right.num}, true
 		case token.Less:
-			return evalResult{kind: ast.KindTrue, b: left.num < right.num}, true
+			return evalResult{kind: ast.KindTrue, boolVal: left.num < right.num}, true
 		case token.LessEq:
-			return evalResult{kind: ast.KindTrue, b: left.num <= right.num}, true
+			return evalResult{kind: ast.KindTrue, boolVal: left.num <= right.num}, true
 		case token.Greater:
-			return evalResult{kind: ast.KindTrue, b: left.num > right.num}, true
+			return evalResult{kind: ast.KindTrue, boolVal: left.num > right.num}, true
 		case token.GreaterEq:
-			return evalResult{kind: ast.KindTrue, b: left.num >= right.num}, true
+			return evalResult{kind: ast.KindTrue, boolVal: left.num >= right.num}, true
 		}
 	}
 
 	if left.kind == ast.KindString && right.kind == ast.KindString {
 		switch op {
 		case token.Eq:
-			return evalResult{kind: ast.KindTrue, b: left.str == right.str}, true
+			return evalResult{kind: ast.KindTrue, boolVal: left.str == right.str}, true
 		case token.NotEq:
-			return evalResult{kind: ast.KindTrue, b: left.str != right.str}, true
+			return evalResult{kind: ast.KindTrue, boolVal: left.str != right.str}, true
 		}
 	}
 

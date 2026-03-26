@@ -32,90 +32,90 @@ type TypeSet struct {
 }
 
 func ParseTypeString(tStr string) TypeSet {
-	var t TypeSet
+	var typeSet TypeSet
 
-	for p := range strings.SplitSeq(tStr, "|") {
-		p = strings.TrimSpace(p)
+	for part := range strings.SplitSeq(tStr, "|") {
+		part = strings.TrimSpace(part)
 
-		if strings.HasSuffix(p, "?") {
-			p = p[:len(p)-1]
+		if strings.HasSuffix(part, "?") {
+			part = part[:len(part)-1]
 
-			t.Basics |= TypeNil
+			typeSet.Basics |= TypeNil
 		}
 
-		switch p {
+		switch part {
 		case "number", "integer", "float":
-			t.Basics |= TypeNumber
+			typeSet.Basics |= TypeNumber
 		case "string":
-			t.Basics |= TypeString
+			typeSet.Basics |= TypeString
 		case "boolean", "bool":
-			t.Basics |= TypeBoolean
+			typeSet.Basics |= TypeBoolean
 		case "table":
-			t.Basics |= TypeTable
+			typeSet.Basics |= TypeTable
 		case "function", "fun":
-			t.Basics |= TypeFunction
+			typeSet.Basics |= TypeFunction
 		case "nil":
-			t.Basics |= TypeNil
+			typeSet.Basics |= TypeNil
 		case "any":
-			t.Basics |= TypeAny
+			typeSet.Basics |= TypeAny
 		case "userdata":
-			t.Basics |= TypeUserdata
+			typeSet.Basics |= TypeUserdata
 		case "thread":
-			t.Basics |= TypeThread
+			typeSet.Basics |= TypeThread
 		default:
-			if strings.HasPrefix(p, "fun(") {
-				t.Basics |= TypeFunction
-			} else if strings.HasPrefix(p, "{") {
-				t.Basics |= TypeTable
-			} else if p != "" {
-				t.CustomName = p
+			if strings.HasPrefix(part, "fun(") {
+				typeSet.Basics |= TypeFunction
+			} else if strings.HasPrefix(part, "{") {
+				typeSet.Basics |= TypeTable
+			} else if part != "" {
+				typeSet.CustomName = part
 			}
 		}
 	}
 
-	return t
+	return typeSet
 }
 
-func (t TypeSet) Format() string {
-	if t.Basics&TypeAny != 0 {
+func (typeSet TypeSet) Format() string {
+	if typeSet.Basics&TypeAny != 0 {
 		return "any"
 	}
 
 	var parts []string
 
-	if t.Basics&TypeNumber != 0 {
+	if typeSet.Basics&TypeNumber != 0 {
 		parts = append(parts, "number")
 	}
 
-	if t.Basics&TypeString != 0 {
+	if typeSet.Basics&TypeString != 0 {
 		parts = append(parts, "string")
 	}
 
-	if t.Basics&TypeBoolean != 0 {
+	if typeSet.Basics&TypeBoolean != 0 {
 		parts = append(parts, "boolean")
 	}
 
-	if t.Basics&TypeTable != 0 {
+	if typeSet.Basics&TypeTable != 0 {
 		parts = append(parts, "table")
 	}
 
-	if t.Basics&TypeFunction != 0 {
+	if typeSet.Basics&TypeFunction != 0 {
 		parts = append(parts, "function")
 	}
 
-	if t.Basics&TypeUserdata != 0 {
+	if typeSet.Basics&TypeUserdata != 0 {
 		parts = append(parts, "userdata")
 	}
 
-	if t.Basics&TypeThread != 0 {
+	if typeSet.Basics&TypeThread != 0 {
 		parts = append(parts, "thread")
 	}
 
-	if t.CustomName != "" {
-		parts = append(parts, t.CustomName)
+	if typeSet.CustomName != "" {
+		parts = append(parts, typeSet.CustomName)
 	}
 
-	if t.Basics&TypeNil != 0 {
+	if typeSet.Basics&TypeNil != 0 {
 		parts = append(parts, "nil")
 	}
 
@@ -148,97 +148,97 @@ func (doc *Document) InferType(id ast.NodeID) TypeSet {
 		doc.Inferring[id] = false
 	}()
 
-	var t TypeSet
+	var typeSet TypeSet
 
 	node := doc.Tree.Nodes[id]
 
 	switch node.Kind {
 	case ast.KindNumber:
-		t.Basics = TypeNumber
+		typeSet.Basics = TypeNumber
 	case ast.KindString:
-		t.Basics = TypeString
+		typeSet.Basics = TypeString
 	case ast.KindTrue, ast.KindFalse:
-		t.Basics = TypeBoolean
+		typeSet.Basics = TypeBoolean
 	case ast.KindNil:
-		t.Basics = TypeNil
+		typeSet.Basics = TypeNil
 	case ast.KindFunctionExpr, ast.KindLocalFunction, ast.KindFunctionStmt:
-		t.Basics = TypeFunction
-		t.DeclNode = id
-		t.DeclURI = doc.URI
+		typeSet.Basics = TypeFunction
+		typeSet.DeclNode = id
+		typeSet.DeclURI = doc.URI
 	case ast.KindTableExpr:
-		t.Basics = TypeTable
-		t.DeclNode = id
-		t.DeclURI = doc.URI
+		typeSet.Basics = TypeTable
+		typeSet.DeclNode = id
+		typeSet.DeclURI = doc.URI
 	case ast.KindBinaryExpr:
 		op := node.Extra
 
 		switch token.Kind(op) {
 		case token.Plus, token.Minus, token.Asterisk, token.Slash, token.FloorSlash, token.Modulo, token.Caret, token.BitAnd, token.BitOr, token.BitXor, token.ShiftLeft, token.ShiftRight:
-			tLeft := doc.InferType(node.Left)
-			tRight := doc.InferType(node.Right)
+			leftType := doc.InferType(node.Left)
+			rightType := doc.InferType(node.Right)
 
-			if tLeft.CustomName != "" {
-				t.CustomName = tLeft.CustomName
-				t.Basics = tLeft.Basics
-			} else if tRight.CustomName != "" {
-				t.CustomName = tRight.CustomName
-				t.Basics = tRight.Basics
+			if leftType.CustomName != "" {
+				typeSet.CustomName = leftType.CustomName
+				typeSet.Basics = leftType.Basics
+			} else if rightType.CustomName != "" {
+				typeSet.CustomName = rightType.CustomName
+				typeSet.Basics = rightType.Basics
 			} else {
-				if tLeft.Basics == TypeUnknown || tRight.Basics == TypeUnknown || tLeft.Basics&TypeAny != 0 || tRight.Basics&TypeAny != 0 {
-					t.Basics = TypeAny
+				if leftType.Basics == TypeUnknown || rightType.Basics == TypeUnknown || leftType.Basics&TypeAny != 0 || rightType.Basics&TypeAny != 0 {
+					typeSet.Basics = TypeAny
 				} else {
-					t.Basics = TypeNumber
+					typeSet.Basics = TypeNumber
 				}
 			}
 		case token.Concat:
-			t.Basics = TypeString
+			typeSet.Basics = TypeString
 		case token.Eq, token.NotEq, token.Less, token.LessEq, token.Greater, token.GreaterEq:
-			t.Basics = TypeBoolean
+			typeSet.Basics = TypeBoolean
 		case token.And, token.Or:
-			tLeft := doc.InferType(node.Left)
-			tRight := doc.InferType(node.Right)
+			leftType := doc.InferType(node.Left)
+			rightType := doc.InferType(node.Right)
 
-			t.Basics = tLeft.Basics | tRight.Basics
+			typeSet.Basics = leftType.Basics | rightType.Basics
 
-			if tLeft.Basics == TypeUnknown && tLeft.CustomName == "" {
-				t.Basics |= TypeAny
+			if leftType.Basics == TypeUnknown && leftType.CustomName == "" {
+				typeSet.Basics |= TypeAny
 			}
 
-			if tRight.Basics == TypeUnknown && tRight.CustomName == "" {
-				t.Basics |= TypeAny
+			if rightType.Basics == TypeUnknown && rightType.CustomName == "" {
+				typeSet.Basics |= TypeAny
 			}
 
-			if t.CustomName == "" {
-				t.CustomName = tLeft.CustomName
+			if typeSet.CustomName == "" {
+				typeSet.CustomName = leftType.CustomName
 			}
 
-			if t.CustomName == "" {
-				t.CustomName = tRight.CustomName
+			if typeSet.CustomName == "" {
+				typeSet.CustomName = rightType.CustomName
 			}
 		}
 	case ast.KindUnaryExpr:
 		src := doc.Source[node.Start:node.End]
 
 		if bytes.HasPrefix(src, []byte("not")) {
-			t.Basics = TypeBoolean
+			typeSet.Basics = TypeBoolean
 		} else if len(src) > 0 && src[0] == '#' {
-			t.Basics = TypeNumber
+			typeSet.Basics = TypeNumber
 		} else {
-			t.Basics = TypeNumber
+			typeSet.Basics = TypeNumber
 		}
 	case ast.KindParenExpr:
-		t = doc.InferType(node.Left)
+		typeSet = doc.InferType(node.Left)
 	case ast.KindIdent:
-		t = doc.inferIdent(id)
+		typeSet = doc.inferIdent(id)
 	case ast.KindMemberExpr:
-		t = doc.inferMemberExpr(node)
+		typeSet = doc.inferMemberExpr(node)
 	case ast.KindCallExpr, ast.KindMethodCall:
-		t = doc.inferCallExpr(node)
+		typeSet = doc.inferCallExpr(node)
 	}
 
-	doc.TypeCache[id] = t
+	doc.TypeCache[id] = typeSet
 
-	return t
+	return typeSet
 }
 
 func (doc *Document) inferIdent(id ast.NodeID) TypeSet {
@@ -276,15 +276,15 @@ func (doc *Document) inferIdent(id ast.NodeID) TypeSet {
 		if valID != ast.InvalidNode {
 			t = targetDoc.InferType(valID)
 		} else if targetDoc.Tree.Nodes[targetDef].Kind == ast.KindIdent {
-			pID := targetDoc.Tree.Nodes[targetDef].Parent
-			if pID != ast.InvalidNode {
-				pNode := targetDoc.Tree.Nodes[pID]
+			parentID := targetDoc.Tree.Nodes[targetDef].Parent
+			if parentID != ast.InvalidNode {
+				parentNode := targetDoc.Tree.Nodes[parentID]
 
-				switch pNode.Kind {
+				switch parentNode.Kind {
 				case ast.KindFunctionExpr:
-					t = targetDoc.inferFunctionParameter(targetDef, pID)
+					t = targetDoc.inferFunctionParameter(targetDef, parentID)
 				case ast.KindNameList:
-					t = targetDoc.inferLoopVariable(targetDef, pID, pNode)
+					t = targetDoc.inferLoopVariable(targetDef, parentID, parentNode)
 				}
 			}
 		}
@@ -337,20 +337,20 @@ func (doc *Document) inferIdent(id ast.NodeID) TypeSet {
 }
 
 func (doc *Document) inferFunctionParameter(defID, funcExprID ast.NodeID) TypeSet {
-	gpID := doc.Tree.Nodes[funcExprID].Parent
-	if gpID == ast.InvalidNode {
+	grandParentID := doc.Tree.Nodes[funcExprID].Parent
+	if grandParentID == ast.InvalidNode {
 		return TypeSet{}
 	}
 
-	gpNode := doc.Tree.Nodes[gpID]
+	grandParentNode := doc.Tree.Nodes[grandParentID]
 
 	var funcDefID ast.NodeID = ast.InvalidNode
 
-	switch gpNode.Kind {
+	switch grandParentNode.Kind {
 	case ast.KindLocalFunction, ast.KindFunctionStmt:
-		funcDefID = gpNode.Left
+		funcDefID = grandParentNode.Left
 	case ast.KindAssign, ast.KindLocalAssign, ast.KindRecordField:
-		funcDefID = gpID
+		funcDefID = grandParentID
 	}
 
 	if funcDefID == ast.InvalidNode {
@@ -370,31 +370,23 @@ func (doc *Document) inferFunctionParameter(defID, funcExprID ast.NodeID) TypeSe
 }
 
 func (doc *Document) inferLoopVariable(defID, nameListID ast.NodeID, nameList ast.Node) TypeSet {
-	gpID := doc.Tree.Nodes[nameListID].Parent
-	if gpID == ast.InvalidNode {
+	grandParentID := doc.Tree.Nodes[nameListID].Parent
+	if grandParentID == ast.InvalidNode {
 		return TypeSet{}
 	}
 
-	gpNode := doc.Tree.Nodes[gpID]
-	if gpNode.Kind != ast.KindForIn || gpNode.Extra == 0 {
+	grandParentNode := doc.Tree.Nodes[grandParentID]
+	if grandParentNode.Kind != ast.KindForIn || grandParentNode.Extra == 0 {
 		return TypeSet{}
 	}
 
-	idx := -1
-
-	for i := uint16(0); i < nameList.Count; i++ {
-		if doc.Tree.ExtraList[nameList.Extra+uint32(i)] == defID {
-			idx = int(i)
-
-			break
-		}
-	}
+	idx := doc.Tree.IndexOfExtra(nameListID, defID)
 
 	if idx == -1 {
 		return TypeSet{}
 	}
 
-	exprList := doc.Tree.Nodes[gpNode.Extra]
+	exprList := doc.Tree.Nodes[grandParentNode.Extra]
 	if exprList.Count == 0 {
 		return TypeSet{}
 	}

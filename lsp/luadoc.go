@@ -78,32 +78,32 @@ type LuaDoc struct {
 }
 
 // findTypeEnd safely scans past complex types with spaces like 'fun(a: string): number'
-func findTypeEnd(s []byte) int {
+func findTypeEnd(data []byte) int {
 	var depth int
 
-	for i := 0; i < len(s); i++ {
-		c := s[i]
+	for i := 0; i < len(data); i++ {
+		char := data[i]
 
-		if c == '(' || c == '<' || c == '{' || c == '[' {
+		if char == '(' || char == '<' || char == '{' || char == '[' {
 			depth++
-		} else if c == ')' || c == '>' || c == '}' || c == ']' {
+		} else if char == ')' || char == '>' || char == '}' || char == ']' {
 			depth--
-		} else if (c == ' ' || c == '\t') && depth <= 0 {
+		} else if (char == ' ' || char == '\t') && depth <= 0 {
 			var j int
 
-			for j = i - 1; j >= 0 && (s[j] == ' ' || s[j] == '\t'); j-- {
+			for j = i - 1; j >= 0 && (data[j] == ' ' || data[j] == '\t'); j-- {
 			}
 
-			if j >= 0 && (s[j] == ':' || s[j] == ',' || s[j] == '|') {
+			if j >= 0 && (data[j] == ':' || data[j] == ',' || data[j] == '|') {
 				continue // Type is still going (e.g., 'fun(): boolean' or 'string | number')
 			}
 
 			var k int
 
-			for k = i + 1; k < len(s) && (s[k] == ' ' || s[k] == '\t'); k++ {
+			for k = i + 1; k < len(data) && (data[k] == ' ' || data[k] == '\t'); k++ {
 			}
 
-			if k < len(s) && (s[k] == '|' || s[k] == ',') {
+			if k < len(data) && (data[k] == '|' || data[k] == ',') {
 				i = k - 1
 
 				continue
@@ -116,49 +116,49 @@ func findTypeEnd(s []byte) int {
 	return -1
 }
 
-func extractTypeDesc(s []byte) (typ, desc []byte) {
-	s = bytes.TrimSpace(s)
+func extractTypeDesc(data []byte) (typeBytes, descBytes []byte) {
+	data = bytes.TrimSpace(data)
 
-	idx := findTypeEnd(s)
+	idx := findTypeEnd(data)
 	if idx == -1 {
-		return s, nil
+		return data, nil
 	}
 
-	return s[:idx], bytes.TrimSpace(s[idx:])
+	return data[:idx], bytes.TrimSpace(data[idx:])
 }
 
-func extractNameParent(s []byte) (name, parent, desc []byte) {
-	s = bytes.TrimSpace(s)
+func extractNameParent(data []byte) (name, parent, descBytes []byte) {
+	data = bytes.TrimSpace(data)
 
 	var nameEnd int
 
-	for nameEnd < len(s) && s[nameEnd] != ' ' && s[nameEnd] != '\t' && s[nameEnd] != ':' {
+	for nameEnd < len(data) && data[nameEnd] != ' ' && data[nameEnd] != '\t' && data[nameEnd] != ':' {
 		nameEnd++
 	}
 
 	if nameEnd == 0 {
-		return nil, nil, s
+		return nil, nil, data
 	}
 
-	name = s[:nameEnd]
-	s = bytes.TrimSpace(s[nameEnd:])
+	name = data[:nameEnd]
+	data = bytes.TrimSpace(data[nameEnd:])
 
-	if bytes.HasPrefix(s, []byte(":")) {
-		s = bytes.TrimSpace(s[1:])
+	if bytes.HasPrefix(data, []byte(":")) {
+		data = bytes.TrimSpace(data[1:])
 
 		var parentEnd int
 
-		for parentEnd < len(s) && s[parentEnd] != ' ' && s[parentEnd] != '\t' {
+		for parentEnd < len(data) && data[parentEnd] != ' ' && data[parentEnd] != '\t' {
 			parentEnd++
 		}
 
-		parent = s[:parentEnd]
-		desc = bytes.TrimSpace(s[parentEnd:])
+		parent = data[:parentEnd]
+		descBytes = bytes.TrimSpace(data[parentEnd:])
 	} else {
-		desc = s
+		descBytes = data
 	}
 
-	return name, parent, desc
+	return name, parent, descBytes
 }
 
 func parseLuaDoc(comments []byte) LuaDoc {
@@ -192,18 +192,18 @@ func parseLuaDoc(comments []byte) LuaDoc {
 				name := rest[:spaceIdx]
 				rest = bytes.TrimSpace(rest[spaceIdx:])
 
-				typ, desc := extractTypeDesc(rest)
-				desc = bytes.TrimPrefix(desc, dashPrefix)
+				typeBytes, descBytes := extractTypeDesc(rest)
+				descBytes = bytes.TrimPrefix(descBytes, dashPrefix)
 
 				nameStr := string(name)
-				typStr := string(typ)
+				typStr := string(typeBytes)
 
 				if bytes.HasSuffix(name, qSuffix) {
 					nameStr = nameStr[:len(nameStr)-1]
 					typStr += "?"
 				}
 
-				doc.Params = append(doc.Params, LuaDocParam{Name: nameStr, Type: typStr, Desc: string(desc)})
+				doc.Params = append(doc.Params, LuaDocParam{Name: nameStr, Type: typStr, Desc: string(descBytes)})
 			} else {
 				nameStr := string(rest)
 
@@ -216,12 +216,12 @@ func parseLuaDoc(comments []byte) LuaDoc {
 		} else if after, ok := bytes.CutPrefix(line, tagReturn); ok {
 			activeTag = "return"
 
-			typ, desc := extractTypeDesc(bytes.TrimSpace(after))
+			typeBytes, descBytes := extractTypeDesc(bytes.TrimSpace(after))
 
-			desc = bytes.TrimPrefix(desc, dashPrefix)
-			desc = bytes.TrimPrefix(desc, hashPrefix)
+			descBytes = bytes.TrimPrefix(descBytes, dashPrefix)
+			descBytes = bytes.TrimPrefix(descBytes, hashPrefix)
 
-			doc.Returns = append(doc.Returns, LuaDocReturn{Type: string(typ), Desc: string(desc)})
+			doc.Returns = append(doc.Returns, LuaDocReturn{Type: string(typeBytes), Desc: string(descBytes)})
 		} else if after, ok := bytes.CutPrefix(line, tagField); ok {
 			activeTag = "field"
 
@@ -240,18 +240,18 @@ func parseLuaDoc(comments []byte) LuaDoc {
 				name := rest[:spaceIdx]
 				rest = bytes.TrimSpace(rest[spaceIdx:])
 
-				typ, desc := extractTypeDesc(rest)
-				desc = bytes.TrimPrefix(desc, dashPrefix)
+				typeBytes, descBytes := extractTypeDesc(rest)
+				descBytes = bytes.TrimPrefix(descBytes, dashPrefix)
 
 				nameStr := string(name)
-				typStr := string(typ)
+				typStr := string(typeBytes)
 
 				if bytes.HasSuffix(name, qSuffix) {
 					nameStr = nameStr[:len(nameStr)-1]
 					typStr = "?" + typStr
 				}
 
-				doc.Fields = append(doc.Fields, LuaDocField{Name: nameStr, Type: typStr, Desc: string(desc)})
+				doc.Fields = append(doc.Fields, LuaDocField{Name: nameStr, Type: typStr, Desc: string(descBytes)})
 			} else {
 				nameStr := string(rest)
 
@@ -276,9 +276,9 @@ func parseLuaDoc(comments []byte) LuaDoc {
 		} else if after, ok := bytes.CutPrefix(line, tagType); ok {
 			activeTag = ""
 
-			typ, desc := extractTypeDesc(bytes.TrimSpace(after))
+			typeBytes, descBytes := extractTypeDesc(bytes.TrimSpace(after))
 
-			doc.Type = &LuaDocType{Type: string(typ), Desc: string(desc)}
+			doc.Type = &LuaDocType{Type: string(typeBytes), Desc: string(descBytes)}
 		} else if after, ok := bytes.CutPrefix(line, tagAlias); ok {
 			activeTag = ""
 
@@ -289,9 +289,9 @@ func parseLuaDoc(comments []byte) LuaDoc {
 				name := rest[:spaceIdx]
 				rest = bytes.TrimSpace(rest[spaceIdx:])
 
-				typ, desc := extractTypeDesc(rest)
+				typeBytes, descBytes := extractTypeDesc(rest)
 
-				doc.Alias = &LuaDocAlias{Name: string(name), Type: string(typ), Desc: string(desc)}
+				doc.Alias = &LuaDocAlias{Name: string(name), Type: string(typeBytes), Desc: string(descBytes)}
 			} else {
 				doc.Alias = &LuaDocAlias{Name: string(rest)}
 			}

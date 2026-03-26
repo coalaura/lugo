@@ -1425,10 +1425,10 @@ func (s *Server) handleSemanticTokensFull(req Request) {
 							tokenType = 5 // class
 						}
 					} else {
-						pID := targetDoc.Tree.Nodes[targetDef].Parent
-						if pID != ast.InvalidNode {
-							pNode := targetDoc.Tree.Nodes[pID]
-							if pNode.Kind == ast.KindFunctionStmt || pNode.Kind == ast.KindLocalFunction {
+						parentID := targetDoc.Tree.Nodes[targetDef].Parent
+						if parentID != ast.InvalidNode {
+							parentNode := targetDoc.Tree.Nodes[parentID]
+							if parentNode.Kind == ast.KindFunctionStmt || parentNode.Kind == ast.KindLocalFunction {
 								if tokenType == 1 {
 									tokenType = 4 // method
 								} else {

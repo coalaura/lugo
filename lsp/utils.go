@@ -34,55 +34,55 @@ func mapsEqualStringBool(a, b map[string]bool) bool {
 }
 
 // Fast, zero-allocation Levenshtein distance for strings up to 63 bytes.
-func levenshteinFast(s, t string, maxDist int) int {
-	if len(s) > len(t) {
-		s, t = t, s
+func levenshteinFast(str1, str2 string, maxDist int) int {
+	if len(str1) > len(str2) {
+		str1, str2 = str2, str1
 	}
 
-	ls := len(s)
-	lt := len(t)
+	len1 := len(str1)
+	len2 := len(str2)
 
-	if ls == 0 {
-		return lt
+	if len1 == 0 {
+		return len2
 	}
 
-	if lt-ls > maxDist || lt > 63 {
+	if len2-len1 > maxDist || len2 > 63 {
 		return maxDist + 1
 	}
 
 	var (
-		v0 [64]int
-		v1 [64]int
+		row0 [64]int
+		row1 [64]int
 	)
 
-	p0, p1 := &v0, &v1
+	prevRow, currRow := &row0, &row1
 
-	for i := 0; i <= ls; i++ {
-		p0[i] = i
+	for i := 0; i <= len1; i++ {
+		prevRow[i] = i
 	}
 
-	for i := range lt {
-		p1[0] = i + 1
+	for i := range len2 {
+		currRow[0] = i + 1
 
-		minDistForRow := p1[0]
+		minDistForRow := currRow[0]
 
-		for j := range ls {
+		for j := range len1 {
 			cost := 1
 
-			if t[i] == s[j] {
+			if str2[i] == str1[j] {
 				cost = 0
 			}
 
-			a := p1[j] + 1
-			b := p0[j+1] + 1
-			c := p0[j] + cost
+			delCost := currRow[j] + 1
+			insCost := prevRow[j+1] + 1
+			subCost := prevRow[j] + cost
 
-			m := min(c, min(b, a))
+			minCost := min(subCost, min(insCost, delCost))
 
-			p1[j+1] = m
+			currRow[j+1] = minCost
 
-			if m < minDistForRow {
-				minDistForRow = m
+			if minCost < minDistForRow {
+				minDistForRow = minCost
 			}
 		}
 
@@ -90,35 +90,35 @@ func levenshteinFast(s, t string, maxDist int) int {
 			return maxDist + 1
 		}
 
-		p0, p1 = p1, p0
+		prevRow, currRow = currRow, prevRow
 	}
 
-	return p0[ls]
+	return prevRow[len1]
 }
 
-func containsFold(b, queryLower []byte) bool {
+func containsFold(text, queryLower []byte) bool {
 	if len(queryLower) == 0 {
 		return true
 	}
 
-	if len(b) < len(queryLower) {
+	if len(text) < len(queryLower) {
 		return false
 	}
 
-	for i := 0; i <= len(b)-len(queryLower); i++ {
+	for i := 0; i <= len(text)-len(queryLower); i++ {
 		match := true
 
 		for j := range queryLower {
-			cb := b[i+j]
+			charText := text[i+j]
 
-			if cb >= 'A' && cb <= 'Z' {
-				cb += 32 // fast to-lower
+			if charText >= 'A' && charText <= 'Z' {
+				charText += 32 // fast to-lower
 			}
 
-			qb := queryLower[j]
+			charQuery := queryLower[j]
 
-			if cb != qb {
-				if (cb == '.' && qb == ':') || (cb == ':' && qb == '.') {
+			if charText != charQuery {
+				if (charText == '.' && charQuery == ':') || (charText == ':' && charQuery == '.') {
 					continue
 				}
 
@@ -136,19 +136,19 @@ func containsFold(b, queryLower []byte) bool {
 	return false
 }
 
-func hasPrefixFold(b, prefix []byte) bool {
-	if len(b) < len(prefix) {
+func hasPrefixFold(text, prefix []byte) bool {
+	if len(text) < len(prefix) {
 		return false
 	}
 
-	for i, pb := range prefix {
-		cb := b[i]
+	for i, charPrefix := range prefix {
+		charText := text[i]
 
-		if cb >= 'A' && cb <= 'Z' {
-			cb += 32 // fast to-lower
+		if charText >= 'A' && charText <= 'Z' {
+			charText += 32 // fast to-lower
 		}
 
-		if cb != pb {
+		if charText != charPrefix {
 			return false
 		}
 	}
@@ -289,26 +289,26 @@ func matchGlob(pattern, path string) bool {
 				return false
 			}
 
-			c1 := pattern[p]
-			c2 := path[t]
+			charPattern := pattern[p]
+			charPath := path[t]
 
-			if c1 >= 'A' && c1 <= 'Z' {
-				c1 += 32
+			if charPattern >= 'A' && charPattern <= 'Z' {
+				charPattern += 32
 			}
 
-			if c2 >= 'A' && c2 <= 'Z' {
-				c2 += 32
+			if charPath >= 'A' && charPath <= 'Z' {
+				charPath += 32
 			}
 
-			if c1 == '\\' {
-				c1 = '/'
+			if charPattern == '\\' {
+				charPattern = '/'
 			}
 
-			if c2 == '\\' {
-				c2 = '/'
+			if charPath == '\\' {
+				charPath = '/'
 			}
 
-			if c1 != c2 {
+			if charPattern != charPath {
 				return false
 			}
 
@@ -407,48 +407,73 @@ func isRootLevel(tree *ast.Tree, id ast.NodeID) bool {
 	return false
 }
 
+func isLoopVariable(tree *ast.Tree, defID ast.NodeID) bool {
+	if defID == ast.InvalidNode || int(defID) >= len(tree.Nodes) {
+		return false
+	}
+
+	parentID := tree.Nodes[defID].Parent
+	if parentID == ast.InvalidNode || int(parentID) >= len(tree.Nodes) {
+		return false
+	}
+
+	parentNode := tree.Nodes[parentID]
+	if parentNode.Kind == ast.KindForNum && parentNode.Left == defID {
+		return true
+	} else if parentNode.Kind == ast.KindNameList {
+		grandParentID := parentNode.Parent
+		if grandParentID != ast.InvalidNode && int(grandParentID) < len(tree.Nodes) {
+			if tree.Nodes[grandParentID].Kind == ast.KindForIn {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 func isWriteAccess(tree *ast.Tree, nodeID ast.NodeID) bool {
 	if nodeID == ast.InvalidNode || int(nodeID) >= len(tree.Nodes) {
 		return false
 	}
 
-	pID := tree.Nodes[nodeID].Parent
-	if pID == ast.InvalidNode || int(pID) >= len(tree.Nodes) {
+	parentID := tree.Nodes[nodeID].Parent
+	if parentID == ast.InvalidNode || int(parentID) >= len(tree.Nodes) {
 		return false
 	}
 
-	pNode := tree.Nodes[pID]
+	parentNode := tree.Nodes[parentID]
 
-	switch pNode.Kind {
+	switch parentNode.Kind {
 	case ast.KindNameList:
-		gpID := pNode.Parent
-		if gpID != ast.InvalidNode && int(gpID) < len(tree.Nodes) {
-			gpNode := tree.Nodes[gpID]
+		grandParentID := parentNode.Parent
+		if grandParentID != ast.InvalidNode && int(grandParentID) < len(tree.Nodes) {
+			grandParentNode := tree.Nodes[grandParentID]
 
-			return gpNode.Kind == ast.KindLocalAssign || gpNode.Kind == ast.KindForIn
+			return grandParentNode.Kind == ast.KindLocalAssign || grandParentNode.Kind == ast.KindForIn
 		}
 	case ast.KindExprList:
-		gpID := pNode.Parent
-		if gpID != ast.InvalidNode && int(gpID) < len(tree.Nodes) {
-			gpNode := tree.Nodes[gpID]
+		grandParentID := parentNode.Parent
+		if grandParentID != ast.InvalidNode && int(grandParentID) < len(tree.Nodes) {
+			grandParentNode := tree.Nodes[grandParentID]
 
-			return gpNode.Kind == ast.KindAssign && gpNode.Left == pID
+			return grandParentNode.Kind == ast.KindAssign && grandParentNode.Left == parentID
 		}
 	case ast.KindForNum, ast.KindLocalFunction, ast.KindFunctionStmt, ast.KindRecordField:
-		return pNode.Left == nodeID
+		return parentNode.Left == nodeID
 	case ast.KindMethodName:
-		return pNode.Right == nodeID
+		return parentNode.Right == nodeID
 	case ast.KindMemberExpr:
-		if pNode.Right == nodeID {
-			gpID := pNode.Parent
-			if gpID != ast.InvalidNode && int(gpID) < len(tree.Nodes) {
-				gpNode := tree.Nodes[gpID]
-				if gpNode.Kind == ast.KindExprList {
-					ggpID := gpNode.Parent
-					if ggpID != ast.InvalidNode && int(ggpID) < len(tree.Nodes) {
-						ggpNode := tree.Nodes[ggpID]
+		if parentNode.Right == nodeID {
+			grandParentID := parentNode.Parent
+			if grandParentID != ast.InvalidNode && int(grandParentID) < len(tree.Nodes) {
+				grandParentNode := tree.Nodes[grandParentID]
+				if grandParentNode.Kind == ast.KindExprList {
+					greatGrandParentID := grandParentNode.Parent
+					if greatGrandParentID != ast.InvalidNode && int(greatGrandParentID) < len(tree.Nodes) {
+						greatGrandParentNode := tree.Nodes[greatGrandParentID]
 
-						return ggpNode.Kind == ast.KindAssign && ggpNode.Left == gpID
+						return greatGrandParentNode.Kind == ast.KindAssign && greatGrandParentNode.Left == grandParentID
 					}
 				}
 			}
@@ -463,17 +488,17 @@ func isLHSOfAssignment(doc *Document, nodeID ast.NodeID) bool {
 		return false
 	}
 
-	pID := doc.Tree.Nodes[nodeID].Parent
-	if pID == ast.InvalidNode || int(pID) >= len(doc.Tree.Nodes) {
+	parentID := doc.Tree.Nodes[nodeID].Parent
+	if parentID == ast.InvalidNode || int(parentID) >= len(doc.Tree.Nodes) {
 		return false
 	}
 
-	pNode := doc.Tree.Nodes[pID]
-	if pNode.Kind == ast.KindExprList {
-		gpID := pNode.Parent
-		if gpID != ast.InvalidNode && int(gpID) < len(doc.Tree.Nodes) {
-			gpNode := doc.Tree.Nodes[gpID]
-			if (gpNode.Kind == ast.KindAssign || gpNode.Kind == ast.KindLocalAssign) && gpNode.Left == pID {
+	parentNode := doc.Tree.Nodes[parentID]
+	if parentNode.Kind == ast.KindExprList {
+		grandParentID := parentNode.Parent
+		if grandParentID != ast.InvalidNode && int(grandParentID) < len(doc.Tree.Nodes) {
+			grandParentNode := doc.Tree.Nodes[grandParentID]
+			if (grandParentNode.Kind == ast.KindAssign || grandParentNode.Kind == ast.KindLocalAssign) && grandParentNode.Left == parentID {
 				return true
 			}
 		}

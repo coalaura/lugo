@@ -603,18 +603,18 @@ func (f *Formatter) getStmtKind(tokens []token.Token, startIndex int) StmtKind {
 		depth := 0
 	Loop:
 		for j := startIndex; j < len(tokens); j++ {
-			t := tokens[j].Kind
+			tokenKind := tokens[j].Kind
 
-			if t == token.LParen || t == token.LBrace || t == token.LBrack {
+			if tokenKind == token.LParen || tokenKind == token.LBrace || tokenKind == token.LBrack {
 				depth++
-			} else if t == token.RParen || t == token.RBrace || t == token.RBrack {
+			} else if tokenKind == token.RParen || tokenKind == token.RBrace || tokenKind == token.RBrack {
 				depth--
 			} else if depth == 0 {
-				if t == token.Assign || t == token.Comma {
+				if tokenKind == token.Assign || tokenKind == token.Comma {
 					return StmtAssign
 				}
 
-				switch t {
+				switch tokenKind {
 				case token.Do, token.Then, token.Else, token.ElseIf, token.End, token.Until, token.Semicolon, token.If, token.For, token.While, token.Repeat, token.Break, token.Goto, token.DoubleColon, token.Local, token.Return, token.Function:
 					break Loop
 				}
@@ -622,7 +622,7 @@ func (f *Formatter) getStmtKind(tokens []token.Token, startIndex int) StmtKind {
 				if j > startIndex {
 					prev := tokens[j-1].Kind
 
-					if f.isExprEnd(prev) && t == token.Ident {
+					if f.isExprEnd(prev) && tokenKind == token.Ident {
 						break Loop
 					}
 				}

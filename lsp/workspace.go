@@ -777,11 +777,11 @@ func (s *Server) updateDocument(uri string, source []byte) {
 			valID := doc.getAssignedValue(pf.ReceiverDef)
 			reqModName = s.getRequireModName(doc, valID)
 		} else {
-			pID := doc.Tree.Nodes[pf.PropNodeID].Parent
-			if pID != ast.InvalidNode && int(pID) < len(doc.Tree.Nodes) {
-				pNode := doc.Tree.Nodes[pID]
-				if pNode.Kind == ast.KindMemberExpr || pNode.Kind == ast.KindMethodCall {
-					reqModName = s.getRequireModName(doc, pNode.Left)
+			parentID := doc.Tree.Nodes[pf.PropNodeID].Parent
+			if parentID != ast.InvalidNode && int(parentID) < len(doc.Tree.Nodes) {
+				parentNode := doc.Tree.Nodes[parentID]
+				if parentNode.Kind == ast.KindMemberExpr || parentNode.Kind == ast.KindMethodCall {
+					reqModName = s.getRequireModName(doc, parentNode.Left)
 				}
 			}
 		}

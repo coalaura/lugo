@@ -245,6 +245,23 @@ func (t *Tree) NodeAt(offset uint32) NodeID {
 	}
 }
 
+// IndexOfExtra finds the index of targetID within the ExtraList of listNodeID.
+func (t *Tree) IndexOfExtra(listNodeID, targetID NodeID) int {
+	if listNodeID == InvalidNode || int(listNodeID) >= len(t.Nodes) {
+		return -1
+	}
+
+	node := t.Nodes[listNodeID]
+
+	for i := uint16(0); i < node.Count; i++ {
+		if t.ExtraList[node.Extra+uint32(i)] == targetID {
+			return int(i)
+		}
+	}
+
+	return -1
+}
+
 // AddNode pushes a node to the flat array and returns its ID.
 func (t *Tree) AddNode(n Node) NodeID {
 	id := NodeID(len(t.Nodes))

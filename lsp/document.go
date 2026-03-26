@@ -66,24 +66,15 @@ func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {
 
 			return ast.InvalidNode
 		case ast.KindNameList:
-			gpID := doc.Tree.Nodes[parentID].Parent
-			if gpID != ast.InvalidNode {
-				gp := doc.Tree.Nodes[gpID]
-				if gp.Kind == ast.KindLocalAssign && gp.Right != ast.InvalidNode {
-					idx := -1
-
-					for i := uint16(0); i < parent.Count; i++ {
-						if doc.Tree.ExtraList[parent.Extra+uint32(i)] == curr {
-							idx = int(i)
-
-							break
-						}
-					}
-
+			grandParentID := doc.Tree.Nodes[parentID].Parent
+			if grandParentID != ast.InvalidNode {
+				grandParentNode := doc.Tree.Nodes[grandParentID]
+				if grandParentNode.Kind == ast.KindLocalAssign && grandParentNode.Right != ast.InvalidNode {
+					idx := doc.Tree.IndexOfExtra(parentID, curr)
 					if idx != -1 {
-						rhs := doc.Tree.Nodes[gp.Right]
-						if uint16(idx) < rhs.Count {
-							return doc.Tree.ExtraList[rhs.Extra+uint32(idx)]
+						rhsNode := doc.Tree.Nodes[grandParentNode.Right]
+						if uint16(idx) < rhsNode.Count {
+							return doc.Tree.ExtraList[rhsNode.Extra+uint32(idx)]
 						}
 					}
 				}
@@ -91,24 +82,15 @@ func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {
 
 			return ast.InvalidNode
 		case ast.KindExprList:
-			gpID := doc.Tree.Nodes[parentID].Parent
-			if gpID != ast.InvalidNode {
-				gp := doc.Tree.Nodes[gpID]
-				if gp.Kind == ast.KindAssign && gp.Left == parentID && gp.Right != ast.InvalidNode {
-					idx := -1
-
-					for i := uint16(0); i < parent.Count; i++ {
-						if doc.Tree.ExtraList[parent.Extra+uint32(i)] == curr {
-							idx = int(i)
-
-							break
-						}
-					}
-
+			grandParentID := doc.Tree.Nodes[parentID].Parent
+			if grandParentID != ast.InvalidNode {
+				grandParentNode := doc.Tree.Nodes[grandParentID]
+				if grandParentNode.Kind == ast.KindAssign && grandParentNode.Left == parentID && grandParentNode.Right != ast.InvalidNode {
+					idx := doc.Tree.IndexOfExtra(parentID, curr)
 					if idx != -1 {
-						rhs := doc.Tree.Nodes[gp.Right]
-						if uint16(idx) < rhs.Count {
-							return doc.Tree.ExtraList[rhs.Extra+uint32(idx)]
+						rhsNode := doc.Tree.Nodes[grandParentNode.Right]
+						if uint16(idx) < rhsNode.Count {
+							return doc.Tree.ExtraList[rhsNode.Extra+uint32(idx)]
 						}
 					}
 				}

@@ -1557,10 +1557,10 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 					}
 
 					for _, defID := range coverage {
-						ds := deadStores[defID]
+						storeInfo := deadStores[defID]
 
-						ds.Edits = append(ds.Edits, edit)
-						ds.Coverage = append(ds.Coverage, nodeID)
+						storeInfo.Edits = append(storeInfo.Edits, edit)
+						storeInfo.Coverage = append(storeInfo.Coverage, nodeID)
 					}
 				} else if node.Right != ast.InvalidNode {
 					exprList := doc.Tree.Nodes[node.Right]
@@ -1578,10 +1578,10 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 							}
 
 							for _, defID := range coverage {
-								ds := deadStores[defID]
+								storeInfo := deadStores[defID]
 
-								ds.Edits = append(ds.Edits, edit)
-								ds.Coverage = append(ds.Coverage, nodeID)
+								storeInfo.Edits = append(storeInfo.Edits, edit)
+								storeInfo.Coverage = append(storeInfo.Coverage, nodeID)
 							}
 						} else {
 							for _, defID := range coverage {
@@ -1639,10 +1639,10 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 										NewText: "",
 									}
 
-									ds := deadStores[defID]
+									storeInfo := deadStores[defID]
 
-									ds.Edits = append(ds.Edits, edit)
-									ds.Coverage = append(ds.Coverage, nodeID)
+									storeInfo.Edits = append(storeInfo.Edits, edit)
+									storeInfo.Coverage = append(storeInfo.Coverage, nodeID)
 								} else {
 									deadStores[defID].CanRemoveAll = false
 								}
@@ -2021,7 +2021,7 @@ func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.N
 
 			unused[id] = false
 
-			if ds := deadStores[id]; ds != nil && !ds.CanRemoveAll {
+			if storeInfo := deadStores[id]; storeInfo != nil && !storeInfo.CanRemoveAll {
 				canCleanlyRemove = false
 			}
 		}
@@ -2040,9 +2040,9 @@ func (s *Server) processListForFixes(doc *Document, nameListID, exprListID ast.N
 		)
 
 		for _, id := range coverage {
-			if ds := deadStores[id]; ds != nil {
-				extraEdits = append(extraEdits, ds.Edits...)
-				extraCoverage = append(extraCoverage, ds.Coverage...)
+			if storeInfo := deadStores[id]; storeInfo != nil {
+				extraEdits = append(extraEdits, storeInfo.Edits...)
+				extraCoverage = append(extraCoverage, storeInfo.Coverage...)
 			}
 		}
 
@@ -2299,32 +2299,29 @@ func (s *Server) checkSafetyAndBudget(doc *Document, targetIf ast.NodeID, budget
 	isImmediateBlock := true
 
 	for curr != ast.InvalidNode {
-		pID := doc.Tree.Nodes[curr].Parent
-		if pID == ast.InvalidNode {
+		parentID := doc.Tree.Nodes[curr].Parent
+		if parentID == ast.InvalidNode {
 			break
 		}
 
-		pNode := doc.Tree.Nodes[pID]
+		parentNode := doc.Tree.Nodes[parentID]
 
-		if pNode.Kind == ast.KindBlock || pNode.Kind == ast.KindFile || pNode.Kind == ast.KindRepeat {
-			idx := -1
-			for i := uint16(0); i < pNode.Count; i++ {
-				if doc.Tree.ExtraList[pNode.Extra+uint32(i)] == curr {
-					idx = int(i)
-					break
-				}
-			}
+		switch parentNode.Kind {
+		case ast.KindBlock, ast.KindFile, ast.KindRepeat:
+			idx := doc.Tree.IndexOfExtra(parentID, curr)
 
 			if idx != -1 {
-				elementsAfter := int(pNode.Count) - 1 - idx
+				elementsAfter := int(parentNode.Count) - 1 - idx
 
 				if isImmediateBlock {
 					if elementsAfter > budget {
 						return nil, false
 					}
-					for i := idx + 1; i < int(pNode.Count); i++ {
-						trailing = append(trailing, doc.Tree.ExtraList[pNode.Extra+uint32(i)])
+
+					for i := idx + 1; i < int(parentNode.Count); i++ {
+						trailing = append(trailing, doc.Tree.ExtraList[parentNode.Extra+uint32(i)])
 					}
+
 					isImmediateBlock = false
 				} else {
 					// If ANY outer block has trailing statements, we cannot early return,
@@ -2334,15 +2331,15 @@ func (s *Server) checkSafetyAndBudget(doc *Document, targetIf ast.NodeID, budget
 					}
 				}
 			}
-		} else if pNode.Kind == ast.KindIf || pNode.Kind == ast.KindElseIf || pNode.Kind == ast.KindElse || pNode.Kind == ast.KindDo {
+		case ast.KindIf, ast.KindElseIf, ast.KindElse, ast.KindDo:
 			// Transparent structural blocks
-		} else if pNode.Kind == ast.KindFunctionExpr || pNode.Kind == ast.KindFunctionStmt || pNode.Kind == ast.KindLocalFunction {
+		case ast.KindFunctionExpr, ast.KindFunctionStmt, ast.KindLocalFunction:
 			return trailing, true // Safe function boundary
-		} else if pNode.Kind == ast.KindWhile || pNode.Kind == ast.KindForIn || pNode.Kind == ast.KindForNum {
+		case ast.KindWhile, ast.KindForIn, ast.KindForNum:
 			return nil, false // Exiting a loop is a break, not a return. Unsafe.
 		}
 
-		curr = pID
+		curr = parentID
 	}
 
 	return trailing, true
@@ -2694,9 +2691,9 @@ func (s *Server) invertCondition(doc *Document, condID ast.NodeID) string {
 func (s *Server) expandRemovalRange(doc *Document, start, end uint32) Range {
 	// Consume leading spaces/tabs on the same line
 	for start > 0 {
-		c := doc.Source[start-1]
+		char := doc.Source[start-1]
 
-		if c == ' ' || c == '\t' {
+		if char == ' ' || char == '\t' {
 			start--
 		} else {
 			break
@@ -2705,11 +2702,11 @@ func (s *Server) expandRemovalRange(doc *Document, start, end uint32) Range {
 
 	// Consume optional trailing semicolon
 	for end < uint32(len(doc.Source)) {
-		c := doc.Source[end]
+		char := doc.Source[end]
 
-		if c == ' ' || c == '\t' {
+		if char == ' ' || char == '\t' {
 			end++
-		} else if c == ';' {
+		} else if char == ';' {
 			end++
 
 			break
@@ -2722,11 +2719,11 @@ func (s *Server) expandRemovalRange(doc *Document, start, end uint32) Range {
 	var hadNewline bool
 
 	for end < uint32(len(doc.Source)) {
-		c := doc.Source[end]
+		char := doc.Source[end]
 
-		if c == ' ' || c == '\t' || c == '\r' {
+		if char == ' ' || char == '\t' || char == '\r' {
 			end++
-		} else if c == '\n' {
+		} else if char == '\n' {
 			end++
 
 			hadNewline = true
@@ -2749,11 +2746,11 @@ func (s *Server) expandRemovalRange(doc *Document, start, end uint32) Range {
 			isEmpty := true
 
 			for i > 0 {
-				c := doc.Source[i-1]
+				char := doc.Source[i-1]
 
-				if c == ' ' || c == '\t' {
+				if char == ' ' || char == '\t' {
 					i--
-				} else if c == '\n' {
+				} else if char == '\n' {
 					break
 				} else {
 					isEmpty = false
@@ -2770,11 +2767,11 @@ func (s *Server) expandRemovalRange(doc *Document, start, end uint32) Range {
 			tempEnd := end
 
 			for tempEnd < uint32(len(doc.Source)) {
-				c := doc.Source[tempEnd]
+				char := doc.Source[tempEnd]
 
-				if c == ' ' || c == '\t' || c == '\r' {
+				if char == ' ' || char == '\t' || char == '\r' {
 					tempEnd++
-				} else if c == '\n' {
+				} else if char == '\n' {
 					tempEnd++
 
 					end = tempEnd
@@ -2945,13 +2942,13 @@ func (s *Server) generateSafeName(doc *Document, defID ast.NodeID, baseName stri
 	}
 
 	for i := 0; i < len(coreName); i++ {
-		c := coreName[i]
+		char := coreName[i]
 
-		if c == '_' {
+		if char == '_' {
 			hasUnderscore = true
-		} else if c >= 'a' && c <= 'z' {
+		} else if char >= 'a' && char <= 'z' {
 			hasLower = true
-		} else if c >= 'A' && c <= 'Z' {
+		} else if char >= 'A' && char <= 'Z' {
 			hasUpper = true
 		}
 	}
@@ -2994,10 +2991,10 @@ func (s *Server) generateSafeName(doc *Document, defID ast.NodeID, baseName stri
 		} else {
 			buf = append(buf, modLower...)
 			if len(coreName) > 0 {
-				c := coreName[0]
+				char := coreName[0]
 
-				if c >= 'a' && c <= 'z' {
-					buf = append(buf, c-32)
+				if char >= 'a' && char <= 'z' {
+					buf = append(buf, char-32)
 					buf = append(buf, coreName[1:]...)
 				} else {
 					buf = append(buf, '_')
@@ -3009,9 +3006,9 @@ func (s *Server) generateSafeName(doc *Document, defID ast.NodeID, baseName stri
 		return check()
 	}
 
-	pID := doc.Tree.Nodes[defID].Parent
-	if pID != ast.InvalidNode && int(pID) < len(doc.Tree.Nodes) {
-		if doc.Tree.Nodes[pID].Kind == ast.KindFunctionExpr {
+	parentID := doc.Tree.Nodes[defID].Parent
+	if parentID != ast.InvalidNode && int(parentID) < len(doc.Tree.Nodes) {
+		if doc.Tree.Nodes[parentID].Kind == ast.KindFunctionExpr {
 			if prefix != "p" {
 				if res := buildCandidate("p", "P", "P"); res != "" {
 					return res
@@ -3078,8 +3075,8 @@ func (s *Server) isValidIdentifier(name string) bool {
 	}
 
 	for i := 1; i < len(name); i++ {
-		c := name[i]
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+		char := name[i]
+		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_') {
 			return false
 		}
 	}
