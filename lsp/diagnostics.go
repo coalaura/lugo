@@ -597,387 +597,474 @@ func (s *Server) publishDiagnostics(uri string) {
 		nodeID := ast.NodeID(i)
 		node := doc.Tree.Nodes[nodeID]
 
-		if s.DiagAmbiguousReturns && node.Kind == ast.KindReturn && node.Left != ast.InvalidNode {
-			exprList := doc.Tree.Nodes[node.Left]
-			if exprList.Count > 0 {
-				firstExprID := doc.Tree.ExtraList[exprList.Extra]
-				firstExprNode := doc.Tree.Nodes[firstExprID]
+		switch node.Kind {
+		case ast.KindReturn:
+			if s.DiagAmbiguousReturns && node.Left != ast.InvalidNode {
+				exprList := doc.Tree.Nodes[node.Left]
+				if exprList.Count > 0 {
+					firstExprID := doc.Tree.ExtraList[exprList.Extra]
+					firstExprNode := doc.Tree.Nodes[firstExprID]
 
-				retLine, _ := doc.Tree.Position(node.Start)
-				exprLine, _ := doc.Tree.Position(firstExprNode.Start)
+					retLine, _ := doc.Tree.Position(node.Start)
+					exprLine, _ := doc.Tree.Position(firstExprNode.Start)
 
-				if exprLine > retLine {
-					lastExprID := doc.Tree.ExtraList[exprList.Extra+uint32(exprList.Count-1)]
+					if exprLine > retLine {
+						lastExprID := doc.Tree.ExtraList[exprList.Extra+uint32(exprList.Count-1)]
 
-					s.diagBuf = append(s.diagBuf, Diagnostic{
-						Range:    getRange(doc.Tree, firstExprNode.Start, doc.Tree.Nodes[lastExprID].End),
-						Severity: SeverityWarning,
-						Code:     "ambiguous-return",
-						Message:  "Ambiguous return: expression on the next line is executed as the return value. Use 'return;' to separate statements.",
-						Data:     float64(i),
-					})
-				}
-			}
-		}
-
-		if s.DiagUnreachableCode && (node.Kind == ast.KindBlock || node.Kind == ast.KindFile) {
-			var terminalFound bool
-
-			for j := uint16(0); j < node.Count; j++ {
-				stmtID := doc.Tree.ExtraList[node.Extra+uint32(j)]
-
-				if terminalFound {
-					lastStmtID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
-
-					s.diagBuf = append(s.diagBuf, Diagnostic{
-						Range:    getRange(doc.Tree, doc.Tree.Nodes[stmtID].Start, doc.Tree.Nodes[lastStmtID].End),
-						Severity: SeverityWarning,
-						Code:     "unreachable-code",
-						Tags:     []DiagnosticTag{Unnecessary},
-						Message:  "Unreachable code detected.",
-						Data:     float64(stmtID),
-					})
-
-					break
-				}
-
-				if isTerminal(doc.Tree, stmtID) {
-					terminalFound = true
-				}
-			}
-		}
-
-		// Loop Variable Mutation
-		if s.DiagLoopVarMutation && (node.Kind == ast.KindAssign) {
-			lhsList := doc.Tree.Nodes[node.Left]
-
-			for j := uint16(0); j < lhsList.Count; j++ {
-				lhsID := doc.Tree.ExtraList[lhsList.Extra+uint32(j)]
-				if doc.Tree.Nodes[lhsID].Kind == ast.KindIdent {
-					defID := doc.Resolver.References[lhsID]
-					if isLoopVariable(doc.Tree, defID) {
 						s.diagBuf = append(s.diagBuf, Diagnostic{
-							Range:    getNodeRange(doc.Tree, lhsID),
+							Range:    getRange(doc.Tree, firstExprNode.Start, doc.Tree.Nodes[lastExprID].End),
 							Severity: SeverityWarning,
-							Code:     "loop-var-mutation",
-							Message:  "Mutation of a loop variable. This can lead to unexpected behavior.",
+							Code:     "ambiguous-return",
+							Message:  "Ambiguous return: expression on the next line is executed as the return value. Use 'return;' to separate statements.",
+							Data:     float64(i),
 						})
 					}
 				}
 			}
-		}
 
-		// Empty block
-		if s.DiagEmptyBlock && node.Kind == ast.KindBlock && node.Count == 0 {
-			if node.Parent != ast.InvalidNode && doc.Tree.Nodes[node.Parent].Kind != ast.KindFile {
-				var data any
-
-				parentNode := doc.Tree.Nodes[node.Parent]
-				if parentNode.Kind == ast.KindDo {
-					data = float64(node.Parent)
-				}
-
-				s.diagBuf = append(s.diagBuf, Diagnostic{
-					Range:    getNodeRange(doc.Tree, nodeID),
-					Severity: SeverityHint,
-					Code:     "empty-block",
-					Tags:     []DiagnosticTag{Unnecessary},
-					Message:  "This block is empty.",
-					Data:     data,
-				})
-			}
-		}
-
-		// Incorrect Vararg Usage
-		if s.DiagIncorrectVararg && node.Kind == ast.KindVararg {
-			parentID := node.Parent
-			if parentID != ast.InvalidNode && doc.Tree.Nodes[parentID].Kind != ast.KindFunctionExpr {
-				var (
-					isVarargFunc bool
-					foundFunc    bool
-				)
-
-				curr := parentID
-
-				for curr != ast.InvalidNode {
-					currNode := doc.Tree.Nodes[curr]
-					if currNode.Kind == ast.KindFunctionExpr {
-						foundFunc = true
-
-						if currNode.Count > 0 {
-							lastParamID := doc.Tree.ExtraList[currNode.Extra+uint32(currNode.Count-1)]
-							if doc.Tree.Nodes[lastParamID].Kind == ast.KindVararg {
-								isVarargFunc = true
+			if s.DiagRedundantReturn {
+				if node.Left == ast.InvalidNode || doc.Tree.Nodes[node.Left].Count == 0 {
+					parentID := node.Parent
+					if parentID != ast.InvalidNode {
+						parentNode := doc.Tree.Nodes[parentID]
+						if parentNode.Kind == ast.KindBlock && parentNode.Count > 0 && doc.Tree.ExtraList[parentNode.Extra+uint32(parentNode.Count-1)] == nodeID {
+							grandParentID := parentNode.Parent
+							if grandParentID != ast.InvalidNode {
+								grandParentNode := doc.Tree.Nodes[grandParentID]
+								if grandParentNode.Kind == ast.KindFunctionExpr || grandParentNode.Kind == ast.KindFile {
+									s.diagBuf = append(s.diagBuf, Diagnostic{
+										Range:    getNodeRange(doc.Tree, nodeID),
+										Severity: SeverityWarning,
+										Code:     "redundant-return",
+										Tags:     []DiagnosticTag{Unnecessary},
+										Message:  "Redundant return statement. The function will exit here anyway.",
+										Data:     float64(nodeID),
+									})
+								}
 							}
 						}
+					}
+				}
+			}
+		case ast.KindBlock, ast.KindFile:
+			if s.DiagUnreachableCode {
+				var terminalFound bool
 
-						break
-					} else if currNode.Kind == ast.KindFile {
-						foundFunc = true
-						isVarargFunc = true
+				for j := uint16(0); j < node.Count; j++ {
+					stmtID := doc.Tree.ExtraList[node.Extra+uint32(j)]
+
+					if terminalFound {
+						lastStmtID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
+
+						s.diagBuf = append(s.diagBuf, Diagnostic{
+							Range:    getRange(doc.Tree, doc.Tree.Nodes[stmtID].Start, doc.Tree.Nodes[lastStmtID].End),
+							Severity: SeverityWarning,
+							Code:     "unreachable-code",
+							Tags:     []DiagnosticTag{Unnecessary},
+							Message:  "Unreachable code detected.",
+							Data:     float64(stmtID),
+						})
 
 						break
 					}
 
-					curr = currNode.Parent
+					if isTerminal(doc.Tree, stmtID) {
+						terminalFound = true
+					}
 				}
+			}
 
-				if foundFunc && !isVarargFunc {
+			if s.DiagEmptyBlock && node.Kind == ast.KindBlock && node.Count == 0 {
+				if node.Parent != ast.InvalidNode && doc.Tree.Nodes[node.Parent].Kind != ast.KindFile {
+					var data any
+
+					parentNode := doc.Tree.Nodes[node.Parent]
+					if parentNode.Kind == ast.KindDo {
+						data = float64(node.Parent)
+					}
+
 					s.diagBuf = append(s.diagBuf, Diagnostic{
 						Range:    getNodeRange(doc.Tree, nodeID),
-						Severity: SeverityError,
-						Code:     "incorrect-vararg",
-						Message:  "Cannot use '...' outside a vararg function.",
+						Severity: SeverityHint,
+						Code:     "empty-block",
+						Tags:     []DiagnosticTag{Unnecessary},
+						Message:  "This block is empty.",
+						Data:     data,
 					})
 				}
 			}
-		}
+		case ast.KindAssign:
+			if s.DiagLoopVarMutation {
+				lhsList := doc.Tree.Nodes[node.Left]
 
-		// Duplicate table fields
-		if s.DiagDuplicateField && node.Kind == ast.KindTableExpr {
-			if s.seenKeysBuf == nil {
-				s.seenKeysBuf = make(map[uint64]ast.NodeID)
-			} else {
-				clear(s.seenKeysBuf)
-			}
-
-			seenKeys := s.seenKeysBuf
-
-			for j := uint16(0); j < node.Count; j++ {
-				fieldID := doc.Tree.ExtraList[node.Extra+uint32(j)]
-				fieldNode := doc.Tree.Nodes[fieldID]
-
-				if fieldNode.Kind == ast.KindRecordField {
-					keyNode := doc.Tree.Nodes[fieldNode.Left]
-					if keyNode.Kind == ast.KindIdent {
-						keyBytes := doc.Source[keyNode.Start:keyNode.End]
-						hash := ast.HashBytes(keyBytes)
-
-						if prevID, exists := seenKeys[hash]; exists {
+				for j := uint16(0); j < lhsList.Count; j++ {
+					lhsID := doc.Tree.ExtraList[lhsList.Extra+uint32(j)]
+					if doc.Tree.Nodes[lhsID].Kind == ast.KindIdent {
+						defID := doc.Resolver.References[lhsID]
+						if isLoopVariable(doc.Tree, defID) {
 							s.diagBuf = append(s.diagBuf, Diagnostic{
-								Range:    getNodeRange(doc.Tree, fieldNode.Left),
+								Range:    getNodeRange(doc.Tree, lhsID),
 								Severity: SeverityWarning,
-								Code:     "duplicate-field",
-								Message:  fmt.Sprintf("Duplicate field '%s' in table.", ast.String(keyBytes)),
-								RelatedInformation: []DiagnosticRelatedInformation{
-									{
-										Location: Location{URI: uri, Range: getNodeRange(doc.Tree, prevID)},
-										Message:  "Previously defined here",
-									},
-								},
+								Code:     "loop-var-mutation",
+								Message:  "Mutation of a loop variable. This can lead to unexpected behavior.",
 							})
-						} else {
-							seenKeys[hash] = fieldNode.Left
 						}
 					}
 				}
 			}
-		}
 
-		// Unbalanced assignments & Redundant values
-		if (s.DiagUnbalancedAssignment || s.DiagRedundantValue) && (node.Kind == ast.KindLocalAssign || node.Kind == ast.KindAssign) {
-			lhsList := doc.Tree.Nodes[node.Left]
-			if node.Right != ast.InvalidNode {
-				rhsList := doc.Tree.Nodes[node.Right]
+			if s.DiagSelfAssignment {
+				lhsList := doc.Tree.Nodes[node.Left]
+				if node.Right != ast.InvalidNode {
+					rhsList := doc.Tree.Nodes[node.Right]
 
-				if lhsList.Count != rhsList.Count && rhsList.Count > 0 {
-					lastRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(rhsList.Count-1)]
-					lastRhsNode := doc.Tree.Nodes[lastRhsID]
+					maxCheck := min(rhsList.Count, lhsList.Count)
 
-					isDynamic := lastRhsNode.Kind == ast.KindCallExpr || lastRhsNode.Kind == ast.KindMethodCall || lastRhsNode.Kind == ast.KindVararg
+					for j := range maxCheck {
+						lID := doc.Tree.ExtraList[lhsList.Extra+uint32(j)]
+						rID := doc.Tree.ExtraList[rhsList.Extra+uint32(j)]
 
-					if !isDynamic || rhsList.Count > lhsList.Count {
-						if rhsList.Count > lhsList.Count && s.DiagRedundantValue {
-							firstRedundantID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count)]
-							prevRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count-1)]
+						lSource := doc.Source[doc.Tree.Nodes[lID].Start:doc.Tree.Nodes[lID].End]
+						rSource := doc.Source[doc.Tree.Nodes[rID].Start:doc.Tree.Nodes[rID].End]
 
-							startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRedundantID].Start, doc.Tree.Nodes[prevRhsID].End)
-
+						if bytes.Equal(lSource, rSource) {
 							s.diagBuf = append(s.diagBuf, Diagnostic{
-								Range:    getRange(doc.Tree, startOff, lastRhsNode.End),
+								Range:    getRange(doc.Tree, doc.Tree.Nodes[lID].Start, doc.Tree.Nodes[rID].End),
 								Severity: SeverityWarning,
-								Code:     "redundant-value",
+								Code:     "self-assignment",
 								Tags:     []DiagnosticTag{Unnecessary},
-								Message:  "Assigning more values than variables; excess values will be discarded.",
+								Message:  fmt.Sprintf("Assigning variable '%s' to itself.", ast.String(lSource)),
 								Data:     float64(nodeID),
 							})
-						} else if lhsList.Count > rhsList.Count && s.DiagUnbalancedAssignment && !isDynamic {
-							firstUnbalancedID := doc.Tree.ExtraList[lhsList.Extra+uint32(rhsList.Count)]
-							lastLhsID := doc.Tree.ExtraList[lhsList.Extra+uint32(lhsList.Count-1)]
-
-							s.diagBuf = append(s.diagBuf, Diagnostic{
-								Range:    getRange(doc.Tree, doc.Tree.Nodes[firstUnbalancedID].Start, doc.Tree.Nodes[lastLhsID].End),
-								Severity: SeverityWarning,
-								Code:     "unbalanced-assignment",
-								Message:  "Assigning fewer values than variables; these variables will be initialized to nil.",
-							})
 						}
 					}
 				}
 			}
-		}
 
-		// Unreachable Elseif/Else
-		if s.DiagUnreachableElse && node.Kind == ast.KindIf {
-			var foundTruthy bool
+			fallthrough
+		case ast.KindLocalAssign:
+			if s.DiagUnbalancedAssignment || s.DiagRedundantValue {
+				lhsList := doc.Tree.Nodes[node.Left]
+				if node.Right != ast.InvalidNode {
+					rhsList := doc.Tree.Nodes[node.Right]
 
-			if s.isStaticallyConstant(doc, node.Left) {
-				res, ok := doc.evalNode(node.Left, 0)
-				if ok {
-					isTruthy := res.kind != ast.KindFalse && res.kind != ast.KindNil
-					if isTruthy {
-						foundTruthy = true
-					} else {
-						s.diagBuf = append(s.diagBuf, Diagnostic{
-							Range:    getNodeRange(doc.Tree, node.Right),
-							Severity: SeverityWarning,
-							Code:     "unreachable-branch",
-							Tags:     []DiagnosticTag{Unnecessary},
-							Message:  "This branch is unreachable because the condition is always falsy.",
-						})
-					}
-				}
-			}
+					if lhsList.Count != rhsList.Count && rhsList.Count > 0 {
+						lastRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(rhsList.Count-1)]
+						lastRhsNode := doc.Tree.Nodes[lastRhsID]
 
-			for j := uint16(0); j < node.Count; j++ {
-				if node.Extra+uint32(j) >= uint32(len(doc.Tree.ExtraList)) {
-					continue
-				}
+						isDynamic := lastRhsNode.Kind == ast.KindCallExpr || lastRhsNode.Kind == ast.KindMethodCall || lastRhsNode.Kind == ast.KindVararg
 
-				childID := doc.Tree.ExtraList[node.Extra+uint32(j)]
-				if int(childID) >= len(doc.Tree.Nodes) {
-					continue
-				}
+						if !isDynamic || rhsList.Count > lhsList.Count {
+							if rhsList.Count > lhsList.Count && s.DiagRedundantValue {
+								firstRedundantID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count)]
+								prevRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count-1)]
 
-				childNode := doc.Tree.Nodes[childID]
+								startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRedundantID].Start, doc.Tree.Nodes[prevRhsID].End)
 
-				if foundTruthy {
-					s.diagBuf = append(s.diagBuf, Diagnostic{
-						Range:    getNodeRange(doc.Tree, childID),
-						Severity: SeverityWarning,
-						Code:     "unreachable-branch",
-						Tags:     []DiagnosticTag{Unnecessary},
-						Message:  "This branch is unreachable because a previous condition is always truthy.",
-					})
-
-					continue
-				}
-
-				if childNode.Kind == ast.KindElseIf {
-					if s.isStaticallyConstant(doc, childNode.Left) {
-						res, ok := doc.evalNode(childNode.Left, 0)
-						if ok {
-							isTruthy := res.kind != ast.KindFalse && res.kind != ast.KindNil
-							if isTruthy {
-								foundTruthy = true
-							} else {
 								s.diagBuf = append(s.diagBuf, Diagnostic{
-									Range:    getNodeRange(doc.Tree, childNode.Right),
+									Range:    getRange(doc.Tree, startOff, lastRhsNode.End),
 									Severity: SeverityWarning,
-									Code:     "unreachable-branch",
+									Code:     "redundant-value",
 									Tags:     []DiagnosticTag{Unnecessary},
-									Message:  "This branch is unreachable because the condition is always falsy.",
+									Message:  "Assigning more values than variables; excess values will be discarded.",
+									Data:     float64(nodeID),
+								})
+							} else if lhsList.Count > rhsList.Count && s.DiagUnbalancedAssignment && !isDynamic {
+								firstUnbalancedID := doc.Tree.ExtraList[lhsList.Extra+uint32(rhsList.Count)]
+								lastLhsID := doc.Tree.ExtraList[lhsList.Extra+uint32(lhsList.Count-1)]
+
+								s.diagBuf = append(s.diagBuf, Diagnostic{
+									Range:    getRange(doc.Tree, doc.Tree.Nodes[firstUnbalancedID].Start, doc.Tree.Nodes[lastLhsID].End),
+									Severity: SeverityWarning,
+									Code:     "unbalanced-assignment",
+									Message:  "Assigning fewer values than variables; these variables will be initialized to nil.",
 								})
 							}
 						}
 					}
 				}
 			}
-		}
+		case ast.KindVararg:
+			if s.DiagIncorrectVararg {
+				parentID := node.Parent
+				if parentID != ast.InvalidNode && doc.Tree.Nodes[parentID].Kind != ast.KindFunctionExpr {
+					var (
+						isVarargFunc bool
+						foundFunc    bool
+					)
 
-		// Self assignment
-		if s.DiagSelfAssignment && node.Kind == ast.KindAssign {
-			lhsList := doc.Tree.Nodes[node.Left]
-			if node.Right != ast.InvalidNode {
-				rhsList := doc.Tree.Nodes[node.Right]
+					curr := parentID
 
-				maxCheck := min(rhsList.Count, lhsList.Count)
+					for curr != ast.InvalidNode {
+						currNode := doc.Tree.Nodes[curr]
+						if currNode.Kind == ast.KindFunctionExpr {
+							foundFunc = true
 
-				for j := range maxCheck {
-					lID := doc.Tree.ExtraList[lhsList.Extra+uint32(j)]
-					rID := doc.Tree.ExtraList[rhsList.Extra+uint32(j)]
+							if currNode.Count > 0 {
+								lastParamID := doc.Tree.ExtraList[currNode.Extra+uint32(currNode.Count-1)]
+								if doc.Tree.Nodes[lastParamID].Kind == ast.KindVararg {
+									isVarargFunc = true
+								}
+							}
 
-					lSource := doc.Source[doc.Tree.Nodes[lID].Start:doc.Tree.Nodes[lID].End]
-					rSource := doc.Source[doc.Tree.Nodes[rID].Start:doc.Tree.Nodes[rID].End]
+							break
+						} else if currNode.Kind == ast.KindFile {
+							foundFunc = true
+							isVarargFunc = true
 
-					if bytes.Equal(lSource, rSource) {
+							break
+						}
+
+						curr = currNode.Parent
+					}
+
+					if foundFunc && !isVarargFunc {
 						s.diagBuf = append(s.diagBuf, Diagnostic{
-							Range:    getRange(doc.Tree, doc.Tree.Nodes[lID].Start, doc.Tree.Nodes[rID].End),
-							Severity: SeverityWarning,
-							Code:     "self-assignment",
-							Tags:     []DiagnosticTag{Unnecessary},
-							Message:  fmt.Sprintf("Assigning variable '%s' to itself.", ast.String(lSource)),
-							Data:     float64(nodeID),
+							Range:    getNodeRange(doc.Tree, nodeID),
+							Severity: SeverityError,
+							Code:     "incorrect-vararg",
+							Message:  "Cannot use '...' outside a vararg function.",
 						})
 					}
 				}
 			}
-		}
-
-		// Type check: call non-function
-		if s.DiagTypeCheck && (node.Kind == ast.KindCallExpr || node.Kind == ast.KindMethodCall) {
-			var funcID ast.NodeID
-
-			if node.Kind == ast.KindMethodCall {
-				funcID = node.Left
-			} else {
-				funcID = node.Left
-			}
-
-			switch node.Kind {
-			case ast.KindCallExpr:
-				t := doc.InferType(funcID)
-				if t.Basics != TypeUnknown && t.CustomName == "" && t.Basics&(TypeFunction|TypeAny|TypeTable|TypeUserdata) == 0 {
-					s.diagBuf = append(s.diagBuf, Diagnostic{
-						Range:    getNodeRange(doc.Tree, funcID),
-						Severity: SeverityWarning,
-						Code:     "call-non-function",
-						Message:  fmt.Sprintf("Attempt to call a non-function value (inferred type: %s).", t.Format()),
-					})
+		case ast.KindTableExpr:
+			if s.DiagDuplicateField {
+				if s.seenKeysBuf == nil {
+					s.seenKeysBuf = make(map[uint64]ast.NodeID)
+				} else {
+					clear(s.seenKeysBuf)
 				}
-			case ast.KindMethodCall:
-				t := doc.InferType(funcID)
-				if t.Basics != TypeUnknown && t.CustomName == "" && t.Basics&(TypeTable|TypeAny|TypeString|TypeUserdata) == 0 {
-					s.diagBuf = append(s.diagBuf, Diagnostic{
-						Range:    getNodeRange(doc.Tree, funcID),
-						Severity: SeverityWarning,
-						Code:     "index-non-table",
-						Message:  fmt.Sprintf("Attempt to index a non-table value (inferred type: %s).", t.Format()),
-					})
-				}
-			}
-		}
 
-		// Type check: index non-table
-		if s.DiagTypeCheck && (node.Kind == ast.KindMemberExpr || node.Kind == ast.KindIndexExpr) {
-			t := doc.InferType(node.Left)
-			if t.Basics != TypeUnknown && t.CustomName == "" && t.Basics&(TypeTable|TypeAny|TypeString|TypeUserdata) == 0 {
-				s.diagBuf = append(s.diagBuf, Diagnostic{
-					Range:    getNodeRange(doc.Tree, node.Left),
-					Severity: SeverityWarning,
-					Code:     "index-non-table",
-					Message:  fmt.Sprintf("Attempt to index a non-table value (inferred type: %s).", t.Format()),
-				})
-			}
-		}
+				seenKeys := s.seenKeysBuf
 
-		// Redundant Return
-		if s.DiagRedundantReturn && node.Kind == ast.KindReturn {
-			if node.Left == ast.InvalidNode || doc.Tree.Nodes[node.Left].Count == 0 {
-				parentID := node.Parent
-				if parentID != ast.InvalidNode {
-					parentNode := doc.Tree.Nodes[parentID]
-					if parentNode.Kind == ast.KindBlock && parentNode.Count > 0 && doc.Tree.ExtraList[parentNode.Extra+uint32(parentNode.Count-1)] == nodeID {
-						grandParentID := parentNode.Parent
-						if grandParentID != ast.InvalidNode {
-							grandParentNode := doc.Tree.Nodes[grandParentID]
-							if grandParentNode.Kind == ast.KindFunctionExpr || grandParentNode.Kind == ast.KindFile {
+				for j := uint16(0); j < node.Count; j++ {
+					fieldID := doc.Tree.ExtraList[node.Extra+uint32(j)]
+					fieldNode := doc.Tree.Nodes[fieldID]
+
+					if fieldNode.Kind == ast.KindRecordField {
+						keyNode := doc.Tree.Nodes[fieldNode.Left]
+						if keyNode.Kind == ast.KindIdent {
+							keyBytes := doc.Source[keyNode.Start:keyNode.End]
+							hash := ast.HashBytes(keyBytes)
+
+							if prevID, exists := seenKeys[hash]; exists {
 								s.diagBuf = append(s.diagBuf, Diagnostic{
-									Range:    getNodeRange(doc.Tree, nodeID),
+									Range:    getNodeRange(doc.Tree, fieldNode.Left),
 									Severity: SeverityWarning,
-									Code:     "redundant-return",
+									Code:     "duplicate-field",
+									Message:  fmt.Sprintf("Duplicate field '%s' in table.", ast.String(keyBytes)),
+									RelatedInformation: []DiagnosticRelatedInformation{
+										{
+											Location: Location{URI: uri, Range: getNodeRange(doc.Tree, prevID)},
+											Message:  "Previously defined here",
+										},
+									},
+								})
+							} else {
+								seenKeys[hash] = fieldNode.Left
+							}
+						}
+					}
+				}
+			}
+		case ast.KindIf:
+			if s.DiagUnreachableElse {
+				var foundTruthy bool
+
+				if s.isStaticallyConstant(doc, node.Left) {
+					res, ok := doc.evalNode(node.Left, 0)
+					if ok {
+						isTruthy := res.kind != ast.KindFalse && res.kind != ast.KindNil
+						if isTruthy {
+							foundTruthy = true
+						} else {
+							s.diagBuf = append(s.diagBuf, Diagnostic{
+								Range:    getNodeRange(doc.Tree, node.Right),
+								Severity: SeverityWarning,
+								Code:     "unreachable-branch",
+								Tags:     []DiagnosticTag{Unnecessary},
+								Message:  "This branch is unreachable because the condition is always falsy.",
+							})
+						}
+					}
+				}
+
+				for j := uint16(0); j < node.Count; j++ {
+					if node.Extra+uint32(j) >= uint32(len(doc.Tree.ExtraList)) {
+						continue
+					}
+
+					childID := doc.Tree.ExtraList[node.Extra+uint32(j)]
+					if int(childID) >= len(doc.Tree.Nodes) {
+						continue
+					}
+
+					childNode := doc.Tree.Nodes[childID]
+
+					if foundTruthy {
+						s.diagBuf = append(s.diagBuf, Diagnostic{
+							Range:    getNodeRange(doc.Tree, childID),
+							Severity: SeverityWarning,
+							Code:     "unreachable-branch",
+							Tags:     []DiagnosticTag{Unnecessary},
+							Message:  "This branch is unreachable because a previous condition is always truthy.",
+						})
+
+						continue
+					}
+
+					if childNode.Kind == ast.KindElseIf {
+						if s.isStaticallyConstant(doc, childNode.Left) {
+							res, ok := doc.evalNode(childNode.Left, 0)
+							if ok {
+								isTruthy := res.kind != ast.KindFalse && res.kind != ast.KindNil
+								if isTruthy {
+									foundTruthy = true
+								} else {
+									s.diagBuf = append(s.diagBuf, Diagnostic{
+										Range:    getNodeRange(doc.Tree, childNode.Right),
+										Severity: SeverityWarning,
+										Code:     "unreachable-branch",
+										Tags:     []DiagnosticTag{Unnecessary},
+										Message:  "This branch is unreachable because the condition is always falsy.",
+									})
+								}
+							}
+						}
+					}
+				}
+			}
+		case ast.KindCallExpr, ast.KindMethodCall:
+			if s.DiagTypeCheck {
+				var funcID ast.NodeID
+
+				if node.Kind == ast.KindMethodCall {
+					funcID = node.Left
+				} else {
+					funcID = node.Left
+				}
+
+				switch node.Kind {
+				case ast.KindCallExpr:
+					t := doc.InferType(funcID)
+					if t.Basics != TypeUnknown && t.CustomName == "" && t.Basics&(TypeFunction|TypeAny|TypeTable|TypeUserdata) == 0 {
+						s.diagBuf = append(s.diagBuf, Diagnostic{
+							Range:    getNodeRange(doc.Tree, funcID),
+							Severity: SeverityWarning,
+							Code:     "call-non-function",
+							Message:  fmt.Sprintf("Attempt to call a non-function value (inferred type: %s).", t.Format()),
+						})
+					}
+				case ast.KindMethodCall:
+					t := doc.InferType(funcID)
+					if t.Basics != TypeUnknown && t.CustomName == "" && t.Basics&(TypeTable|TypeAny|TypeString|TypeUserdata) == 0 {
+						s.diagBuf = append(s.diagBuf, Diagnostic{
+							Range:    getNodeRange(doc.Tree, funcID),
+							Severity: SeverityWarning,
+							Code:     "index-non-table",
+							Message:  fmt.Sprintf("Attempt to index a non-table value (inferred type: %s).", t.Format()),
+						})
+					}
+				}
+			}
+
+			if s.DiagRedundantParameter {
+				var funcIdentID ast.NodeID
+
+				if node.Kind == ast.KindMethodCall {
+					funcIdentID = node.Right
+				} else {
+					funcIdentID = node.Left
+					if int(funcIdentID) < len(doc.Tree.Nodes) && doc.Tree.Nodes[funcIdentID].Kind == ast.KindMemberExpr {
+						funcIdentID = doc.Tree.Nodes[funcIdentID].Right
+					}
+				}
+
+				if funcIdentID != ast.InvalidNode && int(funcIdentID) < len(doc.Tree.Nodes) {
+					ctx := s.resolveSymbolNode(uri, doc, funcIdentID)
+					if ctx != nil {
+						var defs []GlobalSymbol
+
+						if len(ctx.GlobalDefs) > 0 {
+							defs = ctx.GlobalDefs
+						} else if ctx.TargetDefID != ast.InvalidNode {
+							defs = []GlobalSymbol{{URI: ctx.TargetURI, NodeID: ctx.TargetDefID}}
+						}
+
+						var (
+							matchedAny           bool
+							maxExpectedArgs      int
+							maxExpectedArgsFound bool
+						)
+
+						for _, def := range defs {
+							tDoc := s.Documents[def.URI]
+							if tDoc == nil {
+								continue
+							}
+
+							valID := tDoc.getAssignedValue(def.NodeID)
+							if valID != ast.InvalidNode && int(valID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+								funcNode := tDoc.Tree.Nodes[valID]
+
+								var hasVararg bool
+
+								if funcNode.Count > 0 {
+									lastParamID := tDoc.Tree.ExtraList[funcNode.Extra+uint32(funcNode.Count-1)]
+									if tDoc.Tree.Nodes[lastParamID].Kind == ast.KindVararg {
+										hasVararg = true
+									}
+								}
+
+								if hasVararg {
+									matchedAny = true
+
+									break
+								}
+
+								paramOffset := getImplicitSelfOffset(node, tDoc, def.NodeID)
+
+								expectedArgs := int(funcNode.Count) - paramOffset
+								if expectedArgs < 0 {
+									expectedArgs = 0
+								}
+
+								if int(node.Count) <= expectedArgs {
+									matchedAny = true
+
+									break
+								}
+
+								if !maxExpectedArgsFound || expectedArgs > maxExpectedArgs {
+									maxExpectedArgs = expectedArgs
+									maxExpectedArgsFound = true
+								}
+							}
+						}
+
+						if !matchedAny && maxExpectedArgsFound {
+							expectedArgs := maxExpectedArgs
+							if int(node.Count) > expectedArgs {
+								firstRedundantID := doc.Tree.ExtraList[node.Extra+uint32(expectedArgs)]
+								lastArgID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
+
+								var limit uint32
+
+								if expectedArgs > 0 {
+									limit = doc.Tree.Nodes[doc.Tree.ExtraList[node.Extra+uint32(expectedArgs-1)]].End
+								} else {
+									limit = doc.Tree.Nodes[node.Left].End
+								}
+
+								startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRedundantID].Start, limit)
+
+								s.diagBuf = append(s.diagBuf, Diagnostic{
+									Range:    getRange(doc.Tree, startOff, doc.Tree.Nodes[lastArgID].End),
+									Severity: SeverityWarning,
+									Code:     "redundant-parameter",
 									Tags:     []DiagnosticTag{Unnecessary},
-									Message:  "Redundant return statement. The function will exit here anyway.",
+									Message:  fmt.Sprintf("Function expects %d argument(s), but got %d. Excess arguments will be ignored.", expectedArgs, node.Count),
 									Data:     float64(nodeID),
 								})
 							}
@@ -985,226 +1072,133 @@ func (s *Server) publishDiagnostics(uri string) {
 					}
 				}
 			}
-		}
 
-		// Redundant Parameter
-		if s.DiagRedundantParameter && (node.Kind == ast.KindCallExpr || node.Kind == ast.KindMethodCall) {
-			var funcIdentID ast.NodeID
+			if s.DiagFormatString {
+				var (
+					isFormatCall     bool
+					formatStringNode ast.NodeID
+					numArgsProvided  int
+				)
 
-			if node.Kind == ast.KindMethodCall {
-				funcIdentID = node.Right
-			} else {
-				funcIdentID = node.Left
-				if int(funcIdentID) < len(doc.Tree.Nodes) && doc.Tree.Nodes[funcIdentID].Kind == ast.KindMemberExpr {
-					funcIdentID = doc.Tree.Nodes[funcIdentID].Right
-				}
-			}
+				switch node.Kind {
+				case ast.KindCallExpr:
+					if int(node.Left) < len(doc.Tree.Nodes) {
+						leftNode := doc.Tree.Nodes[node.Left]
+						if leftNode.Kind == ast.KindMemberExpr {
+							recID := leftNode.Left
+							propID := leftNode.Right
+							if int(recID) < len(doc.Tree.Nodes) && int(propID) < len(doc.Tree.Nodes) {
+								recNode := doc.Tree.Nodes[recID]
+								propNode := doc.Tree.Nodes[propID]
 
-			if funcIdentID != ast.InvalidNode && int(funcIdentID) < len(doc.Tree.Nodes) {
-				ctx := s.resolveSymbolNode(uri, doc, funcIdentID)
-				if ctx != nil {
-					var defs []GlobalSymbol
+								if recNode.Start <= recNode.End && recNode.End <= uint32(len(doc.Source)) &&
+									propNode.Start <= propNode.End && propNode.End <= uint32(len(doc.Source)) {
 
-					if len(ctx.GlobalDefs) > 0 {
-						defs = ctx.GlobalDefs
-					} else if ctx.TargetDefID != ast.InvalidNode {
-						defs = []GlobalSymbol{{URI: ctx.TargetURI, NodeID: ctx.TargetDefID}}
-					}
+									recBytes := doc.Source[recNode.Start:recNode.End]
+									propBytes := doc.Source[propNode.Start:propNode.End]
 
-					var (
-						matchedAny           bool
-						maxExpectedArgs      int
-						maxExpectedArgsFound bool
-					)
+									if bytes.Equal(recBytes, []byte("string")) && bytes.Equal(propBytes, []byte("format")) {
+										isFormatCall = true
 
-					for _, def := range defs {
-						tDoc := s.Documents[def.URI]
-						if tDoc == nil {
-							continue
-						}
-
-						valID := tDoc.getAssignedValue(def.NodeID)
-						if valID != ast.InvalidNode && int(valID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
-							funcNode := tDoc.Tree.Nodes[valID]
-
-							var hasVararg bool
-
-							if funcNode.Count > 0 {
-								lastParamID := tDoc.Tree.ExtraList[funcNode.Extra+uint32(funcNode.Count-1)]
-								if tDoc.Tree.Nodes[lastParamID].Kind == ast.KindVararg {
-									hasVararg = true
-								}
-							}
-
-							if hasVararg {
-								matchedAny = true
-
-								break
-							}
-
-							paramOffset := getImplicitSelfOffset(node, tDoc, def.NodeID)
-
-							expectedArgs := int(funcNode.Count) - paramOffset
-							if expectedArgs < 0 {
-								expectedArgs = 0
-							}
-
-							if int(node.Count) <= expectedArgs {
-								matchedAny = true
-
-								break
-							}
-
-							if !maxExpectedArgsFound || expectedArgs > maxExpectedArgs {
-								maxExpectedArgs = expectedArgs
-								maxExpectedArgsFound = true
-							}
-						}
-					}
-
-					if !matchedAny && maxExpectedArgsFound {
-						expectedArgs := maxExpectedArgs
-						if int(node.Count) > expectedArgs {
-							firstRedundantID := doc.Tree.ExtraList[node.Extra+uint32(expectedArgs)]
-							lastArgID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
-
-							var limit uint32
-
-							if expectedArgs > 0 {
-								limit = doc.Tree.Nodes[doc.Tree.ExtraList[node.Extra+uint32(expectedArgs-1)]].End
-							} else {
-								limit = doc.Tree.Nodes[node.Left].End
-							}
-
-							startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRedundantID].Start, limit)
-
-							s.diagBuf = append(s.diagBuf, Diagnostic{
-								Range:    getRange(doc.Tree, startOff, doc.Tree.Nodes[lastArgID].End),
-								Severity: SeverityWarning,
-								Code:     "redundant-parameter",
-								Tags:     []DiagnosticTag{Unnecessary},
-								Message:  fmt.Sprintf("Function expects %d argument(s), but got %d. Excess arguments will be ignored.", expectedArgs, node.Count),
-								Data:     float64(nodeID),
-							})
-						}
-					}
-				}
-			}
-		}
-
-		// Format string validation
-		if s.DiagFormatString && (node.Kind == ast.KindCallExpr || node.Kind == ast.KindMethodCall) {
-			var (
-				isFormatCall     bool
-				formatStringNode ast.NodeID
-				numArgsProvided  int
-			)
-
-			switch node.Kind {
-			case ast.KindCallExpr:
-				if int(node.Left) < len(doc.Tree.Nodes) {
-					leftNode := doc.Tree.Nodes[node.Left]
-					if leftNode.Kind == ast.KindMemberExpr {
-						recID := leftNode.Left
-						propID := leftNode.Right
-						if int(recID) < len(doc.Tree.Nodes) && int(propID) < len(doc.Tree.Nodes) {
-							recNode := doc.Tree.Nodes[recID]
-							propNode := doc.Tree.Nodes[propID]
-
-							if recNode.Start <= recNode.End && recNode.End <= uint32(len(doc.Source)) &&
-								propNode.Start <= propNode.End && propNode.End <= uint32(len(doc.Source)) {
-
-								recBytes := doc.Source[recNode.Start:recNode.End]
-								propBytes := doc.Source[propNode.Start:propNode.End]
-
-								if bytes.Equal(recBytes, []byte("string")) && bytes.Equal(propBytes, []byte("format")) {
-									isFormatCall = true
-
-									if node.Count > 0 {
-										formatStringNode = doc.Tree.ExtraList[node.Extra]
-										numArgsProvided = int(node.Count) - 1
+										if node.Count > 0 {
+											formatStringNode = doc.Tree.ExtraList[node.Extra]
+											numArgsProvided = int(node.Count) - 1
+										}
 									}
 								}
 							}
 						}
 					}
+				case ast.KindMethodCall:
+					if int(node.Left) < len(doc.Tree.Nodes) && int(node.Right) < len(doc.Tree.Nodes) {
+						recNode := doc.Tree.Nodes[node.Left]
+						propNode := doc.Tree.Nodes[node.Right]
+
+						if propNode.Start <= propNode.End && propNode.End <= uint32(len(doc.Source)) {
+							propBytes := doc.Source[propNode.Start:propNode.End]
+
+							if recNode.Kind == ast.KindString && bytes.Equal(propBytes, []byte("format")) {
+								isFormatCall = true
+
+								formatStringNode = node.Left
+								numArgsProvided = int(node.Count)
+							}
+						}
+					}
 				}
-			case ast.KindMethodCall:
-				if int(node.Left) < len(doc.Tree.Nodes) && int(node.Right) < len(doc.Tree.Nodes) {
-					recNode := doc.Tree.Nodes[node.Left]
-					propNode := doc.Tree.Nodes[node.Right]
 
-					if propNode.Start <= propNode.End && propNode.End <= uint32(len(doc.Source)) {
-						propBytes := doc.Source[propNode.Start:propNode.End]
+				if isFormatCall && formatStringNode != ast.InvalidNode && int(formatStringNode) < len(doc.Tree.Nodes) {
+					fmtNode := doc.Tree.Nodes[formatStringNode]
+					if fmtNode.Kind == ast.KindString && fmtNode.Start <= fmtNode.End && fmtNode.End <= uint32(len(doc.Source)) {
+						var hasDynamicArgs bool
 
-						if recNode.Kind == ast.KindString && bytes.Equal(propBytes, []byte("format")) {
-							isFormatCall = true
+						for j := uint16(0); j < node.Count; j++ {
+							if node.Extra+uint32(j) >= uint32(len(doc.Tree.ExtraList)) {
+								continue
+							}
 
-							formatStringNode = node.Left
-							numArgsProvided = int(node.Count)
+							argID := doc.Tree.ExtraList[node.Extra+uint32(j)]
+							if int(argID) < len(doc.Tree.Nodes) {
+								argKind := doc.Tree.Nodes[argID].Kind
+								if argKind == ast.KindVararg || argKind == ast.KindCallExpr || argKind == ast.KindMethodCall {
+									hasDynamicArgs = true
+
+									break
+								}
+							}
+						}
+
+						if !hasDynamicArgs {
+							fmtBytes := doc.Source[fmtNode.Start:fmtNode.End]
+
+							var (
+								expectedArgs int
+								inSpecifier  bool
+							)
+
+							for j := range fmtBytes {
+								c := fmtBytes[j]
+
+								if !inSpecifier {
+									if c == '%' {
+										inSpecifier = true
+									}
+								} else {
+									if c == '%' {
+										inSpecifier = false // %% escaped
+									} else if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+										expectedArgs++
+
+										inSpecifier = false
+									}
+								}
+							}
+
+							if expectedArgs != numArgsProvided {
+								msg := fmt.Sprintf("Format string expects %d argument(s), but got %d.", expectedArgs, numArgsProvided)
+
+								s.diagBuf = append(s.diagBuf, Diagnostic{
+									Range:    getNodeRange(doc.Tree, nodeID),
+									Severity: SeverityWarning,
+									Code:     "format-string",
+									Message:  msg,
+								})
+							}
 						}
 					}
 				}
 			}
 
-			if isFormatCall && formatStringNode != ast.InvalidNode && int(formatStringNode) < len(doc.Tree.Nodes) {
-				fmtNode := doc.Tree.Nodes[formatStringNode]
-				if fmtNode.Kind == ast.KindString && fmtNode.Start <= fmtNode.End && fmtNode.End <= uint32(len(doc.Source)) {
-					var hasDynamicArgs bool
-
-					for j := uint16(0); j < node.Count; j++ {
-						if node.Extra+uint32(j) >= uint32(len(doc.Tree.ExtraList)) {
-							continue
-						}
-
-						argID := doc.Tree.ExtraList[node.Extra+uint32(j)]
-						if int(argID) < len(doc.Tree.Nodes) {
-							argKind := doc.Tree.Nodes[argID].Kind
-							if argKind == ast.KindVararg || argKind == ast.KindCallExpr || argKind == ast.KindMethodCall {
-								hasDynamicArgs = true
-
-								break
-							}
-						}
-					}
-
-					if !hasDynamicArgs {
-						fmtBytes := doc.Source[fmtNode.Start:fmtNode.End]
-
-						var (
-							expectedArgs int
-							inSpecifier  bool
-						)
-
-						for j := range fmtBytes {
-							c := fmtBytes[j]
-
-							if !inSpecifier {
-								if c == '%' {
-									inSpecifier = true
-								}
-							} else {
-								if c == '%' {
-									inSpecifier = false // %% escaped
-								} else if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
-									expectedArgs++
-
-									inSpecifier = false
-								}
-							}
-						}
-
-						if expectedArgs != numArgsProvided {
-							msg := fmt.Sprintf("Format string expects %d argument(s), but got %d.", expectedArgs, numArgsProvided)
-
-							s.diagBuf = append(s.diagBuf, Diagnostic{
-								Range:    getNodeRange(doc.Tree, nodeID),
-								Severity: SeverityWarning,
-								Code:     "format-string",
-								Message:  msg,
-							})
-						}
-					}
+		case ast.KindMemberExpr, ast.KindIndexExpr:
+			if s.DiagTypeCheck {
+				t := doc.InferType(node.Left)
+				if t.Basics != TypeUnknown && t.CustomName == "" && t.Basics&(TypeTable|TypeAny|TypeString|TypeUserdata) == 0 {
+					s.diagBuf = append(s.diagBuf, Diagnostic{
+						Range:    getNodeRange(doc.Tree, node.Left),
+						Severity: SeverityWarning,
+						Code:     "index-non-table",
+						Message:  fmt.Sprintf("Attempt to index a non-table value (inferred type: %s).", t.Format()),
+					})
 				}
 			}
 		}
