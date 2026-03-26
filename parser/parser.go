@@ -514,7 +514,7 @@ func (p *Parser) parseReturn() ast.NodeID {
 
 	var exprList ast.NodeID = ast.InvalidNode
 
-	if p.curr.Kind != token.End && p.curr.Kind != token.ElseIf && p.curr.Kind != token.Else && p.curr.Kind != token.EOF && p.curr.Kind != token.Semicolon {
+	if p.curr.Kind != token.End && p.curr.Kind != token.ElseIf && p.curr.Kind != token.Else && p.curr.Kind != token.Until && p.curr.Kind != token.EOF && p.curr.Kind != token.Semicolon {
 		exprList = p.parseExprList()
 	}
 

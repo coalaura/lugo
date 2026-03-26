@@ -45,8 +45,7 @@ func (s *Server) handleHover(req Request) {
 	)
 
 	if ctx != nil {
-		parsedRange := getNodeRange(doc.Tree, ctx.IdentNodeID)
-		r = &parsedRange
+		r = new(getNodeRange(doc.Tree, ctx.IdentNodeID))
 
 		if ctx.TargetURI != "" && ctx.TargetURI != uri {
 			fromFile = filepath.Base(ctx.TargetDoc.Path)
@@ -103,7 +102,7 @@ func (s *Server) handleHover(req Request) {
 					genericStr = "<" + strings.Join(gNames, ", ") + ">"
 				}
 
-				if !ctx.IsProp && ctx.TargetDefID == ctx.IdentNodeID {
+				if !ctx.IsGlobal && !ctx.IsProp && ctx.TargetDefID == ctx.IdentNodeID {
 					code = "local function " + ctx.DisplayName + genericStr + "(" + paramsStr + ")" + returnStr
 				} else {
 					code = "function " + ctx.DisplayName + genericStr + "(" + paramsStr + ")" + returnStr
@@ -386,8 +385,7 @@ func (s *Server) handleHover(req Request) {
 				hoverText = strings.TrimPrefix(evalStr, "\n---\n")
 			}
 
-			evalRange := getRange(doc.Tree, startOff, endOff)
-			r = &evalRange
+			r = new(getRange(doc.Tree, startOff, endOff))
 		}
 	}
 
@@ -397,12 +395,14 @@ func (s *Server) handleHover(req Request) {
 		return
 	}
 
-	result := Hover{
-		Contents: MarkupContent{Kind: "markdown", Value: hoverText},
-		Range:    r,
-	}
-
-	WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: result})
+	WriteMessage(s.Writer, Response{
+		RPC: "2.0",
+		ID:  req.ID,
+		Result: Hover{
+			Contents: MarkupContent{Kind: "markdown", Value: hoverText},
+			Range:    r,
+		},
+	})
 }
 
 func (s *Server) handleCompletion(req Request) {
