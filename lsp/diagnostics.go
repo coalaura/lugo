@@ -144,6 +144,10 @@ func (s *Server) publishDiagnostics(uri string) {
 
 			identBytes := doc.Source[node.Start:node.End]
 
+			if len(identBytes) == 1 && identBytes[0] == '_' {
+				continue
+			}
+
 			if s.isKnownGlobal(identBytes) {
 				continue
 			}
@@ -206,6 +210,10 @@ func (s *Server) publishDiagnostics(uri string) {
 			}
 
 			identBytes := doc.Source[node.Start:node.End]
+
+			if len(identBytes) == 1 && identBytes[0] == '_' {
+				continue
+			}
 
 			if s.isKnownGlobal(identBytes) {
 				continue
