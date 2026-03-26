@@ -43,7 +43,9 @@ func (s *Server) publishDiagnostics(uri string) {
 		return
 	}
 
-	if s.FeatureFiveM && (strings.HasSuffix(uri, "/fxmanifest.lua") || strings.HasSuffix(uri, "/__resource.lua")) {
+	doc := s.Documents[uri]
+
+	if s.FeatureFiveM && doc.IsFiveMManifest {
 		WriteMessage(s.Writer, OutgoingNotification{
 			RPC:    "2.0",
 			Method: "textDocument/publishDiagnostics",
@@ -55,8 +57,6 @@ func (s *Server) publishDiagnostics(uri string) {
 
 		return
 	}
-
-	doc := s.Documents[uri]
 
 	s.diagBuf = s.diagBuf[:0]
 
@@ -83,13 +83,15 @@ func (s *Server) publishDiagnostics(uri string) {
 		if root != "" {
 			if res := s.FiveMResources[root]; res != nil {
 				env := s.getDocFileEnv(res, doc)
-				if env == EnvUnknown && !strings.HasSuffix(uri, "/fxmanifest.lua") && !strings.HasSuffix(uri, "/__resource.lua") {
-					s.diagBuf = append(s.diagBuf, Diagnostic{
-						Range:    Range{Start: Position{Line: 0, Character: 0}, End: Position{Line: 0, Character: 0}},
-						Severity: SeverityWarning,
-						Code:     "unaccounted-file",
-						Message:  "This file is not referenced in the resource manifest (fxmanifest.lua). Its globals are isolated and it cannot access other files in the resource.",
-					})
+				if env == EnvUnknown && !doc.IsFiveMManifest {
+					if s.DiagFiveMUnaccountedFile {
+						s.diagBuf = append(s.diagBuf, Diagnostic{
+							Range:    Range{Start: Position{Line: 0, Character: 0}, End: Position{Line: 0, Character: 0}},
+							Severity: SeverityWarning,
+							Code:     "unaccounted-file",
+							Message:  "This file is not referenced in the resource manifest (fxmanifest.lua). Its globals are isolated and it cannot access other files in the resource.",
+						})
+					}
 				}
 			}
 		}

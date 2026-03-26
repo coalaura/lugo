@@ -1216,8 +1216,8 @@ func (s *Server) canSeeSymbol(srcDoc, tgtDoc *Document) bool {
 			srcEnv := s.getDocFileEnv(srcRes, srcDoc)
 			tgtEnv := s.getDocFileEnv(srcRes, tgtDoc)
 
-			srcIsManifest := strings.HasSuffix(srcDoc.URI, "/fxmanifest.lua") || strings.HasSuffix(srcDoc.URI, "/__resource.lua")
-			tgtIsManifest := strings.HasSuffix(tgtDoc.URI, "/fxmanifest.lua") || strings.HasSuffix(tgtDoc.URI, "/__resource.lua")
+			srcIsManifest := srcDoc.IsFiveMManifest
+			tgtIsManifest := tgtDoc.IsFiveMManifest
 
 			if (!srcIsManifest && srcEnv == EnvUnknown) || (!tgtIsManifest && tgtEnv == EnvUnknown) {
 				return false

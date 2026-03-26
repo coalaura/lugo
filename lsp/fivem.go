@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/coalaura/lugo/ast"
@@ -25,6 +26,46 @@ type FiveMResource struct {
 	ClientCrossIncludes []string
 	ServerCrossIncludes []string
 	SharedCrossIncludes []string
+}
+
+func (r *FiveMResource) Equal(other *FiveMResource) bool {
+	if r == other {
+		return true
+	}
+
+	if r == nil || other == nil {
+		return false
+	}
+
+	if r.Name != other.Name || r.RootURI != other.RootURI || r.ManifestURI != other.ManifestURI {
+		return false
+	}
+
+	if !slices.Equal(r.ClientGlobs, other.ClientGlobs) {
+		return false
+	}
+
+	if !slices.Equal(r.ServerGlobs, other.ServerGlobs) {
+		return false
+	}
+
+	if !slices.Equal(r.SharedGlobs, other.SharedGlobs) {
+		return false
+	}
+
+	if !slices.Equal(r.ClientCrossIncludes, other.ClientCrossIncludes) {
+		return false
+	}
+
+	if !slices.Equal(r.ServerCrossIncludes, other.ServerCrossIncludes) {
+		return false
+	}
+
+	if !slices.Equal(r.SharedCrossIncludes, other.SharedCrossIncludes) {
+		return false
+	}
+
+	return true
 }
 
 func unquoteLuaString(s string) string {

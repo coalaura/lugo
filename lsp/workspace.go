@@ -40,9 +40,13 @@ func (s *Server) handleDidOpen(req Request) {
 
 	s.OpenFiles[uri] = true
 
-	s.updateDocument(uri, []byte(params.TextDocument.Text))
+	needsRepublish := s.updateDocument(uri, []byte(params.TextDocument.Text))
 
-	s.publishDiagnostics(uri)
+	if needsRepublish {
+		s.publishWorkspaceDiagnostics()
+	} else {
+		s.publishDiagnostics(uri)
+	}
 
 	s.Log.Debugf("Opened document: %s\n", uri)
 }
@@ -66,9 +70,13 @@ func (s *Server) handleDidChange(req Request) {
 	}
 
 	if len(params.ContentChanges) > 0 {
-		s.updateDocument(uri, []byte(params.ContentChanges[0].Text))
+		needsRepublish := s.updateDocument(uri, []byte(params.ContentChanges[0].Text))
 
-		s.publishDiagnostics(uri)
+		if needsRepublish {
+			s.publishWorkspaceDiagnostics()
+		} else {
+			s.publishDiagnostics(uri)
+		}
 
 		s.Log.Debugf("Updated document: %s\n", uri)
 	}
@@ -134,10 +142,14 @@ func (s *Server) handleDidChangeWatchedFiles(req Request) {
 				path := s.uriToPath(uri)
 
 				if b, err := os.ReadFile(path); err == nil {
-					s.updateDocument(uri, b)
+					needsRepublish := s.updateDocument(uri, b)
 
 					if s.isWorkspaceURI(uri) {
-						s.publishDiagnostics(uri)
+						if needsRepublish {
+							s.publishWorkspaceDiagnostics()
+						} else {
+							s.publishDiagnostics(uri)
+						}
 					}
 				}
 			}
@@ -249,8 +261,8 @@ func (s *Server) refreshWorkspace() {
 	}
 
 	if s.FeatureFiveM {
-		for uri, doc := range s.Documents {
-			if strings.HasSuffix(uri, "/fxmanifest.lua") || strings.HasSuffix(uri, "/__resource.lua") {
+		for _, doc := range s.Documents {
+			if doc.IsFiveMManifest {
 				res := s.parseFiveMManifest(doc)
 
 				s.FiveMResources[res.RootURI] = res
@@ -438,15 +450,16 @@ func (s *Server) indexEmbeddedStdlib(total, indexed, unchanged *int) {
 	}
 }
 
-func (s *Server) updateDocument(uri string, source []byte) {
+func (s *Server) updateDocument(uri string, source []byte) bool {
 	var (
-		tree *ast.Tree
-		doc  *Document
+		needsWorkspaceRepublish bool
+		tree                    *ast.Tree
+		doc                     *Document
 	)
 
 	if existing, exists := s.Documents[uri]; exists {
 		if bytes.Equal(existing.Source, source) {
-			return
+			return false
 		}
 
 		doc = existing
@@ -476,6 +489,7 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		doc.IsLibrary = s.checkIsLibrary(uri, doc.LowerPath)
 		doc.IsWorkspace = s.checkIsWorkspace(uri, doc.LowerPath)
 		doc.ModuleName = s.computeModuleName(uri, doc.Path, doc.LowerPath)
+		doc.IsFiveMManifest = strings.HasSuffix(uri, "/fxmanifest.lua") || strings.HasSuffix(uri, "/__resource.lua")
 
 		s.Documents[uri] = doc
 	}
@@ -832,14 +846,29 @@ func (s *Server) updateDocument(uri string, source []byte) {
 		}
 	}
 
-	if s.FeatureFiveM && (strings.HasSuffix(uri, "/fxmanifest.lua") || strings.HasSuffix(uri, "/__resource.lua")) {
+	if s.FeatureFiveM && doc.IsFiveMManifest {
 		res := s.parseFiveMManifest(doc)
 
-		s.FiveMResources[res.RootURI] = res
-		s.FiveMResourceByName[res.Name] = res
+		oldRes := s.FiveMResources[res.RootURI]
+
+		if !res.Equal(oldRes) {
+			s.FiveMResources[res.RootURI] = res
+			s.FiveMResourceByName[res.Name] = res
+
+			for dUri, d := range s.Documents {
+				if strings.HasPrefix(dUri, res.RootURI) {
+					d.EnvResolved = false
+					d.FiveMResolved = false
+				}
+			}
+
+			needsWorkspaceRepublish = true
+		}
 	}
 
 	s.Documents[uri] = doc
+
+	return needsWorkspaceRepublish
 }
 
 func (s *Server) clearDocument(uri string) {

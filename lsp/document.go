@@ -31,6 +31,7 @@ type Document struct {
 	IsMeta             bool
 	IsLibrary          bool
 	IsWorkspace        bool
+	IsFiveMManifest    bool
 	FiveMResolved      bool
 	EnvResolved        bool
 }
