@@ -95,6 +95,14 @@ func TestParser_ValidSyntax(t *testing.T) {
 				local z = (a + b) * c
 			`,
 		},
+		{
+			name: "Operator Precedence",
+			input: `
+				local a = 1 + 2 * 3 ^ 4
+				local b = (1 + 2) * 3
+				local c = a == b and c ~= d or e
+			`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -189,6 +197,34 @@ func TestParser_ErrorRecovery(t *testing.T) {
 				t.Errorf("Parser failed to recover! Could not find the subsequent identifier %q in the AST", tt.verifyIdent)
 			}
 		})
+	}
+}
+
+func TestParser_VarargRule(t *testing.T) {
+	input := []byte(`function bad(..., a) end`)
+
+	tree := ast.NewTree(input)
+
+	p := parser.New(input, tree, 0)
+
+	p.Parse()
+
+	if len(p.Errors) == 0 {
+		t.Errorf("Expected syntax error for vararg '...' not being the last parameter")
+	} else {
+		var foundVarargErr bool
+
+		for _, err := range p.Errors {
+			if err.Message == "syntax error: vararg '...' must be the last parameter" {
+				foundVarargErr = true
+
+				break
+			}
+		}
+
+		if !foundVarargErr {
+			t.Errorf("Expected specific vararg error, got: %v", p.Errors)
+		}
 	}
 }
 

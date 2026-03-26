@@ -92,6 +92,13 @@ func TestLexer_Comprehensive(t *testing.T) {
 				{token.EOF, ""},
 			},
 		},
+		{
+			name:  "Unterminated Strings and Comments",
+			input: `"unterminated string   `,
+			expected: []lexTest{
+				{token.String, `"unterminated string   `}, {token.EOF, ""},
+			},
+		},
 	}
 
 	for _, tt := range tests {

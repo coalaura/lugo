@@ -33,9 +33,11 @@ func TestResolver_LocalScope(t *testing.T) {
 	tree := ast.NewTree(input)
 
 	p := parser.New(input, tree, 0)
+
 	root := p.Parse()
 
 	res := semantic.New(tree)
+
 	res.Resolve(root)
 
 	targets := findIdents(tree, "target")
@@ -63,9 +65,11 @@ func TestResolver_Shadowing(t *testing.T) {
 	tree := ast.NewTree(input)
 
 	p := parser.New(input, tree, 0)
+
 	root := p.Parse()
 
 	res := semantic.New(tree)
+
 	res.Resolve(root)
 
 	aNodes := findIdents(tree, "a")
@@ -102,9 +106,11 @@ func TestResolver_Globals(t *testing.T) {
 	tree := ast.NewTree(input)
 
 	p := parser.New(input, tree, 0)
+
 	root := p.Parse()
 
 	res := semantic.New(tree)
+
 	res.Resolve(root)
 
 	if len(res.GlobalDefs) != 1 {
@@ -130,13 +136,82 @@ func TestResolver_TablesAndMethods(t *testing.T) {
 	tree := ast.NewTree(input)
 
 	p := parser.New(input, tree, 0)
+
 	root := p.Parse()
 
 	res := semantic.New(tree)
+
 	res.Resolve(root)
 
 	if len(res.FieldDefs) != 1 {
 		t.Errorf("Expected 1 field definition (method), got %d", len(res.FieldDefs))
+	}
+}
+
+func TestResolver_LoopScopeLeakage(t *testing.T) {
+	input := []byte(`
+		for i = 1, 10 do
+			print(i)
+		end
+		print(i)
+	`)
+
+	tree := ast.NewTree(input)
+
+	p := parser.New(input, tree, 0)
+
+	root := p.Parse()
+
+	res := semantic.New(tree)
+
+	res.Resolve(root)
+
+	iNodes := findIdents(tree, "i")
+	if len(iNodes) != 3 {
+		t.Fatalf("Expected 3 'i' identifiers, found %d", len(iNodes))
+	}
+
+	loopDef := iNodes[0]
+	innerRef := iNodes[1]
+	outerRef := iNodes[2]
+
+	if res.References[innerRef] != loopDef {
+		t.Errorf("Inner 'i' did not resolve to the loop variable")
+	}
+
+	if res.References[outerRef] != ast.InvalidNode {
+		t.Errorf("Outer 'i' should be unresolved (global), but resolved to local def %d", res.References[outerRef])
+	}
+}
+
+func TestResolver_GlobalFields(t *testing.T) {
+	input := []byte(`
+		Config = {}
+		Config.Debug = true
+		function Config:Init() end
+	`)
+
+	tree := ast.NewTree(input)
+
+	p := parser.New(input, tree, 0)
+
+	root := p.Parse()
+
+	res := semantic.New(tree)
+
+	res.Resolve(root)
+
+	if len(res.GlobalDefs) != 1 {
+		t.Errorf("Expected 1 global definition (Config), got %d", len(res.GlobalDefs))
+	}
+
+	if len(res.FieldDefs) != 2 {
+		t.Fatalf("Expected 2 field definitions (Debug, Init), got %d", len(res.FieldDefs))
+	}
+
+	debugField := res.FieldDefs[0]
+	if string(debugField.ReceiverName) != "Config" {
+		t.Errorf("Expected receiver 'Config', got %q", debugField.ReceiverName)
 	}
 }
 
@@ -153,6 +228,7 @@ func BenchmarkResolver(b *testing.B) {
 	tree := ast.NewTree(src)
 
 	p := parser.New(src, tree, 0)
+
 	root := p.Parse()
 
 	res := semantic.New(tree)
