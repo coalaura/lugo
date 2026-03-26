@@ -163,14 +163,12 @@ func (s *Server) handleDocumentSymbol(req Request) {
 	}
 
 	var (
-		walkTable func(tableID ast.NodeID) []DocumentSymbol
-		walk      func(nodeID ast.NodeID) []DocumentSymbol
+		walkTable func(tableID ast.NodeID, out *[]DocumentSymbol)
+		walk      func(nodeID ast.NodeID, out *[]DocumentSymbol)
 	)
 
-	walkTable = func(tableID ast.NodeID) []DocumentSymbol {
+	walkTable = func(tableID ast.NodeID, out *[]DocumentSymbol) {
 		node := doc.Tree.Nodes[tableID]
-
-		var syms []DocumentSymbol
 
 		for i := uint16(0); i < node.Count; i++ {
 			fieldID := doc.Tree.ExtraList[node.Extra+uint32(i)]
@@ -192,15 +190,15 @@ func (s *Server) handleDocumentSymbol(req Request) {
 				switch valNode.Kind {
 				case ast.KindFunctionExpr:
 					kind = SymbolKindMethod
-					children = walk(valNode.Right)
+					walk(valNode.Right, &children)
 				case ast.KindTableExpr:
 					kind = SymbolKindClass
-					children = walkTable(fieldNode.Right)
+					walkTable(fieldNode.Right, &children)
 				case ast.KindCallExpr, ast.KindMethodCall:
-					children = walk(fieldNode.Right)
+					walk(fieldNode.Right, &children)
 				}
 
-				syms = append(syms, DocumentSymbol{
+				*out = append(*out, DocumentSymbol{
 					Name:           name,
 					Kind:           kind,
 					Range:          getNodeRange(doc.Tree, fieldID),
@@ -209,25 +207,21 @@ func (s *Server) handleDocumentSymbol(req Request) {
 				})
 			}
 		}
-
-		return syms
 	}
 
-	walk = func(nodeID ast.NodeID) []DocumentSymbol {
+	walk = func(nodeID ast.NodeID, out *[]DocumentSymbol) {
 		if nodeID == ast.InvalidNode {
-			return nil
+			return
 		}
 
 		node := doc.Tree.Nodes[nodeID]
 
-		var syms []DocumentSymbol
-
 		switch node.Kind {
 		case ast.KindFile:
-			return walk(node.Left)
+			walk(node.Left, out)
 		case ast.KindBlock:
 			for i := uint16(0); i < node.Count; i++ {
-				syms = append(syms, walk(doc.Tree.ExtraList[node.Extra+uint32(i)])...)
+				walk(doc.Tree.ExtraList[node.Extra+uint32(i)], out)
 			}
 		case ast.KindLocalFunction, ast.KindFunctionStmt:
 			nameNode := doc.Tree.Nodes[node.Left]
@@ -247,11 +241,11 @@ func (s *Server) handleDocumentSymbol(req Request) {
 			if node.Right != ast.InvalidNode {
 				funcExpr := doc.Tree.Nodes[node.Right]
 				if funcExpr.Kind == ast.KindFunctionExpr {
-					children = walk(funcExpr.Right)
+					walk(funcExpr.Right, &children)
 				}
 			}
 
-			syms = append(syms, DocumentSymbol{
+			*out = append(*out, DocumentSymbol{
 				Name:           name,
 				Kind:           kind,
 				Range:          getNodeRange(doc.Tree, nodeID),
@@ -286,24 +280,32 @@ func (s *Server) handleDocumentSymbol(req Request) {
 
 					switch rNode.Kind {
 					case ast.KindFunctionExpr:
-						syms = append(syms, DocumentSymbol{
+						var children []DocumentSymbol
+
+						walk(rNode.Right, &children)
+
+						*out = append(*out, DocumentSymbol{
 							Name:           name,
 							Kind:           SymbolKindFunction,
 							Range:          getNodeRange(doc.Tree, nodeID),
 							SelectionRange: getNodeRange(doc.Tree, lID),
-							Children:       walk(rNode.Right),
+							Children:       children,
 						})
 					case ast.KindTableExpr:
-						syms = append(syms, DocumentSymbol{
+						var children []DocumentSymbol
+
+						walkTable(rID, &children)
+
+						*out = append(*out, DocumentSymbol{
 							Name:           name,
 							Kind:           SymbolKindClass,
 							Range:          getNodeRange(doc.Tree, nodeID),
 							SelectionRange: getNodeRange(doc.Tree, lID),
-							Children:       walkTable(rID),
+							Children:       children,
 						})
 					default:
 						if node.Kind == ast.KindLocalAssign {
-							syms = append(syms, DocumentSymbol{
+							*out = append(*out, DocumentSymbol{
 								Name:           name,
 								Kind:           SymbolKindVariable,
 								Range:          getNodeRange(doc.Tree, lID),
@@ -312,7 +314,7 @@ func (s *Server) handleDocumentSymbol(req Request) {
 						}
 
 						if rNode.Kind == ast.KindCallExpr || rNode.Kind == ast.KindMethodCall {
-							syms = append(syms, walk(rID)...)
+							walk(rID, out)
 						}
 					}
 				}
@@ -410,17 +412,21 @@ func (s *Server) handleDocumentSymbol(req Request) {
 						selRange = getNodeRange(doc.Tree, argID)
 					}
 
-					syms = append(syms, DocumentSymbol{
+					var children []DocumentSymbol
+
+					walk(argNode.Right, &children)
+
+					*out = append(*out, DocumentSymbol{
 						Name:           name,
 						Kind:           SymbolKindFunction,
 						Range:          getNodeRange(doc.Tree, argID),
 						SelectionRange: selRange,
-						Children:       walk(argNode.Right),
+						Children:       children,
 					})
 				case ast.KindCallExpr, ast.KindMethodCall:
-					syms = append(syms, walk(argID)...)
+					walk(argID, out)
 				case ast.KindTableExpr:
-					syms = append(syms, walkTable(argID)...)
+					walkTable(argID, out)
 				}
 			}
 		case ast.KindReturn:
@@ -441,34 +447,38 @@ func (s *Server) handleDocumentSymbol(req Request) {
 							selRange = getNodeRange(doc.Tree, exprID)
 						}
 
-						syms = append(syms, DocumentSymbol{
+						var children []DocumentSymbol
+
+						walk(exprNode.Right, &children)
+
+						*out = append(*out, DocumentSymbol{
 							Name:           "(return function)",
 							Kind:           SymbolKindFunction,
 							Range:          getNodeRange(doc.Tree, exprID),
 							SelectionRange: selRange,
-							Children:       walk(exprNode.Right),
+							Children:       children,
 						})
 					case ast.KindCallExpr, ast.KindMethodCall:
-						syms = append(syms, walk(exprID)...)
+						walk(exprID, out)
 					}
 				}
 			}
 		case ast.KindIf:
-			syms = append(syms, walk(node.Right)...)
+			walk(node.Right, out)
 
 			for i := uint16(0); i < node.Count; i++ {
-				syms = append(syms, walk(doc.Tree.ExtraList[node.Extra+uint32(i)])...)
+				walk(doc.Tree.ExtraList[node.Extra+uint32(i)], out)
 			}
 		case ast.KindElseIf, ast.KindWhile, ast.KindForIn, ast.KindForNum:
-			syms = append(syms, walk(node.Right)...)
+			walk(node.Right, out)
 		case ast.KindElse, ast.KindRepeat, ast.KindDo:
-			syms = append(syms, walk(node.Left)...)
+			walk(node.Left, out)
 		}
-
-		return syms
 	}
 
-	symbols := walk(doc.Tree.Root)
+	var symbols []DocumentSymbol
+
+	walk(doc.Tree.Root, &symbols)
 
 	if symbols == nil {
 		symbols = []DocumentSymbol{}
@@ -1001,16 +1011,18 @@ func (s *Server) removeDocumentGlobals(uri string, doc *Document) {
 
 	for nodeID, key := range doc.ExportedGlobalDefs {
 		if syms, ok := s.GlobalIndex[key]; ok {
-			var newSyms []GlobalSymbol
+			var n int
 
 			for _, sym := range syms {
 				if sym.URI != uri || sym.NodeID != nodeID {
-					newSyms = append(newSyms, sym)
+					syms[n] = sym
+
+					n++
 				}
 			}
 
-			if len(newSyms) > 0 {
-				s.GlobalIndex[key] = newSyms
+			if n > 0 {
+				s.GlobalIndex[key] = syms[:n]
 			} else {
 				delete(s.GlobalIndex, key)
 			}
