@@ -60,6 +60,15 @@ Lugo performs workspace-wide analysis to catch bugs before runtime:
 * **Used Ignored Variables:** Warns when a variable conventionally marked as ignored (prefixed with `_`) is actually used in the code, offering a quick-fix to safely rename it.
 * **Deprecation:** Warns when using symbols marked with `@deprecated`.
 
+## FiveM Support (Optional)
+
+Lugo includes first-class, built-in support for FiveM resource development. When enabled via the `lugo.fivem.enabled` setting, Lugo will automatically parse `fxmanifest.lua` and `__resource.lua` files to accurately map your project structure.
+
+* **Environment Isolation:** Automatically detects whether a file is `client`, `server`, or `shared`. Client files cannot see server-only globals, and vice versa.
+* **Resource Scoping:** Globals defined in one resource will not leak into another resource.
+* **Cross-Resource Includes:** Understands `@resource_name/file.lua` syntax in manifests for cross-resource dependencies.
+* **Unaccounted File Warnings:** Warns you if a `.lua` file exists in your workspace but is missing from the resource manifest, preventing "script not running" headaches.
+
 ## Installation
 
 ### VS Code
