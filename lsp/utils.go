@@ -582,24 +582,29 @@ func isOppositeCondition(tree *ast.Tree, a, b ast.NodeID) bool {
 
 	checkNot := func(n, other ast.NodeID) bool {
 		node := tree.Nodes[n]
-		if node.Kind == ast.KindUnaryExpr {
+		if node.Kind == ast.KindUnaryExpr && node.Right != ast.InvalidNode && other != ast.InvalidNode {
 			src := tree.Source[node.Start:node.End]
 			if bytes.HasPrefix(src, []byte("not")) {
 				right := tree.Nodes[node.Right]
+				otherNode := tree.Nodes[other]
 
-				rightSrc := bytes.TrimSpace(tree.Source[right.Start:right.End])
-				otherSrc := bytes.TrimSpace(tree.Source[tree.Nodes[other].Start:tree.Nodes[other].End])
+				if right.Start <= right.End && right.End <= uint32(len(tree.Source)) &&
+					otherNode.Start <= otherNode.End && otherNode.End <= uint32(len(tree.Source)) {
 
-				// Strip optional parentheses for comparison
-				if bytes.HasPrefix(rightSrc, []byte("(")) && bytes.HasSuffix(rightSrc, []byte(")")) {
-					rightSrc = bytes.TrimSpace(rightSrc[1 : len(rightSrc)-1])
+					rightSrc := bytes.TrimSpace(tree.Source[right.Start:right.End])
+					otherSrc := bytes.TrimSpace(tree.Source[otherNode.Start:otherNode.End])
+
+					// Strip optional parentheses for comparison
+					if bytes.HasPrefix(rightSrc, []byte("(")) && bytes.HasSuffix(rightSrc, []byte(")")) {
+						rightSrc = bytes.TrimSpace(rightSrc[1 : len(rightSrc)-1])
+					}
+
+					if bytes.HasPrefix(otherSrc, []byte("(")) && bytes.HasSuffix(otherSrc, []byte(")")) {
+						otherSrc = bytes.TrimSpace(otherSrc[1 : len(otherSrc)-1])
+					}
+
+					return bytes.Equal(rightSrc, otherSrc)
 				}
-
-				if bytes.HasPrefix(otherSrc, []byte("(")) && bytes.HasSuffix(otherSrc, []byte(")")) {
-					otherSrc = bytes.TrimSpace(otherSrc[1 : len(otherSrc)-1])
-				}
-
-				return bytes.Equal(rightSrc, otherSrc)
 			}
 		}
 
