@@ -1688,10 +1688,16 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 
 					if !isDynamic || rhsList.Count > lhsList.Count {
 						if rhsList.Count > lhsList.Count {
-							firstRedundantID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count)]
-							prevRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count-1)]
+							var startOff uint32
 
-							startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRedundantID].Start, doc.Tree.Nodes[prevRhsID].End)
+							firstRedundantID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count)]
+
+							if lhsList.Count > 0 {
+								prevRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count-1)]
+								startOff = s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRedundantID].Start, doc.Tree.Nodes[prevRhsID].End)
+							} else {
+								startOff = doc.Tree.Nodes[firstRedundantID].Start
+							}
 
 							fixes = append(fixes, SafeFix{
 								Coverage: []ast.NodeID{nodeID},
@@ -1738,10 +1744,16 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 
 					if !isDynamic || rhsList.Count > lhsList.Count {
 						if rhsList.Count > lhsList.Count {
-							firstRedundantID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count)]
-							prevRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count-1)]
+							var startOff uint32
 
-							startOff := s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRedundantID].Start, doc.Tree.Nodes[prevRhsID].End)
+							firstRedundantID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count)]
+
+							if lhsList.Count > 0 {
+								prevRhsID := doc.Tree.ExtraList[rhsList.Extra+uint32(lhsList.Count-1)]
+								startOff = s.findCommaBefore(doc.Source, doc.Tree.Nodes[firstRedundantID].Start, doc.Tree.Nodes[prevRhsID].End)
+							} else {
+								startOff = doc.Tree.Nodes[firstRedundantID].Start
+							}
 
 							fixes = append(fixes, SafeFix{
 								Coverage: []ast.NodeID{nodeID},
