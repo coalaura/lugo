@@ -299,6 +299,7 @@ func (t *Tree) Reset(source []byte) {
 	if cap(t.Nodes) < len(source)/10 {
 		t.Nodes = make([]Node, 1, len(source)/10+1024)
 		t.ExtraList = make([]NodeID, 0, len(source)/20+512)
+		t.Nodes[0] = Node{Kind: KindInvalid, Start: 0xFFFFFFFF, End: 0xFFFFFFFF}
 	} else if len(t.Nodes) > 0 {
 		t.Nodes = t.Nodes[:1]
 		t.ExtraList = t.ExtraList[:0]

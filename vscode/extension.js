@@ -194,6 +194,7 @@ async function startClient(context) {
 	const clientOptions = {
 		documentSelector: [
 			{ scheme: "file", language: "lua" },
+			{ scheme: "untitled", language: "lua" },
 			{ scheme: "std", language: "lua" },
 		],
 		synchronize: {

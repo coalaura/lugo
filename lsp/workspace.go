@@ -99,6 +99,8 @@ func (s *Server) handleDidClose(req Request) {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			s.clearDocument(uri)
 		}
+	} else if strings.HasPrefix(uri, "untitled:") {
+		s.clearDocument(uri)
 	}
 
 	s.Log.Debugf("Closed document: %s\n", uri)
