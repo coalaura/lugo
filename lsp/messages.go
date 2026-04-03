@@ -75,8 +75,14 @@ type MarkupContent struct {
 	Value string `json:"value"`
 }
 
+type WorkspaceFolder struct {
+	URI  string `json:"uri"`
+	Name string `json:"name"`
+}
+
 type InitializeParams struct {
 	RootURI               string                `json:"rootUri"`
+	WorkspaceFolders      []WorkspaceFolder     `json:"workspaceFolders,omitempty"`
 	InitializationOptions InitializationOptions `json:"initializationOptions"`
 }
 

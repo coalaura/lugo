@@ -56,9 +56,11 @@ type Server struct {
 	sharedCommentBuf []byte
 	sharedDepBuf     []byte
 
-	Version       string
-	RootURI       string
-	lowerRootPath string
+	Version               string
+	RootURI               string
+	lowerRootPath         string
+	WorkspaceFolders      []string
+	lowerWorkspaceFolders []string
 
 	MaxParseErrors int
 
@@ -278,7 +280,13 @@ func (s *Server) setLibraryPaths(paths []string) bool {
 	s.LibraryPaths = slices.Clone(paths)
 	s.lowerLibraryPaths = s.lowerLibraryPaths[:0]
 
-	for _, lib := range s.LibraryPaths {
+	for i, lib := range s.LibraryPaths {
+		if realPath, err := filepath.EvalSymlinks(lib); err == nil {
+			s.LibraryPaths[i] = realPath
+
+			lib = realPath
+		}
+
 		s.lowerLibraryPaths = append(s.lowerLibraryPaths, strings.ToLower(filepath.Clean(filepath.FromSlash(lib))))
 	}
 
@@ -397,8 +405,23 @@ func (s *Server) handleInitialize(req Request) {
 
 	err := json.Unmarshal(req.Params, &params)
 	if err == nil {
-		s.RootURI = params.RootURI
-		s.lowerRootPath = strings.ToLower(s.uriToPath(params.RootURI))
+		if len(params.WorkspaceFolders) > 0 {
+			for _, folder := range params.WorkspaceFolders {
+				uri := s.normalizeURI(folder.URI)
+
+				s.WorkspaceFolders = append(s.WorkspaceFolders, uri)
+				s.lowerWorkspaceFolders = append(s.lowerWorkspaceFolders, strings.ToLower(s.uriToPath(uri)))
+			}
+
+			s.RootURI = s.WorkspaceFolders[0]
+			s.lowerRootPath = s.lowerWorkspaceFolders[0]
+		} else if params.RootURI != "" {
+			s.RootURI = s.normalizeURI(params.RootURI)
+			s.lowerRootPath = strings.ToLower(s.uriToPath(s.RootURI))
+
+			s.WorkspaceFolders = []string{s.RootURI}
+			s.lowerWorkspaceFolders = []string{s.lowerRootPath}
+		}
 
 		s.applyInitializationOptions(params.InitializationOptions)
 	}

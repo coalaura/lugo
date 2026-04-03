@@ -242,10 +242,10 @@ func (s *Server) refreshWorkspace() {
 		s.indexWorkspace(libPath, &total, &indexed, &unchanged, &failed)
 	}
 
-	if s.RootURI != "" {
-		s.Log.Printf("Indexing workspace: %s\n", s.RootURI)
+	for _, wf := range s.WorkspaceFolders {
+		s.Log.Printf("Indexing workspace folder: %s\n", wf)
 
-		s.indexWorkspace(s.RootURI, &total, &indexed, &unchanged, &failed)
+		s.indexWorkspace(wf, &total, &indexed, &unchanged, &failed)
 	}
 
 	for uri := range s.Documents {
@@ -305,18 +305,7 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 	var path string
 
 	if strings.HasPrefix(rootPathOrURI, "file://") {
-		u, err := url.Parse(rootPathOrURI)
-		if err != nil {
-			s.Log.Errorf("Invalid workspace URI format: %s\n", rootPathOrURI)
-
-			return
-		}
-
-		path = u.Path
-
-		if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") {
-			path = path[1:]
-		}
+		path = s.uriToPath(rootPathOrURI)
 	} else {
 		path = rootPathOrURI
 	}
@@ -379,7 +368,7 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 			if isDir {
 				walk(fullPath)
 			} else if strings.HasSuffix(name, ".lua") {
-				uri := s.pathToURI(fullPath)
+				uri := s.normalizeURI(s.pathToURI(fullPath))
 
 				if s.OpenFiles[uri] {
 					if s.activeURIs != nil {
@@ -998,11 +987,17 @@ func (s *Server) checkIsWorkspace(uri, lowerPath string) bool {
 		}
 	}
 
-	if s.RootURI == "" {
+	if len(s.lowerWorkspaceFolders) == 0 {
 		return true
 	}
 
-	return strings.HasPrefix(lowerPath, s.lowerRootPath)
+	for _, wf := range s.lowerWorkspaceFolders {
+		if strings.HasPrefix(lowerPath, wf) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (s *Server) isWorkspaceURI(uri string) bool {
@@ -1058,17 +1053,24 @@ func (s *Server) computeModuleName(uri, path, lowerPath string) string {
 		return ""
 	}
 
-	var bestRoot string
+	var (
+		bestRoot string
+		bestLen  int
+	)
 
-	if s.RootURI != "" {
-		if strings.HasPrefix(lowerPath, s.lowerRootPath) {
-			bestRoot = s.uriToPath(s.RootURI)
+	for i, wf := range s.lowerWorkspaceFolders {
+		if strings.HasPrefix(lowerPath, wf) {
+			if len(wf) > bestLen {
+				bestLen = len(wf)
+				bestRoot = s.uriToPath(s.WorkspaceFolders[i])
+			}
 		}
 	}
 
 	for i, lib := range s.lowerLibraryPaths {
 		if strings.HasPrefix(lowerPath, lib) {
-			if len(lib) > len(bestRoot) {
+			if len(lib) > bestLen {
+				bestLen = len(lib)
 				bestRoot = s.LibraryPaths[i]
 			}
 		}
@@ -1098,7 +1100,21 @@ func (s *Server) normalizeURI(uri string) string {
 		return uri
 	}
 
-	return s.pathToURI(s.uriToPath(uri))
+	path := s.uriToPath(uri)
+
+	realPath, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		path = realPath
+	} else {
+		dir := filepath.Dir(path)
+
+		realDir, err := filepath.EvalSymlinks(dir)
+		if err == nil {
+			path = filepath.Join(realDir, filepath.Base(path))
+		}
+	}
+
+	return s.pathToURI(path)
 }
 
 func (s *Server) resolveModule(currentURI string, modName string) *Document {
@@ -1131,10 +1147,10 @@ func (s *Server) resolveModule(currentURI string, modName string) *Document {
 		}
 	}
 
-	var rootDir string
+	var rootDirs []string
 
-	if s.RootURI != "" {
-		rootDir = filepath.ToSlash(s.uriToPath(s.RootURI))
+	for _, wf := range s.WorkspaceFolders {
+		rootDirs = append(rootDirs, filepath.ToSlash(s.uriToPath(wf)))
 	}
 
 	for _, d := range s.Documents {
@@ -1149,8 +1165,13 @@ func (s *Server) resolveModule(currentURI string, modName string) *Document {
 
 			if currentDir != "" && strings.HasPrefix(path, currentDir) {
 				score = 3
-			} else if rootDir != "" && strings.HasPrefix(path, rootDir) {
-				score = 2
+			} else {
+				for _, rootDir := range rootDirs {
+					if strings.HasPrefix(path, rootDir) {
+						score = 2
+						break
+					}
+				}
 			}
 
 			if score > bestScore {
