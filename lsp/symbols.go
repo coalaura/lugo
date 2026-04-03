@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"bytes"
 	"encoding/json"
 	"iter"
 	"strings"
@@ -698,6 +699,20 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 	}
 
 	isGlobal := (defID == ast.InvalidNode && recDef == ast.InvalidNode && (!isProp || gKey.ReceiverHash != 0)) || isModuleAccess
+
+	if defID == ast.InvalidNode && identName == "self" {
+		isGlobal = false
+
+		doc.GetLocalsAt(identNode.Start, func(name []byte, id ast.NodeID) bool {
+			if bytes.Equal(name, []byte("self")) {
+				defID = id
+
+				return false
+			}
+
+			return true
+		})
+	}
 
 	ctx := &SymbolContext{
 		TargetDoc:   doc,

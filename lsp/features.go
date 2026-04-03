@@ -611,7 +611,7 @@ func (s *Server) handleCompletion(req Request) {
 		}
 
 		for _, fd := range doc.Resolver.FieldDefs {
-			if (recDef != ast.InvalidNode && fd.ReceiverDef == recDef) || (recDef == ast.InvalidNode && fd.ReceiverHash == recHash) {
+			if fd.ReceiverHash == recHash && (recDef == ast.InvalidNode || fd.ReceiverDef == recDef) {
 				node := doc.Tree.Nodes[fd.NodeID]
 
 				kind := FieldCompletion

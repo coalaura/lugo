@@ -296,6 +296,12 @@ func (doc *Document) GetLocalsAt(offset uint32, yield func(name []byte, defID as
 
 			if node.Kind == ast.KindFunctionStmt {
 				funcExpr = node.Right
+
+				if int(node.Left) < len(doc.Tree.Nodes) && doc.Tree.Nodes[node.Left].Kind == ast.KindMethodName {
+					if !yield([]byte("self"), node.Left) {
+						return
+					}
+				}
 			}
 
 			if funcExpr != ast.InvalidNode {

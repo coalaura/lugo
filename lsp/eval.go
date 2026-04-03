@@ -392,9 +392,19 @@ func applyOp(left, right evalResult, op token.Kind) (evalResult, bool) {
 		case token.BitXor:
 			return evalResult{kind: numKind, num: float64(int64(left.num) ^ int64(right.num))}, true
 		case token.ShiftLeft:
-			return evalResult{kind: numKind, num: float64(int64(left.num) << int64(right.num))}, true
+			shift := int64(right.num)
+			if shift < 0 {
+				return evalResult{}, false
+			}
+
+			return evalResult{kind: numKind, num: float64(int64(left.num) << shift)}, true
 		case token.ShiftRight:
-			return evalResult{kind: numKind, num: float64(int64(left.num) >> int64(right.num))}, true
+			shift := int64(right.num)
+			if shift < 0 {
+				return evalResult{}, false
+			}
+
+			return evalResult{kind: numKind, num: float64(int64(left.num) >> shift)}, true
 		case token.Eq:
 			return evalResult{kind: ast.KindTrue, boolVal: left.num == right.num}, true
 		case token.NotEq:
