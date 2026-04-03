@@ -159,13 +159,25 @@ func hasPrefixFold(text, prefix []byte) bool {
 func trimTrailingWhitespace(text string) string {
 	var out strings.Builder
 
-	lines := strings.Split(text, "\n")
+	out.Grow(len(text))
 
-	for i, line := range lines {
+	for len(text) > 0 {
+		idx := strings.IndexByte(text, '\n')
+
+		var line string
+
+		if idx == -1 {
+			line = text
+			text = ""
+		} else {
+			line = text[:idx]
+			text = text[idx+1:]
+		}
+
 		out.WriteString(strings.TrimRight(line, " \t\r"))
 
-		if i < len(lines)-1 {
-			out.WriteString("\n")
+		if idx != -1 {
+			out.WriteByte('\n')
 		}
 	}
 

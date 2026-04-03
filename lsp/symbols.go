@@ -703,15 +703,13 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 	if defID == ast.InvalidNode && identName == "self" {
 		isGlobal = false
 
-		doc.GetLocalsAt(identNode.Start, func(name []byte, id ast.NodeID) bool {
+		for name, id := range doc.LocalsAt(identNode.Start) {
 			if bytes.Equal(name, []byte("self")) {
 				defID = id
 
-				return false
+				break
 			}
-
-			return true
-		})
+		}
 	}
 
 	ctx := &SymbolContext{

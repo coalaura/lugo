@@ -38,6 +38,10 @@ func ReadMessage(r *bufio.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("missing content length")
 	}
 
+	if length > 100*1024*1024 { // 100MB hard limit
+		return nil, fmt.Errorf("message too large: %d bytes", length)
+	}
+
 	content := make([]byte, length)
 
 	_, err := io.ReadFull(r, content)

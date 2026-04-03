@@ -235,121 +235,122 @@ func (doc *Document) getCommentsAbove(id ast.NodeID) []byte {
 	return bytes.TrimSpace(b)
 }
 
-// GetLocalsAt walks up the AST from the given offset and calls 'yield' for every
-// local variable in scope. Returns false if the yield function stops the iteration.
-func (doc *Document) GetLocalsAt(offset uint32, yield func(name []byte, defID ast.NodeID) bool) {
-	nodeID := doc.Tree.NodeAt(offset)
-	if nodeID == ast.InvalidNode {
-		return
-	}
+// LocalsAt walks up the AST from the given offset and yields every local variable in scope.
+func (doc *Document) LocalsAt(offset uint32) iter.Seq2[[]byte, ast.NodeID] {
+	return func(yield func([]byte, ast.NodeID) bool) {
+		nodeID := doc.Tree.NodeAt(offset)
+		if nodeID == ast.InvalidNode {
+			return
+		}
 
-	curr := nodeID
+		curr := nodeID
 
-	for curr != ast.InvalidNode {
-		node := doc.Tree.Nodes[curr]
+		for curr != ast.InvalidNode {
+			node := doc.Tree.Nodes[curr]
 
-		switch node.Kind {
-		case ast.KindBlock, ast.KindFile:
-			// Binary search for the active statement
-			low, high := 0, int(node.Count)
+			switch node.Kind {
+			case ast.KindBlock, ast.KindFile:
+				// Binary search for the active statement
+				low, high := 0, int(node.Count)
 
-			for low < high {
-				mid := int(uint(low+high) >> 1)
-				stmtID := doc.Tree.ExtraList[node.Extra+uint32(mid)]
+				for low < high {
+					mid := int(uint(low+high) >> 1)
+					stmtID := doc.Tree.ExtraList[node.Extra+uint32(mid)]
 
-				if doc.Tree.Nodes[stmtID].Start >= offset {
-					high = mid
-				} else {
-					low = mid + 1
+					if doc.Tree.Nodes[stmtID].Start >= offset {
+						high = mid
+					} else {
+						low = mid + 1
+					}
 				}
-			}
 
-			lastStmtIdx := low - 1
+				lastStmtIdx := low - 1
 
-			for i := lastStmtIdx; i >= 0; i-- {
-				stmtID := doc.Tree.ExtraList[node.Extra+uint32(i)]
-				stmtNode := doc.Tree.Nodes[stmtID]
+				for i := lastStmtIdx; i >= 0; i-- {
+					stmtID := doc.Tree.ExtraList[node.Extra+uint32(i)]
+					stmtNode := doc.Tree.Nodes[stmtID]
 
-				switch stmtNode.Kind {
-				case ast.KindLocalAssign:
-					nameList := doc.Tree.Nodes[stmtNode.Left]
+					switch stmtNode.Kind {
+					case ast.KindLocalAssign:
+						nameList := doc.Tree.Nodes[stmtNode.Left]
 
-					// Iterate backwards to support `local a, a = 1, 2`
-					for j := int(nameList.Count) - 1; j >= 0; j-- {
-						identID := doc.Tree.ExtraList[nameList.Extra+uint32(j)]
+						// Iterate backwards to support `local a, a = 1, 2`
+						for j := int(nameList.Count) - 1; j >= 0; j-- {
+							identID := doc.Tree.ExtraList[nameList.Extra+uint32(j)]
+							identNode := doc.Tree.Nodes[identID]
+
+							if !yield(doc.Source[identNode.Start:identNode.End], identID) {
+								return
+							}
+						}
+					case ast.KindLocalFunction:
+						identNode := doc.Tree.Nodes[stmtNode.Left]
+
+						if !yield(doc.Source[identNode.Start:identNode.End], stmtNode.Left) {
+							return
+						}
+					}
+				}
+			case ast.KindFunctionExpr, ast.KindFunctionStmt:
+				var funcExpr ast.NodeID = curr
+
+				if node.Kind == ast.KindFunctionStmt {
+					funcExpr = node.Right
+
+					if int(node.Left) < len(doc.Tree.Nodes) && doc.Tree.Nodes[node.Left].Kind == ast.KindMethodName {
+						if !yield([]byte("self"), node.Left) {
+							return
+						}
+					}
+				}
+
+				if funcExpr != ast.InvalidNode {
+					exprNode := doc.Tree.Nodes[funcExpr]
+
+					for i := uint16(0); i < exprNode.Count; i++ {
+						paramID := doc.Tree.ExtraList[exprNode.Extra+uint32(i)]
+						paramNode := doc.Tree.Nodes[paramID]
+
+						if !yield(doc.Source[paramNode.Start:paramNode.End], paramID) {
+							return
+						}
+					}
+				}
+			case ast.KindForNum:
+				var exprsEnd uint32
+
+				if node.Count > 0 {
+					lastExprID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
+					exprsEnd = doc.Tree.Nodes[lastExprID].End
+				} else {
+					exprsEnd = doc.Tree.Nodes[node.Left].End
+				}
+
+				if offset > exprsEnd {
+					identNode := doc.Tree.Nodes[node.Left]
+
+					if !yield(doc.Source[identNode.Start:identNode.End], node.Left) {
+						return
+					}
+				}
+			case ast.KindForIn:
+				exprListID := ast.NodeID(node.Extra)
+				if exprListID != ast.InvalidNode && offset > doc.Tree.Nodes[exprListID].End {
+					nameList := doc.Tree.Nodes[node.Left]
+
+					for i := uint16(0); i < nameList.Count; i++ {
+						identID := doc.Tree.ExtraList[nameList.Extra+uint32(i)]
 						identNode := doc.Tree.Nodes[identID]
 
 						if !yield(doc.Source[identNode.Start:identNode.End], identID) {
 							return
 						}
 					}
-				case ast.KindLocalFunction:
-					identNode := doc.Tree.Nodes[stmtNode.Left]
-
-					if !yield(doc.Source[identNode.Start:identNode.End], stmtNode.Left) {
-						return
-					}
-				}
-			}
-		case ast.KindFunctionExpr, ast.KindFunctionStmt:
-			var funcExpr ast.NodeID = curr
-
-			if node.Kind == ast.KindFunctionStmt {
-				funcExpr = node.Right
-
-				if int(node.Left) < len(doc.Tree.Nodes) && doc.Tree.Nodes[node.Left].Kind == ast.KindMethodName {
-					if !yield([]byte("self"), node.Left) {
-						return
-					}
 				}
 			}
 
-			if funcExpr != ast.InvalidNode {
-				exprNode := doc.Tree.Nodes[funcExpr]
-
-				for i := uint16(0); i < exprNode.Count; i++ {
-					paramID := doc.Tree.ExtraList[exprNode.Extra+uint32(i)]
-					paramNode := doc.Tree.Nodes[paramID]
-
-					if !yield(doc.Source[paramNode.Start:paramNode.End], paramID) {
-						return
-					}
-				}
-			}
-		case ast.KindForNum:
-			var exprsEnd uint32
-
-			if node.Count > 0 {
-				lastExprID := doc.Tree.ExtraList[node.Extra+uint32(node.Count-1)]
-				exprsEnd = doc.Tree.Nodes[lastExprID].End
-			} else {
-				exprsEnd = doc.Tree.Nodes[node.Left].End
-			}
-
-			if offset > exprsEnd {
-				identNode := doc.Tree.Nodes[node.Left]
-
-				if !yield(doc.Source[identNode.Start:identNode.End], node.Left) {
-					return
-				}
-			}
-		case ast.KindForIn:
-			exprListID := ast.NodeID(node.Extra)
-			if exprListID != ast.InvalidNode && offset > doc.Tree.Nodes[exprListID].End {
-				nameList := doc.Tree.Nodes[node.Left]
-
-				for i := uint16(0); i < nameList.Count; i++ {
-					identID := doc.Tree.ExtraList[nameList.Extra+uint32(i)]
-					identNode := doc.Tree.Nodes[identID]
-
-					if !yield(doc.Source[identNode.Start:identNode.End], identID) {
-						return
-					}
-				}
-			}
+			curr = node.Parent
 		}
-
-		curr = node.Parent
 	}
 }
 

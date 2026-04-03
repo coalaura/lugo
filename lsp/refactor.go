@@ -2849,15 +2849,13 @@ func (s *Server) isNameSafe(doc *Document, defID ast.NodeID, newNameBytes []byte
 	node := doc.Tree.Nodes[defID]
 	isSafe := true
 
-	doc.GetLocalsAt(node.Start, func(name []byte, id ast.NodeID) bool {
+	for name, id := range doc.LocalsAt(node.Start) {
 		if bytes.Equal(name, newNameBytes) && id != defID {
 			isSafe = false
 
-			return false
+			break
 		}
-
-		return true
-	})
+	}
 
 	if !isSafe {
 		return false
@@ -2867,15 +2865,13 @@ func (s *Server) isNameSafe(doc *Document, defID ast.NodeID, newNameBytes []byte
 		if refDefID == defID && ast.NodeID(i) != defID {
 			refNode := doc.Tree.Nodes[i]
 
-			doc.GetLocalsAt(refNode.Start, func(name []byte, id ast.NodeID) bool {
+			for name, id := range doc.LocalsAt(refNode.Start) {
 				if bytes.Equal(name, newNameBytes) && id != defID {
 					isSafe = false
 
-					return false
+					break
 				}
-
-				return true
-			})
+			}
 
 			if !isSafe {
 				return false

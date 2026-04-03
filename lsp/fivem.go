@@ -75,8 +75,19 @@ func unquoteLuaString(s string) string {
 		return s[1 : len(s)-1]
 	}
 
-	if strings.HasPrefix(s, "[[") && strings.HasSuffix(s, "]]") {
-		return s[2 : len(s)-2]
+	if strings.HasPrefix(s, "[") {
+		idx := strings.IndexByte(s[1:], '[')
+		if idx != -1 {
+			start := 2 + idx
+			if start < len(s) && s[start] == '\n' {
+				start++
+			}
+
+			end := len(s) - (2 + idx)
+			if start <= end {
+				return s[start:end]
+			}
+		}
 	}
 
 	return s

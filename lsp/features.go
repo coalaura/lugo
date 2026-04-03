@@ -586,15 +586,13 @@ func (s *Server) handleCompletion(req Request) {
 
 		var recDef ast.NodeID = ast.InvalidNode
 
-		doc.GetLocalsAt(offset, func(name []byte, defID ast.NodeID) bool {
+		for name, defID := range doc.LocalsAt(offset) {
 			if bytes.Equal(name, rootName) {
 				recDef = defID
 
-				return false
+				break
 			}
-
-			return true
-		})
+		}
 
 		var modHash uint64
 
@@ -691,7 +689,7 @@ func (s *Server) handleCompletion(req Request) {
 			}
 		}
 	} else {
-		doc.GetLocalsAt(offset, func(name []byte, defID ast.NodeID) bool {
+		for name, defID := range doc.LocalsAt(offset) {
 			isDep, _ := doc.HasDeprecatedTag(defID)
 
 			kind := VariableCompletion
@@ -707,9 +705,7 @@ func (s *Server) handleCompletion(req Request) {
 			}
 
 			addCompletion(label, kind, "local", isDep, "0", insertText, insertFormat)
-
-			return true
-		})
+		}
 
 		for key, syms := range s.GlobalIndex {
 			if key.ReceiverHash == 0 && key.PropHash != 0 && len(syms) > 0 {
