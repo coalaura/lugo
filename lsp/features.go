@@ -1503,6 +1503,75 @@ func (s *Server) handleSemanticTokensFull(req Request) {
 	})
 }
 
+func (s *Server) handleSelectionRange(req Request) {
+	var params SelectionRangeParams
+
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	uri := s.normalizeURI(params.TextDocument.URI)
+
+	doc, ok := s.Documents[uri]
+	if !ok {
+		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
+
+		return
+	}
+
+	var ranges []SelectionRange
+
+	for _, pos := range params.Positions {
+		offset := doc.Tree.Offset(pos.Line, pos.Character)
+		currID := doc.Tree.NodeAt(offset)
+
+		var (
+			first *SelectionRange
+			curr  *SelectionRange
+		)
+
+		for currID != ast.InvalidNode {
+			node := doc.Tree.Nodes[currID]
+
+			sr := &SelectionRange{
+				Range: getRange(doc.Tree, node.Start, node.End),
+			}
+
+			if first == nil {
+				first = sr
+				curr = sr
+			} else {
+				// Skip duplicate ranges to make the selection expansion feel natural
+				if curr.Range != sr.Range {
+					curr.Parent = sr
+					curr = sr
+				}
+			}
+
+			currID = node.Parent
+		}
+
+		if first != nil {
+			ranges = append(ranges, *first)
+		} else {
+			ranges = append(ranges, SelectionRange{
+				Range: Range{Start: pos, End: pos},
+			})
+		}
+	}
+
+	if ranges == nil {
+		ranges = []SelectionRange{}
+	}
+
+	WriteMessage(s.Writer, Response{
+		RPC:    "2.0",
+		ID:     req.ID,
+		Result: ranges,
+	})
+}
+
 func (s *Server) handleFoldingRange(req Request) {
 	var params FoldingRangeParams
 

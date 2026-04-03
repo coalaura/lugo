@@ -158,6 +158,7 @@ type ServerCapabilities struct {
 	WorkspaceSymbolProvider         bool                   `json:"workspaceSymbolProvider"`
 	InlayHintProvider               bool                   `json:"inlayHintProvider"`
 	FoldingRangeProvider            bool                   `json:"foldingRangeProvider"`
+	SelectionRangeProvider          bool                   `json:"selectionRangeProvider,omitempty"`
 	LinkedEditingRangeProvider      bool                   `json:"linkedEditingRangeProvider"`
 	CallHierarchyProvider           bool                   `json:"callHierarchyProvider"`
 	DocumentHighlightProvider       bool                   `json:"documentHighlightProvider,omitempty"`
@@ -556,6 +557,16 @@ type FoldingRange struct {
 	StartCharacter uint32 `json:"startCharacter,omitempty"`
 	EndLine        uint32 `json:"endLine"`
 	EndCharacter   uint32 `json:"endCharacter,omitempty"`
+}
+
+type SelectionRangeParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Positions    []Position             `json:"positions"`
+}
+
+type SelectionRange struct {
+	Range  Range           `json:"range"`
+	Parent *SelectionRange `json:"parent,omitempty"`
 }
 
 type LinkedEditingRangeParams struct {

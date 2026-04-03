@@ -387,6 +387,8 @@ func (s *Server) handleMessage(req Request) {
 		s.handleRangeFormatting(req)
 	case "textDocument/foldingRange":
 		s.handleFoldingRange(req)
+	case "textDocument/selectionRange":
+		s.handleSelectionRange(req)
 	case "textDocument/codeLens":
 		s.handleCodeLens(req)
 	case "codeLens/resolve":
@@ -439,6 +441,7 @@ func (s *Server) handleInitialize(req Request) {
 			WorkspaceSymbolProvider:         true,
 			InlayHintProvider:               true,
 			FoldingRangeProvider:            true,
+			SelectionRangeProvider:          true,
 			CallHierarchyProvider:           true,
 			DocumentHighlightProvider:       true,
 			DocumentFormattingProvider:      true,
