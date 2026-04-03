@@ -132,7 +132,8 @@ func (r *Resolver) Cleanup() {
 	r.fieldMap = nil
 	r.scopeStack = nil
 	r.scopeStarts = nil
-	r.nameArena = nil
+
+	// intentionally not resetting nameArena, FieldDef.ReceiverName slices point to it
 }
 
 func (r *Resolver) Resolve(root ast.NodeID) {
@@ -213,7 +214,7 @@ func (r *Resolver) defineField(memberNodeID ast.NodeID) {
 		return
 	}
 
-	recDef, recHash, recName := r.GetReceiverContext(node.Left)
+	recDef, recHash, recName := r.getReceiverContextArena(node.Left)
 	if len(recName) == 0 {
 		return
 	}
@@ -292,6 +293,34 @@ func (r *Resolver) GetReceiverContext(recID ast.NodeID) (ast.NodeID, uint64, []b
 
 		if node.Kind == ast.KindIdent {
 			rootDef = r.References[curr]
+
+			break
+		} else if node.Kind == ast.KindMemberExpr {
+			curr = node.Left
+		} else {
+			return ast.InvalidNode, 0, nil
+		}
+	}
+
+	recBytes := r.buildMemberName(recID, nil)
+
+	return rootDef, ast.HashBytes(recBytes), recBytes
+}
+
+func (r *Resolver) getReceiverContextArena(recID ast.NodeID) (ast.NodeID, uint64, []byte) {
+	if recID == ast.InvalidNode {
+		return ast.InvalidNode, 0, nil
+	}
+
+	curr := recID
+
+	var rootDef ast.NodeID = ast.InvalidNode
+
+	for curr != ast.InvalidNode {
+		node := r.Tree.Nodes[curr]
+
+		if node.Kind == ast.KindIdent {
+			rootDef = r.References[curr]
 			break
 		} else if node.Kind == ast.KindMemberExpr {
 			curr = node.Left
@@ -302,30 +331,32 @@ func (r *Resolver) GetReceiverContext(recID ast.NodeID) (ast.NodeID, uint64, []b
 
 	startIdx := len(r.nameArena)
 
-	r.buildMemberName(recID)
+	r.nameArena = r.buildMemberName(recID, r.nameArena)
 
 	recBytes := r.nameArena[startIdx:]
 
 	return rootDef, ast.HashBytes(recBytes), recBytes
 }
 
-func (r *Resolver) buildMemberName(id ast.NodeID) {
+func (r *Resolver) buildMemberName(id ast.NodeID, buf []byte) []byte {
 	if id == ast.InvalidNode {
-		return
+		return buf
 	}
 
 	node := r.Tree.Nodes[id]
 
 	switch node.Kind {
 	case ast.KindIdent:
-		r.nameArena = append(r.nameArena, r.source(id)...)
+		buf = append(buf, r.source(id)...)
 	case ast.KindMemberExpr:
-		r.buildMemberName(node.Left)
+		buf = r.buildMemberName(node.Left, buf)
 
-		r.nameArena = append(r.nameArena, '.')
+		buf = append(buf, '.')
 
-		r.buildMemberName(node.Right)
+		buf = r.buildMemberName(node.Right, buf)
 	}
+
+	return buf
 }
 
 func (r *Resolver) getTableReceiver(id ast.NodeID) (ast.NodeID, []byte) {
@@ -356,7 +387,8 @@ func (r *Resolver) getTableReceiver(id ast.NodeID) (ast.NodeID, []byte) {
 					} else if r.Tree.Nodes[leftID].Kind == ast.KindIdent {
 						return r.References[leftID], r.source(leftID)
 					} else if r.Tree.Nodes[leftID].Kind == ast.KindMemberExpr {
-						defID, _, recBytes := r.GetReceiverContext(leftID)
+						defID, _, recBytes := r.getReceiverContextArena(leftID)
+
 						return defID, recBytes
 					}
 				}
@@ -508,7 +540,7 @@ func (r *Resolver) visit(id ast.NodeID) {
 		r.visit(node.Left)
 
 		if node.Right != ast.InvalidNode && r.Tree.Nodes[node.Right].Kind == ast.KindIdent && r.Tree.Nodes[node.Right].Start < r.Tree.Nodes[node.Right].End {
-			recDef, recHash, recName := r.GetReceiverContext(node.Left)
+			recDef, recHash, recName := r.getReceiverContextArena(node.Left)
 
 			if len(recName) > 0 {
 				propHash := ast.HashBytes(r.source(node.Right))
