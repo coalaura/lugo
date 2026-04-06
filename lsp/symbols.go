@@ -739,7 +739,37 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 				}
 			}
 		}
-	} else if gKey.PropHash != 0 {
+	} else if isProp {
+		pID := doc.Tree.Nodes[nodeID].Parent
+		if pID != ast.InvalidNode && int(pID) < len(doc.Tree.Nodes) {
+			pNode := doc.Tree.Nodes[pID]
+
+			var propType TypeSet
+
+			switch pNode.Kind {
+			case ast.KindMemberExpr:
+				propType = doc.InferType(pID)
+			case ast.KindMethodCall, ast.KindMethodName:
+				propType = doc.inferMemberExpr(pNode)
+			}
+
+			if propType.DeclNode != ast.InvalidNode && propType.DeclURI != "" {
+				if targetDoc, ok := s.Documents[propType.DeclURI]; ok {
+					ctx.TargetDoc = targetDoc
+					ctx.TargetURI = propType.DeclURI
+
+					defForVal := targetDoc.getDefForValue(propType.DeclNode)
+					if defForVal != ast.InvalidNode {
+						ctx.TargetDefID = defForVal
+					} else {
+						ctx.TargetDefID = propType.DeclNode
+					}
+				}
+			}
+		}
+	}
+
+	if ctx.TargetDefID == ast.InvalidNode && gKey.PropHash != 0 {
 		if gSyms, ok := s.getGlobalSymbols(doc, gKey.ReceiverHash, gKey.PropHash); ok {
 			bestDefs := s.getBestDefsForContext(doc, nodeID, gSyms)
 

@@ -326,7 +326,7 @@ func (s *Server) handleMessage(req Request) {
 	case "shutdown":
 		s.handleShutdown(req)
 	case "exit":
-		s.handleExit(req)
+		s.handleExit()
 
 	// Workspace
 	case "workspace/didChangeConfiguration":
@@ -485,7 +485,7 @@ func (s *Server) handleShutdown(req Request) {
 	}
 }
 
-func (s *Server) handleExit(req Request) {
+func (s *Server) handleExit() {
 	s.Log.Println("Received exit notification, terminating.")
 
 	os.Exit(0)

@@ -164,7 +164,7 @@ func (f *Formatter) Format(doc *Document, formatRange *Range) []TextEdit {
 		var forceNl bool
 
 		if nl == 0 && prevTok.Kind != 0 {
-			forceNl = f.needsNewline(prevNonCommentTok.Kind, tok.Kind, stack, lineIdx)
+			forceNl = f.needsNewline(prevNonCommentTok.Kind, tok.Kind, stack)
 		}
 
 		var skipSemicolon bool
@@ -185,7 +185,7 @@ func (f *Formatter) Format(doc *Document, formatRange *Range) []TextEdit {
 			} else {
 				gapAfter := source[tok.End:nextNonComment.Start]
 
-				if bytes.ContainsRune(gapAfter, '\n') || f.needsNewline(tok.Kind, nextNonComment.Kind, stack, lineIdx) {
+				if bytes.ContainsRune(gapAfter, '\n') || f.needsNewline(tok.Kind, nextNonComment.Kind, stack) {
 					if nextNonComment.Kind != token.LParen && nextNonComment.Kind != token.LBrack {
 						skipSemicolon = true
 					}
@@ -291,7 +291,7 @@ func (f *Formatter) Format(doc *Document, formatRange *Range) []TextEdit {
 		}
 
 		if isLineStart {
-			currentLineIndent = f.calculateLineIndent(stack, tokens, i, source, lineIdx)
+			currentLineIndent = f.calculateLineIndent(stack, tokens, i, source)
 			if currentLineIndent > 0 {
 				if f.UseTabs {
 					gapBuilder.Write(bytes.Repeat([]byte{'\t'}, currentLineIndent))
@@ -454,7 +454,7 @@ func (f *Formatter) isKeywordAsIdentifier(tokens []token.Token, i int) bool {
 	return false
 }
 
-func (f *Formatter) calculateLineIndent(stack []Scope, tokens []token.Token, startIndex int, source []byte, currentLine int) int {
+func (f *Formatter) calculateLineIndent(stack []Scope, tokens []token.Token, startIndex int, source []byte) int {
 	var indent int
 
 	if len(stack) > 0 {
@@ -471,7 +471,7 @@ func (f *Formatter) calculateLineIndent(stack []Scope, tokens []token.Token, sta
 			prev := tokens[i-1]
 			gap := source[prev.End:tok.Start]
 
-			if bytes.ContainsRune(gap, '\n') || f.needsNewline(prev.Kind, tok.Kind, stack, currentLine) {
+			if bytes.ContainsRune(gap, '\n') || f.needsNewline(prev.Kind, tok.Kind, stack) {
 				break
 			}
 		}
@@ -731,7 +731,7 @@ func (f *Formatter) isExprEnd(k token.Kind) bool {
 	return false
 }
 
-func (f *Formatter) needsNewline(left, right token.Kind, stack []Scope, currentLine int) bool {
+func (f *Formatter) needsNewline(left, right token.Kind, stack []Scope) bool {
 	if left == token.Illegal || left == token.EOF || right == token.Illegal || right == token.EOF {
 		return false
 	}

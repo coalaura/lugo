@@ -286,7 +286,7 @@ func (doc *Document) inferIdent(id ast.NodeID) TypeSet {
 				case ast.KindFunctionExpr:
 					t = targetDoc.inferFunctionParameter(targetDef, parentID)
 				case ast.KindNameList:
-					t = targetDoc.inferLoopVariable(targetDef, parentID, parentNode)
+					t = targetDoc.inferLoopVariable(targetDef, parentID)
 				}
 			}
 		}
@@ -323,6 +323,11 @@ func (doc *Document) inferIdent(id ast.NodeID) TypeSet {
 					if t.DeclNode == ast.InvalidNode && rt.DeclNode != ast.InvalidNode {
 						t.DeclNode = rt.DeclNode
 						t.DeclURI = rt.DeclURI
+					}
+
+					if t.MetaNode == ast.InvalidNode && rt.MetaNode != ast.InvalidNode {
+						t.MetaNode = rt.MetaNode
+						t.MetaURI = rt.MetaURI
 					}
 				}
 			}
@@ -371,7 +376,7 @@ func (doc *Document) inferFunctionParameter(defID, funcExprID ast.NodeID) TypeSe
 	return TypeSet{}
 }
 
-func (doc *Document) inferLoopVariable(defID, nameListID ast.NodeID, nameList ast.Node) TypeSet {
+func (doc *Document) inferLoopVariable(defID, nameListID ast.NodeID) TypeSet {
 	grandParentID := doc.Tree.Nodes[nameListID].Parent
 	if grandParentID == ast.InvalidNode {
 		return TypeSet{}
@@ -465,23 +470,95 @@ func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 	fieldName := doc.Source[rightNode.Start:rightNode.End]
 	propHash := ast.HashBytes(fieldName)
 
-	// 1. Check initial table literal
-	if targetDoc != nil {
-		recNode := targetDoc.Tree.Nodes[leftType.DeclNode]
-		if recNode.Kind == ast.KindTableExpr {
-			for i := uint16(0); i < recNode.Count; i++ {
-				fieldID := targetDoc.Tree.ExtraList[recNode.Extra+uint32(i)]
-				field := targetDoc.Tree.Nodes[fieldID]
+	checkTableFields := func(tDoc *Document, tableID ast.NodeID) {
+		if tableID == ast.InvalidNode || int(tableID) >= len(tDoc.Tree.Nodes) || (t.Basics != TypeUnknown || t.CustomName != "") {
+			return
+		}
+
+		tableNode := tDoc.Tree.Nodes[tableID]
+		if tableNode.Kind == ast.KindTableExpr {
+			for i := uint16(0); i < tableNode.Count; i++ {
+				fieldID := tDoc.Tree.ExtraList[tableNode.Extra+uint32(i)]
+				field := tDoc.Tree.Nodes[fieldID]
 
 				if field.Kind == ast.KindRecordField {
-					key := targetDoc.Tree.Nodes[field.Left]
+					key := tDoc.Tree.Nodes[field.Left]
 
 					if key.Kind == ast.KindIdent {
-						keyName := targetDoc.Source[key.Start:key.End]
+						keyName := tDoc.Source[key.Start:key.End]
 						if bytes.Equal(keyName, fieldName) {
-							t = targetDoc.InferType(field.Right)
+							t = tDoc.InferType(field.Right)
+							return
+						}
+					}
+				}
+			}
+		}
 
-							break
+		recDef := tDoc.getDefForValue(tableID)
+		if recDef != ast.InvalidNode {
+			for _, fd := range tDoc.Resolver.FieldDefs {
+				if fd.ReceiverDef == recDef && fd.PropHash == propHash {
+					valID := tDoc.getAssignedValue(fd.NodeID)
+					if valID != ast.InvalidNode {
+						rt := tDoc.InferType(valID)
+						if rt.Basics == TypeUnknown && rt.CustomName == "" {
+							t.Basics |= TypeAny
+						} else {
+							t.Basics |= rt.Basics
+							if t.CustomName == "" {
+								t.CustomName = rt.CustomName
+							}
+
+							if t.DeclNode == ast.InvalidNode && rt.DeclNode != ast.InvalidNode {
+								t.DeclNode = rt.DeclNode
+								t.DeclURI = rt.DeclURI
+							}
+
+							if t.MetaNode == ast.InvalidNode && rt.MetaNode != ast.InvalidNode {
+								t.MetaNode = rt.MetaNode
+								t.MetaURI = rt.MetaURI
+							}
+						}
+					}
+					return
+				}
+			}
+		}
+	}
+
+	// 1. Check initial table literal and its subsequent assignments
+	if targetDoc != nil {
+		checkTableFields(targetDoc, leftType.DeclNode)
+	}
+
+	// 2. Check subsequent assignments on the local variable itself
+	if t.Basics == TypeUnknown && t.CustomName == "" {
+		recDef, recHash, _ := doc.Resolver.GetReceiverContext(node.Left)
+
+		for _, fd := range doc.Resolver.FieldDefs {
+			if (recDef != ast.InvalidNode && fd.ReceiverDef == recDef) || (recDef == ast.InvalidNode && recHash != 0 && fd.ReceiverHash == recHash) {
+				if fd.PropHash == propHash {
+					valID := doc.getAssignedValue(fd.NodeID)
+					if valID != ast.InvalidNode {
+						rt := doc.InferType(valID)
+						if rt.Basics == TypeUnknown && rt.CustomName == "" {
+							t.Basics |= TypeAny
+						} else {
+							t.Basics |= rt.Basics
+							if t.CustomName == "" {
+								t.CustomName = rt.CustomName
+							}
+
+							if t.DeclNode == ast.InvalidNode && rt.DeclNode != ast.InvalidNode {
+								t.DeclNode = rt.DeclNode
+								t.DeclURI = rt.DeclURI
+							}
+
+							if t.MetaNode == ast.InvalidNode && rt.MetaNode != ast.InvalidNode {
+								t.MetaNode = rt.MetaNode
+								t.MetaURI = rt.MetaURI
+							}
 						}
 					}
 				}
@@ -489,33 +566,7 @@ func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 		}
 	}
 
-	// 2. Check subsequent assignments in the local document
-	recDef, recHash, _ := doc.Resolver.GetReceiverContext(node.Left)
-
-	for _, fd := range doc.Resolver.FieldDefs {
-		if (recDef != ast.InvalidNode && fd.ReceiverDef == recDef) || (recDef == ast.InvalidNode && recHash != 0 && fd.ReceiverHash == recHash) {
-			if fd.PropHash == propHash {
-				valID := doc.getAssignedValue(fd.NodeID)
-				if valID != ast.InvalidNode {
-					rt := doc.InferType(valID)
-					if rt.Basics == TypeUnknown && rt.CustomName == "" {
-						t.Basics |= TypeAny
-					} else {
-						t.Basics |= rt.Basics
-						if t.CustomName == "" {
-							t.CustomName = rt.CustomName
-						}
-
-						if t.DeclNode == ast.InvalidNode && rt.DeclNode != ast.InvalidNode {
-							t.DeclNode = rt.DeclNode
-							t.DeclURI = rt.DeclURI
-						}
-					}
-				}
-			}
-		}
-	}
-
+	// 3. Check Metatable __index
 	if t.Basics == TypeUnknown && t.CustomName == "" {
 		if leftType.MetaNode != ast.InvalidNode {
 			metaDoc := doc
@@ -526,10 +577,7 @@ func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 			if metaDoc != nil {
 				indexDoc, indexTableID := metaDoc.getIndexTable(leftType.MetaNode)
 				if indexDoc != nil && indexTableID != ast.InvalidNode {
-					valID := indexDoc.findFieldInTable(indexTableID, string(fieldName))
-					if valID != ast.InvalidNode {
-						t = indexDoc.InferType(valID)
-					}
+					checkTableFields(indexDoc, indexTableID)
 				}
 			}
 		}
@@ -690,8 +738,91 @@ func (doc *Document) findFieldInTable(tableID ast.NodeID, fieldName string) ast.
 	return ast.InvalidNode
 }
 
+func (doc *Document) getDefForValue(valID ast.NodeID) ast.NodeID {
+	if valID == ast.InvalidNode {
+		return ast.InvalidNode
+	}
+
+	parentID := doc.Tree.Nodes[valID].Parent
+	if parentID == ast.InvalidNode {
+		return ast.InvalidNode
+	}
+
+	parentNode := doc.Tree.Nodes[parentID]
+
+	switch parentNode.Kind {
+	case ast.KindExprList:
+		grandParentID := parentNode.Parent
+		if grandParentID != ast.InvalidNode {
+			grandParentNode := doc.Tree.Nodes[grandParentID]
+			if grandParentNode.Kind == ast.KindLocalAssign || grandParentNode.Kind == ast.KindAssign {
+				idx := doc.Tree.IndexOfExtra(parentID, valID)
+				if idx != -1 {
+					lhsNode := doc.Tree.Nodes[grandParentNode.Left]
+					if uint16(idx) < lhsNode.Count {
+						lhsID := doc.Tree.ExtraList[lhsNode.Extra+uint32(idx)]
+
+						switch doc.Tree.Nodes[lhsID].Kind {
+						case ast.KindIdent:
+							if grandParentNode.Kind == ast.KindLocalAssign {
+								return lhsID
+							}
+							return doc.Resolver.References[lhsID]
+						case ast.KindMemberExpr:
+							return doc.Tree.Nodes[lhsID].Right
+						case ast.KindIndexExpr:
+							return lhsID
+						}
+					}
+				}
+			}
+		}
+	case ast.KindLocalFunction, ast.KindFunctionStmt:
+		if parentNode.Right == valID {
+			leftNode := doc.Tree.Nodes[parentNode.Left]
+
+			switch leftNode.Kind {
+			case ast.KindIdent:
+				if parentNode.Kind == ast.KindLocalFunction {
+					return parentNode.Left
+				}
+
+				return doc.Resolver.References[parentNode.Left]
+			case ast.KindMethodName, ast.KindMemberExpr:
+				return leftNode.Right
+			}
+		}
+	case ast.KindRecordField, ast.KindIndexField:
+		if parentNode.Right == valID {
+			if doc.Tree.Nodes[parentNode.Left].Kind == ast.KindIdent {
+				return parentNode.Left
+			}
+		}
+	}
+
+	return ast.InvalidNode
+}
+
 func (doc *Document) getIndexTable(metaNodeID ast.NodeID) (*Document, ast.NodeID) {
 	indexValID := doc.findFieldInTable(metaNodeID, "__index")
+
+	if indexValID == ast.InvalidNode {
+		recDef := doc.getDefForValue(metaNodeID)
+		if recDef != ast.InvalidNode {
+			propHash := ast.HashBytes([]byte("__index"))
+			for _, fd := range doc.Resolver.FieldDefs {
+				if fd.ReceiverDef == recDef && fd.PropHash == propHash {
+					indexValID = doc.getAssignedValue(fd.NodeID)
+					if indexValID == ast.InvalidNode {
+						indexValID = fd.NodeID
+					}
+
+					break
+				}
+			}
+		}
+	}
+
 	if indexValID != ast.InvalidNode {
 		if doc.Tree.Nodes[indexValID].Kind == ast.KindTableExpr {
 			return doc, indexValID
@@ -783,6 +914,16 @@ func (doc *Document) inferFunctionReturnType(funcExprID ast.NodeID) TypeSet {
 
 					if t.CustomName == "" {
 						t.CustomName = rt.CustomName
+					}
+
+					if t.DeclNode == ast.InvalidNode && rt.DeclNode != ast.InvalidNode {
+						t.DeclNode = rt.DeclNode
+						t.DeclURI = rt.DeclURI
+					}
+
+					if t.MetaNode == ast.InvalidNode && rt.MetaNode != ast.InvalidNode {
+						t.MetaNode = rt.MetaNode
+						t.MetaURI = rt.MetaURI
 					}
 				}
 			} else {

@@ -425,9 +425,11 @@ func (s *Server) handleCodeAction(req Request) {
 					childID := doc.Tree.ExtraList[node.Extra+uint32(i)]
 					if int(childID) < len(doc.Tree.Nodes) {
 						child := doc.Tree.Nodes[childID]
-						if child.Kind == ast.KindElseIf {
+
+						switch child.Kind {
+						case ast.KindElseIf:
 							hasElseIf = true
-						} else if child.Kind == ast.KindElse {
+						case ast.KindElse:
 							hasElse = true
 						}
 					}

@@ -166,8 +166,12 @@ func (s *Server) handleHover(req Request) {
 						pID := doc.Tree.Nodes[ctx.IdentNodeID].Parent
 						if pID != ast.InvalidNode {
 							pNode := doc.Tree.Nodes[pID]
-							if pNode.Kind == ast.KindMemberExpr || pNode.Kind == ast.KindMethodCall {
+
+							switch pNode.Kind {
+							case ast.KindMemberExpr:
 								baseType = doc.InferType(pID)
+							case ast.KindMethodCall, ast.KindMethodName:
+								baseType = doc.inferMemberExpr(pNode)
 							}
 						}
 					}
@@ -352,7 +356,14 @@ func (s *Server) handleHover(req Request) {
 			if ctx.IsProp {
 				pID := doc.Tree.Nodes[ctx.IdentNodeID].Parent
 				if pID != ast.InvalidNode {
-					baseType = doc.InferType(pID)
+					pNode := doc.Tree.Nodes[pID]
+
+					switch pNode.Kind {
+					case ast.KindMemberExpr:
+						baseType = doc.InferType(pID)
+					case ast.KindMethodCall, ast.KindMethodName:
+						baseType = doc.inferMemberExpr(pNode)
+					}
 				}
 			}
 
@@ -683,6 +694,87 @@ func (s *Server) handleCompletion(req Request) {
 			}
 		}
 
+		addFieldsFromTable := func(tDoc *Document, tableID ast.NodeID, detail string) {
+			if tableID == ast.InvalidNode || int(tableID) >= len(tDoc.Tree.Nodes) {
+				return
+			}
+
+			tableNode := tDoc.Tree.Nodes[tableID]
+			if tableNode.Kind != ast.KindTableExpr {
+				return
+			}
+
+			// 1. Fields inside the table literal
+			for i := uint16(0); i < tableNode.Count; i++ {
+				if tableNode.Extra+uint32(i) >= uint32(len(tDoc.Tree.ExtraList)) {
+					continue
+				}
+
+				fieldID := tDoc.Tree.ExtraList[tableNode.Extra+uint32(i)]
+				if int(fieldID) >= len(tDoc.Tree.Nodes) {
+					continue
+				}
+
+				field := tDoc.Tree.Nodes[fieldID]
+				if field.Kind == ast.KindRecordField {
+					key := tDoc.Tree.Nodes[field.Left]
+					if key.Kind == ast.KindIdent {
+						label := ast.String(tDoc.Source[key.Start:key.End])
+
+						kind := FieldCompletion
+						insertText := label
+						insertFormat := PlainTextTextFormat
+
+						valID := field.Right
+						if valID != ast.InvalidNode && int(valID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+							kind = FunctionCompletion
+							insertText, insertFormat = buildFuncSnippet(label, tDoc, valID, isColon)
+						}
+
+						isDep, _ := tDoc.HasDeprecatedTag(field.Left)
+
+						addCompletion(label, kind, detail, isDep, "1", insertText, insertFormat)
+					}
+				}
+			}
+
+			// 2. Fields assigned to this table later (via its local definition)
+			recDef := tDoc.getDefForValue(tableID)
+			if recDef != ast.InvalidNode {
+				for _, fd := range tDoc.Resolver.FieldDefs {
+					if fd.ReceiverDef == recDef {
+						node := tDoc.Tree.Nodes[fd.NodeID]
+						label := ast.String(tDoc.Source[node.Start:node.End])
+
+						kind := FieldCompletion
+						insertText := label
+						insertFormat := PlainTextTextFormat
+
+						valID := tDoc.getAssignedValue(fd.NodeID)
+						if valID != ast.InvalidNode && tDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+							kind = FunctionCompletion
+							insertText, insertFormat = buildFuncSnippet(label, tDoc, valID, isColon)
+						}
+
+						isDep, _ := tDoc.HasDeprecatedTag(fd.NodeID)
+
+						addCompletion(label, kind, detail, isDep, "1", insertText, insertFormat)
+					}
+				}
+			}
+		}
+
+		if recType.DeclNode != ast.InvalidNode {
+			declDoc := doc
+			if recType.DeclURI != "" && recType.DeclURI != doc.URI {
+				declDoc = s.Documents[recType.DeclURI]
+			}
+
+			if declDoc != nil {
+				addFieldsFromTable(declDoc, recType.DeclNode, "field")
+			}
+		}
+
 		if recType.MetaNode != ast.InvalidNode {
 			metaDoc := doc
 			if recType.MetaURI != "" && recType.MetaURI != doc.URI {
@@ -692,40 +784,7 @@ func (s *Server) handleCompletion(req Request) {
 			if metaDoc != nil {
 				indexDoc, indexTableID := metaDoc.getIndexTable(recType.MetaNode)
 				if indexDoc != nil && indexTableID != ast.InvalidNode {
-					tableNode := indexDoc.Tree.Nodes[indexTableID]
-
-					for i := uint16(0); i < tableNode.Count; i++ {
-						if tableNode.Extra+uint32(i) >= uint32(len(indexDoc.Tree.ExtraList)) {
-							continue
-						}
-
-						fieldID := indexDoc.Tree.ExtraList[tableNode.Extra+uint32(i)]
-						if int(fieldID) >= len(indexDoc.Tree.Nodes) {
-							continue
-						}
-
-						field := indexDoc.Tree.Nodes[fieldID]
-						if field.Kind == ast.KindRecordField {
-							key := indexDoc.Tree.Nodes[field.Left]
-							if key.Kind == ast.KindIdent {
-								label := ast.String(indexDoc.Source[key.Start:key.End])
-
-								kind := FieldCompletion
-								insertText := label
-								insertFormat := PlainTextTextFormat
-
-								valID := field.Right
-								if valID != ast.InvalidNode && int(valID) < len(indexDoc.Tree.Nodes) && indexDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
-									kind = FunctionCompletion
-									insertText, insertFormat = buildFuncSnippet(label, indexDoc, valID, isColon)
-								}
-
-								isDep, _ := indexDoc.HasDeprecatedTag(field.Left)
-
-								addCompletion(label, kind, "metatable field", isDep, "1", insertText, insertFormat)
-							}
-						}
-					}
+					addFieldsFromTable(indexDoc, indexTableID, "metatable field")
 				}
 			}
 		}
