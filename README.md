@@ -13,8 +13,18 @@ Lugo is built from the ground up for maximum performance. By iterating over sour
 Most Lua language servers struggle when dropped into massive codebases (like game server environments or large modding frameworks). They consume gigabytes of RAM, take minutes to index and lag while typing.
 
 **Lugo is different:**
-* **Blistering Performance:** In real-world benchmarks on modern hardware (e.g., AMD Ryzen 9 9950X3D), Lugo completely cold-indexes a **2,200+ file workspace** (including full AST generation, resolution and publishing workspace-wide diagnostics) in **~1.2s**.
-* **Incremental Warm Starts:** Lugo hashes your workspace files. If you trigger a re-index, it skips parsing unchanged files and reuses map memory pools (`clear()`), dropping warm re-indexes to just **~500ms**.
+* **Blistering Performance:** In real-world benchmarks on modern hardware, Lugo completely cold-indexes massive workspaces (including full AST generation, symbol resolution, and publishing workspace-wide diagnostics) in a matter of seconds.
+  ```text
+  2026-04-06T23:06:52 Starting workspace re-index...
+  2026-04-06T23:06:52 Indexing external library: /opt/lua-fivem-sdk
+  2026-04-06T23:06:52 Indexing workspace folder: file:///workspace/server/resources
+  2026-04-06T23:06:54 Indexing workspace folder: file:///workspace/server/framework-assets
+  2026-04-06T23:06:54 Indexing workspace folder: file:///workspace/server/legacy-assets
+  2026-04-06T23:06:54 Re-indexed workspace in 1.9606123s (indexed=3020, unchanged=1, failed=0)
+  2026-04-06T23:06:55 Published diagnostics for 2997 files in 487.4179ms
+  2026-04-06T23:06:55 Total time taken for 28619407 bytes: 2.4480302s
+  ```
+* **Incremental Warm Starts:** Lugo hashes your workspace files. If you trigger a re-index, it skips parsing unchanged files and reuses map memory pools (`clear()`), dropping warm re-indexes to a fraction of a second.
 * **Zero-Allocation Architecture:** The parser, lexer and symbol resolver are designed to never allocate heap strings during normal typing. Tight loops execute inside CPU registers, leveraging SIMD-accelerated byte scanning to maximize cache locality.
 * **Microscopic Memory Footprint:** Lugo only stores flat arrays of integers. Only actively open files keep their source strings in memory, meaning Lugo can index thousands of files while consuming a fraction of the RAM used by traditional LSPs.
 * **Dynamic by Design:** Instead of forcing strict typing on a dynamic language, Lugo embraces Lua. If you do `MySQL = this` in a local file, Lugo dynamically resolves all deep table fields (e.g., `MySQL.Await.Execute`) across your entire workspace in real-time.
@@ -30,8 +40,9 @@ Lugo implements a comprehensive suite of modern Language Server Protocol feature
 * **Smart Selection (Selection Range):** Press `Shift+Alt+RightArrow` to semantically expand your text selection based on the AST (Identifier -> Call Expression -> Statement -> Block -> Function -> File).
 * **Go to Definition & Hover:** Instant cross-file jumps. Fully parses LuaDoc (`@param`, `@return`, `@field`, `@class`, `@alias`, `@type`, `@generic`, `@overload`, `@see`, `@deprecated`) and renders beautifully formatted function signatures.
 * **Hover Evaluation:** Lugo statically evaluates constant expressions (math, bitwise operations, string concatenation and logic) in real-time, displaying the computed result directly in the hover tooltip.
-* **Advanced Type Inference:** Lazily evaluates and caches types. Supports control-flow type narrowing (e.g., `type(x) == "string"`), loop variable unpacking (`ipairs`/`pairs`) and deep module aliasing.
+* **Advanced Type Inference:** Lazily evaluates and caches types. Supports control-flow type narrowing (e.g., `type(x) == "string"`), loop variable unpacking (`ipairs`/`pairs`), `require` module aliasing/exports, and deep metatable resolution (understands `setmetatable` and `__index` inheritance).
 * **Find References & Code Lens:** Find all usages of a symbol across your workspace. Automatically embeds clickable Code Lens reference counters directly above function definitions.
+* **Format Alerts:** Automatically formats special comment tags (e.g., `NOTE:`, `TODO:`, `FIXME:`, `WARNING:`) with emojis and bold text in hover tooltips for better visibility.
 * **Rename & Linked Editing Ranges:** Instantly rename symbols across your workspace. Supports Linked Editing for simultaneous, multi-cursor renaming of local variables as you type.
 * **Call Hierarchy:** Visually explore a tree of incoming and outgoing function calls.
 * **Document & Workspace Symbols:** Instant workspace-wide search (`Ctrl+T`) for fully qualified names (e.g., `OP.Math.Round`) and full VS Code "Outline" tree generation.
