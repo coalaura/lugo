@@ -28,6 +28,8 @@ type TypeSet struct {
 	CustomName string
 	DeclURI    string
 	DeclNode   ast.NodeID
+	MetaURI    string
+	MetaNode   ast.NodeID
 	Basics     BasicType
 }
 
@@ -514,6 +516,56 @@ func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 		}
 	}
 
+	if t.Basics == TypeUnknown && t.CustomName == "" {
+		if leftType.MetaNode != ast.InvalidNode {
+			metaDoc := doc
+			if leftType.MetaURI != "" && leftType.MetaURI != doc.URI && doc.Server != nil {
+				metaDoc = doc.Server.Documents[leftType.MetaURI]
+			}
+
+			if metaDoc != nil {
+				indexDoc, indexTableID := metaDoc.getIndexTable(leftType.MetaNode)
+				if indexDoc != nil && indexTableID != ast.InvalidNode {
+					valID := indexDoc.findFieldInTable(indexTableID, string(fieldName))
+					if valID != ast.InvalidNode {
+						t = indexDoc.InferType(valID)
+					}
+				}
+			}
+		}
+
+		if t.Basics == TypeUnknown && t.CustomName == "" && leftType.CustomName != "" && doc.Server != nil {
+			currClassName := leftType.CustomName
+			for i := 0; i < 10; i++ {
+				if currClassName == "" {
+					break
+				}
+
+				classHash := ast.HashBytes([]byte(currClassName))
+				if syms, ok := doc.Server.getGlobalSymbols(doc, classHash, propHash); ok && len(syms) > 0 {
+					sym := syms[0]
+					if gDoc, ok := doc.Server.Documents[sym.URI]; ok {
+						valID := gDoc.getAssignedValue(sym.NodeID)
+						if valID != ast.InvalidNode {
+							t = gDoc.InferType(valID)
+						} else {
+							t.Basics = TypeAny
+						}
+
+						break
+					}
+				}
+
+				classSyms, ok := doc.Server.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: classHash}]
+				if !ok || len(classSyms) == 0 {
+					break
+				}
+
+				currClassName = classSyms[0].Parent
+			}
+		}
+	}
+
 	return t
 }
 
@@ -543,6 +595,41 @@ func (doc *Document) inferCallExpr(node ast.Node) TypeSet {
 						return targetDoc.InferType(targetDoc.ExportedNode)
 					}
 				}
+			} else if bytes.Equal(funcName, []byte("setmetatable")) && node.Count >= 2 && node.Extra+1 < uint32(len(doc.Tree.ExtraList)) {
+				arg1ID := doc.Tree.ExtraList[node.Extra]
+				arg2ID := doc.Tree.ExtraList[node.Extra+1]
+
+				t := doc.InferType(arg1ID)
+
+				metaNodeID := arg2ID
+				metaURI := doc.URI
+
+				if doc.Tree.Nodes[arg2ID].Kind == ast.KindIdent {
+					defID := doc.Resolver.References[arg2ID]
+					if defID != ast.InvalidNode {
+						valID := doc.getAssignedValue(defID)
+						if valID != ast.InvalidNode {
+							metaNodeID = valID
+						}
+					} else {
+						identHash := ast.HashBytes(doc.Source[doc.Tree.Nodes[arg2ID].Start:doc.Tree.Nodes[arg2ID].End])
+						if syms, ok := doc.Server.getGlobalSymbols(doc, 0, identHash); ok && len(syms) > 0 {
+							sym := syms[0]
+							if gDoc, ok := doc.Server.Documents[sym.URI]; ok {
+								valID := gDoc.getAssignedValue(sym.NodeID)
+								if valID != ast.InvalidNode {
+									metaNodeID = valID
+									metaURI = sym.URI
+								}
+							}
+						}
+					}
+				}
+
+				t.MetaNode = metaNodeID
+				t.MetaURI = metaURI
+
+				return t
 			}
 		}
 
@@ -566,6 +653,73 @@ func (doc *Document) inferCallExpr(node ast.Node) TypeSet {
 	}
 
 	return TypeSet{}
+}
+
+func (doc *Document) findFieldInTable(tableID ast.NodeID, fieldName string) ast.NodeID {
+	if tableID == ast.InvalidNode || int(tableID) >= len(doc.Tree.Nodes) {
+		return ast.InvalidNode
+	}
+
+	node := doc.Tree.Nodes[tableID]
+	if node.Kind != ast.KindTableExpr {
+		return ast.InvalidNode
+	}
+
+	for i := uint16(0); i < node.Count; i++ {
+		if node.Extra+uint32(i) >= uint32(len(doc.Tree.ExtraList)) {
+			continue
+		}
+
+		fieldID := doc.Tree.ExtraList[node.Extra+uint32(i)]
+		if int(fieldID) >= len(doc.Tree.Nodes) {
+			continue
+		}
+
+		field := doc.Tree.Nodes[fieldID]
+		if field.Kind == ast.KindRecordField {
+			key := doc.Tree.Nodes[field.Left]
+			if key.Kind == ast.KindIdent {
+				name := doc.Source[key.Start:key.End]
+				if string(name) == fieldName {
+					return field.Right
+				}
+			}
+		}
+	}
+
+	return ast.InvalidNode
+}
+
+func (doc *Document) getIndexTable(metaNodeID ast.NodeID) (*Document, ast.NodeID) {
+	indexValID := doc.findFieldInTable(metaNodeID, "__index")
+	if indexValID != ast.InvalidNode {
+		if doc.Tree.Nodes[indexValID].Kind == ast.KindTableExpr {
+			return doc, indexValID
+		}
+
+		if doc.Tree.Nodes[indexValID].Kind == ast.KindIdent {
+			defID := doc.Resolver.References[indexValID]
+			if defID != ast.InvalidNode {
+				valID := doc.getAssignedValue(defID)
+				if valID != ast.InvalidNode && doc.Tree.Nodes[valID].Kind == ast.KindTableExpr {
+					return doc, valID
+				}
+			} else if doc.Server != nil {
+				identHash := ast.HashBytes(doc.Source[doc.Tree.Nodes[indexValID].Start:doc.Tree.Nodes[indexValID].End])
+				if syms, ok := doc.Server.getGlobalSymbols(doc, 0, identHash); ok && len(syms) > 0 {
+					sym := syms[0]
+					if gDoc, ok := doc.Server.Documents[sym.URI]; ok {
+						valID := gDoc.getAssignedValue(sym.NodeID)
+						if valID != ast.InvalidNode && gDoc.Tree.Nodes[valID].Kind == ast.KindTableExpr {
+							return gDoc, valID
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil, ast.InvalidNode
 }
 
 func (doc *Document) extractArrayElementType(t TypeSet) TypeSet {

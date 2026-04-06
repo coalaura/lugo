@@ -18,6 +18,7 @@ var luaKeywords = []string{
 type GlobalSymbol struct {
 	URI    string
 	Name   string
+	Parent string
 	NodeID ast.NodeID
 	Depth  int
 }
@@ -979,6 +980,13 @@ func (s *Server) getGlobalSymbols(srcDoc *Document, recHash, propHash uint64) ([
 			break
 		}
 
+		classSyms, ok := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: currRec}]
+		if ok && len(classSyms) > 0 && classSyms[0].Parent != "" {
+			currRec = ast.HashBytes([]byte(classSyms[0].Parent))
+
+			continue
+		}
+
 		nextRec := s.getGlobalAlias(currRec)
 		if nextRec == 0 {
 			break
@@ -990,7 +998,7 @@ func (s *Server) getGlobalSymbols(srcDoc *Document, recHash, propHash uint64) ([
 	return nil, false
 }
 
-func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, depth int, name string) {
+func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, depth int, name, parent string) {
 	if doc, ok := s.Documents[uri]; ok {
 		if doc.ExportedGlobalDefs == nil {
 			doc.ExportedGlobalDefs = make(map[ast.NodeID]GlobalKey)
@@ -1005,6 +1013,7 @@ func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, d
 		if sym.URI == uri && sym.NodeID == nodeID {
 			syms[i].Depth = depth
 			syms[i].Name = name
+			syms[i].Parent = parent
 			return
 		}
 	}
@@ -1014,6 +1023,7 @@ func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, d
 		NodeID: nodeID,
 		Depth:  depth,
 		Name:   name,
+		Parent: parent,
 	})
 }
 

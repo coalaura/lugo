@@ -599,7 +599,13 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 					propHash = ast.HashBytes(nameBytes)
 				}
 
-				s.setGlobalSymbol(GlobalKey{ReceiverHash: recHash, PropHash: propHash}, uri, ast.InvalidNode, 0, typeName)
+				var parentName string
+
+				if luadoc.Class != nil {
+					parentName = luadoc.Class.Parent
+				}
+
+				s.setGlobalSymbol(GlobalKey{ReceiverHash: recHash, PropHash: propHash}, uri, ast.InvalidNode, 0, typeName, parentName)
 			}
 		}
 	}
@@ -615,7 +621,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 
 		depth := getASTDepth(tree, defID)
 
-		s.setGlobalSymbol(GlobalKey{ReceiverHash: 0, PropHash: hash}, uri, defID, depth, string(identBytes))
+		s.setGlobalSymbol(GlobalKey{ReceiverHash: 0, PropHash: hash}, uri, defID, depth, string(identBytes), "")
 
 		for name := range doc.ExtractLuaDocFields(defID) {
 			fieldHash := ast.HashBytes(name)
@@ -627,7 +633,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 			sb.WriteByte('.')
 			sb.Write(name)
 
-			s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fieldHash}, uri, defID, depth, sb.String())
+			s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fieldHash}, uri, defID, depth, sb.String(), "")
 		}
 
 		// Module Aliasing
@@ -656,7 +662,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 							sb.WriteByte('.')
 							sb.Write(propBytes)
 
-							s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, sb.String())
+							s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, sb.String(), "")
 						} else if len(fd.ReceiverName) > len(localName) && bytes.HasPrefix(fd.ReceiverName, localName) && fd.ReceiverName[len(localName)] == '.' {
 							suffix := fd.ReceiverName[len(localName)+1:]
 
@@ -673,7 +679,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 							sb.WriteByte('.')
 							sb.Write(propBytes)
 
-							s.setGlobalSymbol(GlobalKey{ReceiverHash: newRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, sb.String())
+							s.setGlobalSymbol(GlobalKey{ReceiverHash: newRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, sb.String(), "")
 						}
 					}
 				}
@@ -723,7 +729,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 			sb.WriteByte(sep)
 			sb.Write(propBytes)
 
-			s.setGlobalSymbol(GlobalKey{ReceiverHash: globalRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, sb.String())
+			s.setGlobalSymbol(GlobalKey{ReceiverHash: globalRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, sb.String(), "")
 		}
 	}
 
@@ -745,7 +751,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 
 						propName := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
 
-						s.setGlobalSymbol(GlobalKey{ReceiverHash: modHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, modName+"."+string(propName))
+						s.setGlobalSymbol(GlobalKey{ReceiverHash: modHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, modName+"."+string(propName), "")
 					}
 				}
 			}
@@ -767,7 +773,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 
 							propName := doc.Source[key.Start:key.End]
 
-							s.setGlobalSymbol(GlobalKey{ReceiverHash: modHash, PropHash: propHash}, uri, field.Left, depth, modName+"."+string(propName))
+							s.setGlobalSymbol(GlobalKey{ReceiverHash: modHash, PropHash: propHash}, uri, field.Left, depth, modName+"."+string(propName), "")
 						}
 					}
 				}

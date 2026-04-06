@@ -502,6 +502,7 @@ func (s *Server) handleCompletion(req Request) {
 		recName  []byte
 		isMember bool
 		isColon  bool
+		endId    int
 	)
 
 	i := int(offset) - 1
@@ -544,7 +545,7 @@ func (s *Server) handleCompletion(req Request) {
 			}
 		}
 
-		endId := i + 1
+		endId = i + 1
 
 		for i >= 0 {
 			c := doc.Source[i]
@@ -642,6 +643,91 @@ func (s *Server) handleCompletion(req Request) {
 
 		if modHash != 0 {
 			validRecs[modHash] = true
+		}
+
+		recNodeID := doc.Tree.NodeAt(uint32(endId - 1))
+		if recNodeID != ast.InvalidNode {
+			pID := doc.Tree.Nodes[recNodeID].Parent
+			if pID != ast.InvalidNode {
+				pNode := doc.Tree.Nodes[pID]
+				if (pNode.Kind == ast.KindMemberExpr || pNode.Kind == ast.KindMethodCall) && pNode.Right == recNodeID {
+					recNodeID = pID
+				}
+			}
+		}
+
+		var recType TypeSet
+
+		if recNodeID != ast.InvalidNode {
+			recType = doc.InferType(recNodeID)
+		}
+
+		if recType.CustomName != "" {
+			currClassName := recType.CustomName
+
+			for i := 0; i < 10; i++ {
+				if currClassName == "" {
+					break
+				}
+
+				classHash := ast.HashBytes([]byte(currClassName))
+
+				validRecs[classHash] = true
+
+				classSyms, ok := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: classHash}]
+				if !ok || len(classSyms) == 0 {
+					break
+				}
+
+				currClassName = classSyms[0].Parent
+			}
+		}
+
+		if recType.MetaNode != ast.InvalidNode {
+			metaDoc := doc
+			if recType.MetaURI != "" && recType.MetaURI != doc.URI {
+				metaDoc = s.Documents[recType.MetaURI]
+			}
+
+			if metaDoc != nil {
+				indexDoc, indexTableID := metaDoc.getIndexTable(recType.MetaNode)
+				if indexDoc != nil && indexTableID != ast.InvalidNode {
+					tableNode := indexDoc.Tree.Nodes[indexTableID]
+
+					for i := uint16(0); i < tableNode.Count; i++ {
+						if tableNode.Extra+uint32(i) >= uint32(len(indexDoc.Tree.ExtraList)) {
+							continue
+						}
+
+						fieldID := indexDoc.Tree.ExtraList[tableNode.Extra+uint32(i)]
+						if int(fieldID) >= len(indexDoc.Tree.Nodes) {
+							continue
+						}
+
+						field := indexDoc.Tree.Nodes[fieldID]
+						if field.Kind == ast.KindRecordField {
+							key := indexDoc.Tree.Nodes[field.Left]
+							if key.Kind == ast.KindIdent {
+								label := ast.String(indexDoc.Source[key.Start:key.End])
+
+								kind := FieldCompletion
+								insertText := label
+								insertFormat := PlainTextTextFormat
+
+								valID := field.Right
+								if valID != ast.InvalidNode && int(valID) < len(indexDoc.Tree.Nodes) && indexDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+									kind = FunctionCompletion
+									insertText, insertFormat = buildFuncSnippet(label, indexDoc, valID, isColon)
+								}
+
+								isDep, _ := indexDoc.HasDeprecatedTag(field.Left)
+
+								addCompletion(label, kind, "metatable field", isDep, "1", insertText, insertFormat)
+							}
+						}
+					}
+				}
+			}
 		}
 
 		for key, syms := range s.GlobalIndex {
