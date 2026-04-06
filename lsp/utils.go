@@ -377,20 +377,6 @@ func getNodeRange(tree *ast.Tree, nodeID ast.NodeID) Range {
 	return getRange(tree, node.Start, node.End)
 }
 
-func getASTDepth(tree *ast.Tree, id ast.NodeID) int {
-	var depth int
-
-	curr := tree.Nodes[id].Parent
-
-	for curr != ast.InvalidNode {
-		depth++
-
-		curr = tree.Nodes[curr].Parent
-	}
-
-	return depth
-}
-
 func isRootLevel(tree *ast.Tree, id ast.NodeID) bool {
 	curr := tree.Nodes[id].Parent
 

@@ -16,11 +16,21 @@ var luaKeywords = []string{
 }
 
 type GlobalSymbol struct {
-	URI    string
-	Name   string
-	Parent string
-	NodeID ast.NodeID
-	Depth  int
+	URI           string
+	Name          string
+	Parent        string
+	NodeID        ast.NodeID
+	IsRoot        bool
+	IsDeprecated  bool
+	DeprecatedMsg string
+}
+
+type ExportedSymbol struct {
+	NodeID        ast.NodeID
+	Key           GlobalKey
+	IsRoot        bool
+	IsDeprecated  bool
+	DeprecatedMsg string
 }
 
 type GlobalKey struct {
@@ -728,14 +738,17 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 	if defID != ast.InvalidNode {
 		ctx.TargetDefID = defID
 
-		if !ctx.IsGlobal && ctx.TargetDoc != nil && ctx.TargetDoc.ExportedGlobalDefs != nil {
-			if exportedKey, exported := ctx.TargetDoc.ExportedGlobalDefs[defID]; exported {
-				ctx.IsGlobal = true
-				ctx.GKey = exportedKey
+		if !ctx.IsGlobal && ctx.TargetDoc != nil {
+			for _, exp := range ctx.TargetDoc.ExportedGlobalDefs {
+				if exp.NodeID == defID {
+					ctx.IsGlobal = true
+					ctx.GKey = exp.Key
 
-				if gSyms, ok := s.getGlobalSymbols(doc, ctx.GKey.ReceiverHash, ctx.GKey.PropHash); ok {
-					bestDefs := s.getBestDefsForContext(doc, nodeID, gSyms)
-					ctx.GlobalDefs = bestDefs
+					if gSyms, ok := s.getGlobalSymbols(doc, ctx.GKey.ReceiverHash, ctx.GKey.PropHash); ok {
+						bestDefs := s.getBestDefsForContext(doc, nodeID, gSyms)
+						ctx.GlobalDefs = bestDefs
+					}
+					break
 				}
 			}
 		}
@@ -998,6 +1011,9 @@ func (s *Server) getGlobalSymbols(srcDoc *Document, recHash, propHash uint64) ([
 			for _, sym := range syms {
 				if tgtDoc, ok := s.Documents[sym.URI]; ok && s.canSeeSymbol(srcDoc, tgtDoc) {
 					filtered = append(filtered, sym)
+					if len(filtered) >= 10 {
+						break
+					}
 				}
 			}
 
@@ -1028,46 +1044,35 @@ func (s *Server) getGlobalSymbols(srcDoc *Document, recHash, propHash uint64) ([
 	return nil, false
 }
 
-func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, depth int, name, parent string) {
+func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, name, parent string, isRoot bool, isDep bool, depMsg string) {
 	if doc, ok := s.Documents[uri]; ok {
-		if doc.ExportedGlobalDefs == nil {
-			doc.ExportedGlobalDefs = make(map[ast.NodeID]GlobalKey)
-		}
-
-		doc.ExportedGlobalDefs[nodeID] = key
+		doc.ExportedGlobalDefs = append(doc.ExportedGlobalDefs, ExportedSymbol{
+			NodeID:        nodeID,
+			Key:           key,
+			IsRoot:        isRoot,
+			IsDeprecated:  isDep,
+			DeprecatedMsg: depMsg,
+		})
 	}
 
-	syms := s.GlobalIndex[key]
-
-	for i, sym := range syms {
-		if sym.URI == uri && sym.NodeID == nodeID {
-			syms[i].Depth = depth
-			syms[i].Name = name
-			syms[i].Parent = parent
-			return
-		}
-	}
-
-	s.GlobalIndex[key] = append(syms, GlobalSymbol{
-		URI:    uri,
-		NodeID: nodeID,
-		Depth:  depth,
-		Name:   name,
-		Parent: parent,
+	s.GlobalIndex[key] = append(s.GlobalIndex[key], GlobalSymbol{
+		URI:           uri,
+		NodeID:        nodeID,
+		Name:          name,
+		Parent:        parent,
+		IsRoot:        isRoot,
+		IsDeprecated:  isDep,
+		DeprecatedMsg: depMsg,
 	})
 }
 
 func (s *Server) removeDocumentGlobals(uri string, doc *Document) {
-	if doc.ExportedGlobalDefs == nil {
-		return
-	}
-
-	for nodeID, key := range doc.ExportedGlobalDefs {
-		if syms, ok := s.GlobalIndex[key]; ok {
+	for _, exp := range doc.ExportedGlobalDefs {
+		if syms, ok := s.GlobalIndex[exp.Key]; ok {
 			var n int
 
 			for _, sym := range syms {
-				if sym.URI != uri || sym.NodeID != nodeID {
+				if sym.URI != uri || sym.NodeID != exp.NodeID {
 					syms[n] = sym
 
 					n++
@@ -1075,9 +1080,9 @@ func (s *Server) removeDocumentGlobals(uri string, doc *Document) {
 			}
 
 			if n > 0 {
-				s.GlobalIndex[key] = syms[:n]
+				s.GlobalIndex[exp.Key] = syms[:n]
 			} else {
-				delete(s.GlobalIndex, key)
+				delete(s.GlobalIndex, exp.Key)
 			}
 		}
 	}

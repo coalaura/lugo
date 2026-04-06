@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"iter"
 	"strings"
+	"time"
 
 	"github.com/coalaura/lugo/ast"
 	"github.com/coalaura/lugo/parser"
@@ -17,7 +18,7 @@ type Document struct {
 	Resolver           *semantic.Resolver
 	TypeCache          map[ast.NodeID]TypeSet
 	Inferring          map[ast.NodeID]bool
-	ExportedGlobalDefs map[ast.NodeID]GlobalKey
+	ExportedGlobalDefs []ExportedSymbol
 	Source             []byte
 	Errors             []parser.ParseError
 	URI                string
@@ -34,6 +35,7 @@ type Document struct {
 	IsFiveMManifest    bool
 	FiveMResolved      bool
 	EnvResolved        bool
+	ModTime            time.Time
 }
 
 func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {

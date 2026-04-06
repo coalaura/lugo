@@ -31,6 +31,7 @@ type Server struct {
 	visitedDirs         map[string]bool
 	FiveMResources      map[string]*FiveMResource
 	FiveMResourceByName map[string]*FiveMResource
+	uriCache            map[string]string
 
 	// Global Index & Resolution
 	GlobalIndex       map[GlobalKey][]GlobalSymbol
@@ -119,6 +120,7 @@ func NewServer(version string) *Server {
 		IsIndexing:          true,
 		FiveMResources:      make(map[string]*FiveMResource),
 		FiveMResourceByName: make(map[string]*FiveMResource),
+		uriCache:            make(map[string]string, 1024),
 
 		// Global Index
 		GlobalIndex: make(map[GlobalKey][]GlobalSymbol),

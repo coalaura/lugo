@@ -129,8 +129,8 @@ func (s *Server) publishDiagnostics(uri string) {
 	// 2. Undefined Globals
 	if s.DiagUndefinedGlobals {
 		if s.suggestCache == nil {
-			s.suggestCache = make(map[string]string)
-		} else {
+			s.suggestCache = make(map[string]string, 256)
+		} else if len(s.suggestCache) > 4096 {
 			clear(s.suggestCache)
 		}
 
@@ -235,7 +235,7 @@ func (s *Server) publishDiagnostics(uri string) {
 							continue
 						}
 
-						if isRootLevel(symDoc.Tree, sym.NodeID) {
+						if sym.IsRoot {
 							isDefinedAtRoot = true
 
 							break
@@ -548,25 +548,22 @@ func (s *Server) publishDiagnostics(uri string) {
 
 			if syms, ok := s.getGlobalSymbols(doc, 0, hash); ok && len(syms) > 0 && syms[0].NodeID != ast.InvalidNode {
 				sym := syms[0]
-				if symDoc, docOk := s.Documents[sym.URI]; docOk {
-					info := checkDep(symDoc, sym.NodeID)
-					if info.IsDep {
-						diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", ast.String(identBytes))
+				if sym.IsDeprecated {
+					diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", ast.String(identBytes))
 
-						if info.Msg != "" {
-							diagMsg += ": " + info.Msg
-						} else {
-							diagMsg += "."
-						}
-
-						s.diagBuf = append(s.diagBuf, Diagnostic{
-							Range:    getNodeRange(doc.Tree, refID),
-							Severity: SeverityHint,
-							Code:     "deprecated",
-							Tags:     []DiagnosticTag{Deprecated},
-							Message:  diagMsg,
-						})
+					if sym.DeprecatedMsg != "" {
+						diagMsg += ": " + sym.DeprecatedMsg
+					} else {
+						diagMsg += "."
 					}
+
+					s.diagBuf = append(s.diagBuf, Diagnostic{
+						Range:    getNodeRange(doc.Tree, refID),
+						Severity: SeverityHint,
+						Code:     "deprecated",
+						Tags:     []DiagnosticTag{Deprecated},
+						Message:  diagMsg,
+					})
 				}
 			}
 		}
@@ -576,26 +573,23 @@ func (s *Server) publishDiagnostics(uri string) {
 			if doc.Resolver.References[pf.PropNodeID] == ast.InvalidNode && pf.ReceiverHash != 0 {
 				if syms, ok := s.getGlobalSymbols(doc, pf.ReceiverHash, pf.PropHash); ok && len(syms) > 0 && syms[0].NodeID != ast.InvalidNode {
 					sym := syms[0]
-					if symDoc, docOk := s.Documents[sym.URI]; docOk {
-						info := checkDep(symDoc, sym.NodeID)
-						if info.IsDep {
-							identBytes := doc.Source[doc.Tree.Nodes[pf.PropNodeID].Start:doc.Tree.Nodes[pf.PropNodeID].End]
-							diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", ast.String(identBytes))
+					if sym.IsDeprecated {
+						identBytes := doc.Source[doc.Tree.Nodes[pf.PropNodeID].Start:doc.Tree.Nodes[pf.PropNodeID].End]
+						diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", ast.String(identBytes))
 
-							if info.Msg != "" {
-								diagMsg += ": " + info.Msg
-							} else {
-								diagMsg += "."
-							}
-
-							s.diagBuf = append(s.diagBuf, Diagnostic{
-								Range:    getNodeRange(doc.Tree, pf.PropNodeID),
-								Severity: SeverityHint,
-								Code:     "deprecated",
-								Tags:     []DiagnosticTag{Deprecated},
-								Message:  diagMsg,
-							})
+						if sym.DeprecatedMsg != "" {
+							diagMsg += ": " + sym.DeprecatedMsg
+						} else {
+							diagMsg += "."
 						}
+
+						s.diagBuf = append(s.diagBuf, Diagnostic{
+							Range:    getNodeRange(doc.Tree, pf.PropNodeID),
+							Severity: SeverityHint,
+							Code:     "deprecated",
+							Tags:     []DiagnosticTag{Deprecated},
+							Message:  diagMsg,
+						})
 					}
 				}
 			}

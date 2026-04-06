@@ -340,14 +340,14 @@ func (s *Server) handleHover(req Request) {
 			hoverText = "```lua\n" + code + "\n```"
 
 			if docString != "" {
-				hoverText += "\n---\n\n" + docString
+				hoverText += "\n\n---\n\n" + docString
 			}
 
 			if fromFile != "" {
 				if after, ok := strings.CutPrefix(ctx.TargetURI, "std:///"); ok {
-					hoverText += "\n---\n*Standard Library (`" + after + "`)*"
+					hoverText += "\n\n---\n\n*Standard Library (`" + after + "`)*"
 				} else {
-					hoverText += "\n---\n*Defined in `" + fromFile + "`*"
+					hoverText += "\n\n---\n\n*Defined in `" + fromFile + "`*"
 				}
 			}
 		} else {
@@ -388,12 +388,12 @@ func (s *Server) handleHover(req Request) {
 
 	if s.FeatureHoverEval {
 		if startOff, endOff, evalVal, ok := doc.FindEvaluableParent(offset); ok {
-			evalStr := fmt.Sprintf("\n---\n*Evaluates to:*\n```lua\n%s\n```", evalVal)
+			evalStr := fmt.Sprintf("\n\n---\n\n*Evaluates to:*\n```lua\n%s\n```", evalVal)
 
 			if hoverText != "" {
 				hoverText += evalStr
 			} else {
-				hoverText = strings.TrimPrefix(evalStr, "\n---\n")
+				hoverText = strings.TrimPrefix(evalStr, "\n\n---\n\n")
 			}
 
 			r = new(getRange(doc.Tree, startOff, endOff))

@@ -143,8 +143,14 @@ func (s *Server) handleDidChangeWatchedFiles(req Request) {
 			if !s.OpenFiles[uri] {
 				path := s.uriToPath(uri)
 
+				stat, statErr := os.Stat(path)
+
 				if b, err := os.ReadFile(path); err == nil {
 					needsRepublish := s.updateDocument(uri, b)
+
+					if statErr == nil && s.Documents[uri] != nil {
+						s.Documents[uri].ModTime = stat.ModTime()
+					}
 
 					if s.isWorkspaceURI(uri) {
 						if needsRepublish {
@@ -324,12 +330,14 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 		clear(s.visitedDirs)
 	}
 
-	var walk func(dir string)
+	var walk func(dir string, isSymlink bool)
 
-	walk = func(dir string) {
-		realDir, err := filepath.EvalSymlinks(dir)
-		if err != nil {
-			realDir = dir
+	walk = func(dir string, isSymlink bool) {
+		realDir := dir
+		if isSymlink {
+			if r, err := filepath.EvalSymlinks(dir); err == nil {
+				realDir = r
+			}
 		}
 
 		if s.visitedDirs[realDir] {
@@ -338,13 +346,13 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 
 		s.visitedDirs[realDir] = true
 
-		entries, err := os.ReadDir(dir)
+		entries, err := os.ReadDir(realDir)
 		if err != nil {
 			return
 		}
 
 		for _, e := range entries {
-			fullPath := filepath.Join(dir, e.Name())
+			fullPath := filepath.Join(realDir, e.Name())
 
 			isDir := e.IsDir()
 			name := e.Name()
@@ -353,8 +361,8 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 				continue
 			}
 
-			// Check if its a symlink
-			if e.Type()&fs.ModeSymlink != 0 {
+			isSym := e.Type()&fs.ModeSymlink != 0
+			if isSym {
 				stat, err := os.Stat(fullPath)
 				if err == nil {
 					isDir = stat.IsDir()
@@ -366,7 +374,7 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 			}
 
 			if isDir {
-				walk(fullPath)
+				walk(fullPath, isSym)
 			} else if strings.HasSuffix(name, ".lua") {
 				uri := s.normalizeURI(s.pathToURI(fullPath))
 
@@ -380,10 +388,29 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 					continue
 				}
 
+				stat, statErr := os.Stat(fullPath)
+				if statErr == nil {
+					if existing, ok := s.Documents[uri]; ok && existing.ModTime == stat.ModTime() {
+						if s.activeURIs != nil {
+							s.activeURIs[uri] = true
+						}
+
+						*unchanged++
+
+						continue
+					}
+				}
+
 				b, fsErr := os.ReadFile(fullPath)
 				if fsErr == nil {
 					if existing, ok := s.Documents[uri]; ok && bytes.Equal(existing.Source, b) {
-						s.activeURIs[uri] = true
+						if statErr == nil {
+							existing.ModTime = stat.ModTime()
+						}
+
+						if s.activeURIs != nil {
+							s.activeURIs[uri] = true
+						}
 
 						*unchanged++
 
@@ -393,6 +420,10 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 					*total += len(b)
 
 					s.updateDocument(uri, b)
+
+					if statErr == nil && s.Documents[uri] != nil {
+						s.Documents[uri].ModTime = stat.ModTime()
+					}
 
 					if s.activeURIs != nil {
 						s.activeURIs[uri] = true
@@ -406,7 +437,7 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 		}
 	}
 
-	walk(path)
+	walk(path, true)
 }
 
 func (s *Server) indexEmbeddedStdlib(total, indexed, unchanged *int) {
@@ -433,7 +464,9 @@ func (s *Server) indexEmbeddedStdlib(total, indexed, unchanged *int) {
 
 				s.updateDocument(uri, b)
 
-				s.activeURIs[uri] = true
+				if s.activeURIs != nil {
+					s.activeURIs[uri] = true
+				}
 
 				*indexed++
 			}
@@ -458,7 +491,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 
 		s.removeDocumentGlobals(uri, doc)
 
-		clear(doc.ExportedGlobalDefs)
+		doc.ExportedGlobalDefs = doc.ExportedGlobalDefs[:0]
 
 		tree = existing.Tree
 		tree.Reset(source)
@@ -466,12 +499,11 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 		tree = ast.NewTree(source)
 
 		doc = &Document{
-			Server:             s,
-			URI:                uri,
-			Source:             source,
-			Tree:               tree,
-			Resolver:           semantic.New(tree),
-			ExportedGlobalDefs: make(map[ast.NodeID]GlobalKey),
+			Server:   s,
+			URI:      uri,
+			Source:   source,
+			Tree:     tree,
+			Resolver: semantic.New(tree),
 		}
 
 		doc.Path = s.uriToPath(uri)
@@ -605,7 +637,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 					parentName = luadoc.Class.Parent
 				}
 
-				s.setGlobalSymbol(GlobalKey{ReceiverHash: recHash, PropHash: propHash}, uri, ast.InvalidNode, 0, typeName, parentName)
+				s.setGlobalSymbol(GlobalKey{ReceiverHash: recHash, PropHash: propHash}, uri, ast.InvalidNode, typeName, parentName, true, luadoc.IsDeprecated, luadoc.DeprecatedMsg)
 			}
 		}
 	}
@@ -619,9 +651,10 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 		identBytes := tree.Source[node.Start:node.End]
 		hash := ast.HashBytes(identBytes)
 
-		depth := getASTDepth(tree, defID)
+		isRoot := isRootLevel(tree, defID)
+		isDep, depMsg := doc.HasDeprecatedTag(defID)
 
-		s.setGlobalSymbol(GlobalKey{ReceiverHash: 0, PropHash: hash}, uri, defID, depth, string(identBytes), "")
+		s.setGlobalSymbol(GlobalKey{ReceiverHash: 0, PropHash: hash}, uri, defID, string(identBytes), "", isRoot, isDep, depMsg)
 
 		for name := range doc.ExtractLuaDocFields(defID) {
 			fieldHash := ast.HashBytes(name)
@@ -633,7 +666,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 			sb.WriteByte('.')
 			sb.Write(name)
 
-			s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fieldHash}, uri, defID, depth, sb.String(), "")
+			s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fieldHash}, uri, defID, sb.String(), "", isRoot, isDep, depMsg)
 		}
 
 		// Module Aliasing
@@ -652,6 +685,9 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 					for _, fdIdx := range fieldDefsByLocal[localDefID] {
 						fd := res.FieldDefs[fdIdx]
 
+						fdIsRoot := isRootLevel(tree, fd.NodeID)
+						fdIsDep, fdDepMsg := doc.HasDeprecatedTag(fd.NodeID)
+
 						if bytes.Equal(fd.ReceiverName, localName) {
 							propBytes := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
 
@@ -662,7 +698,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 							sb.WriteByte('.')
 							sb.Write(propBytes)
 
-							s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, sb.String(), "")
+							s.setGlobalSymbol(GlobalKey{ReceiverHash: hash, PropHash: fd.PropHash}, uri, fd.NodeID, sb.String(), "", fdIsRoot, fdIsDep, fdDepMsg)
 						} else if len(fd.ReceiverName) > len(localName) && bytes.HasPrefix(fd.ReceiverName, localName) && fd.ReceiverName[len(localName)] == '.' {
 							suffix := fd.ReceiverName[len(localName)+1:]
 
@@ -679,7 +715,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 							sb.WriteByte('.')
 							sb.Write(propBytes)
 
-							s.setGlobalSymbol(GlobalKey{ReceiverHash: newRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, sb.String(), "")
+							s.setGlobalSymbol(GlobalKey{ReceiverHash: newRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, sb.String(), "", fdIsRoot, fdIsDep, fdDepMsg)
 						}
 					}
 				}
@@ -712,8 +748,6 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 				continue
 			}
 
-			depth := getASTDepth(tree, fd.NodeID)
-
 			propBytes := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
 
 			sep := byte('.')
@@ -729,7 +763,10 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 			sb.WriteByte(sep)
 			sb.Write(propBytes)
 
-			s.setGlobalSymbol(GlobalKey{ReceiverHash: globalRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, sb.String(), "")
+			isRoot := isRootLevel(tree, fd.NodeID)
+			isDep, depMsg := doc.HasDeprecatedTag(fd.NodeID)
+
+			s.setGlobalSymbol(GlobalKey{ReceiverHash: globalRecHash, PropHash: fd.PropHash}, uri, fd.NodeID, sb.String(), "", isRoot, isDep, depMsg)
 		}
 	}
 
@@ -747,11 +784,12 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 			if exportDef != ast.InvalidNode {
 				for _, fd := range doc.Resolver.FieldDefs {
 					if fd.ReceiverDef == exportDef {
-						depth := getASTDepth(doc.Tree, fd.NodeID)
-
 						propName := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
 
-						s.setGlobalSymbol(GlobalKey{ReceiverHash: modHash, PropHash: fd.PropHash}, uri, fd.NodeID, depth, modName+"."+string(propName), "")
+						isRoot := isRootLevel(doc.Tree, fd.NodeID)
+						isDep, depMsg := doc.HasDeprecatedTag(fd.NodeID)
+
+						s.setGlobalSymbol(GlobalKey{ReceiverHash: modHash, PropHash: fd.PropHash}, uri, fd.NodeID, modName+"."+string(propName), "", isRoot, isDep, depMsg)
 					}
 				}
 			}
@@ -768,12 +806,12 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 						key := doc.Tree.Nodes[field.Left]
 						if key.Kind == ast.KindIdent {
 							propHash := ast.HashBytes(doc.Source[key.Start:key.End])
-
-							depth := getASTDepth(doc.Tree, field.Left)
-
 							propName := doc.Source[key.Start:key.End]
 
-							s.setGlobalSymbol(GlobalKey{ReceiverHash: modHash, PropHash: propHash}, uri, field.Left, depth, modName+"."+string(propName), "")
+							isRoot := isRootLevel(doc.Tree, field.Left)
+							isDep, depMsg := doc.HasDeprecatedTag(field.Left)
+
+							s.setGlobalSymbol(GlobalKey{ReceiverHash: modHash, PropHash: propHash}, uri, field.Left, modName+"."+string(propName), "", isRoot, isDep, depMsg)
 						}
 					}
 				}
@@ -1106,6 +1144,12 @@ func (s *Server) normalizeURI(uri string) string {
 		return uri
 	}
 
+	if s.uriCache == nil {
+		s.uriCache = make(map[string]string, 1024)
+	} else if res, ok := s.uriCache[uri]; ok {
+		return res
+	}
+
 	path := s.uriToPath(uri)
 
 	realPath, err := filepath.EvalSymlinks(path)
@@ -1120,7 +1164,11 @@ func (s *Server) normalizeURI(uri string) string {
 		}
 	}
 
-	return s.pathToURI(path)
+	res := s.pathToURI(path)
+
+	s.uriCache[uri] = res
+
+	return res
 }
 
 func (s *Server) resolveModule(currentURI string, modName string) *Document {
