@@ -84,6 +84,7 @@ function buildInitializationOptions() {
 		featureDocHighlight: lugoConfig.get("features.documentHighlight") !== false,
 		featureHoverEval: lugoConfig.get("features.hoverEvaluation") !== false,
 		featureCodeLens: lugoConfig.get("features.codeLens") !== false,
+		featureFormatAlerts: lugoConfig.get("features.formatAlerts") !== false,
 
 		featureFiveM: lugoConfig.get("fivem.enabled") === true,
 		diagFiveMUnaccountedFile: lugoConfig.get("fivem.diagnostics.unaccountedFile") !== false,

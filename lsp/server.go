@@ -103,6 +103,7 @@ type Server struct {
 	FeatureFormatting     bool
 	FormatOpinionated     bool
 	SuggestFunctionParams bool
+	FeatureFormatAlerts   bool
 
 	FeatureFiveM             bool
 	DiagFiveMUnaccountedFile bool
@@ -227,6 +228,7 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 	setCfg(&s.FeatureFormatting, opts.FeatureFormatting, nil)
 	setCfg(&s.FormatOpinionated, opts.FormatOpinionated, nil)
 	setCfg(&s.SuggestFunctionParams, opts.SuggestFunctionParams, nil)
+	setCfg(&s.FeatureFormatAlerts, opts.FeatureFormatAlerts, nil)
 
 	setCfg(&s.FeatureFiveM, opts.FeatureFiveM, &needsReindex)
 	setCfg(&s.DiagFiveMUnaccountedFile, opts.DiagFiveMUnaccountedFile, &needsRepublish)

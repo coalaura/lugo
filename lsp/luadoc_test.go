@@ -15,7 +15,7 @@ It spans multiple lines.
 @deprecated Use new_function instead
 	`)
 
-	doc := parseLuaDoc(comments)
+	doc := parseLuaDoc(comments, false)
 
 	expectedDesc := "This is a description.\nIt spans multiple lines."
 	if doc.Description != expectedDesc {
@@ -55,7 +55,7 @@ func TestParseLuaDoc_ComplexTypesAndFields(t *testing.T) {
 @class MyClass : ParentClass Description of class
 	`)
 
-	doc := parseLuaDoc(comments)
+	doc := parseLuaDoc(comments, false)
 
 	if len(doc.Fields) != 2 {
 		t.Fatalf("Expected 2 fields, got %d", len(doc.Fields))
@@ -88,7 +88,7 @@ func TestParseLuaDoc_AdvancedTags(t *testing.T) {
 @type number
 	`)
 
-	doc := parseLuaDoc(comments)
+	doc := parseLuaDoc(comments, false)
 
 	if doc.Alias == nil || doc.Alias.Name != "ID" || doc.Alias.Type != "string | number" {
 		t.Errorf("Alias parsed incorrectly: %+v", doc.Alias)

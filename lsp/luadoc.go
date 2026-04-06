@@ -1,6 +1,9 @@
 package lsp
 
-import "bytes"
+import (
+	"bytes"
+	"strings"
+)
 
 var (
 	tagParam      = []byte("@param")
@@ -127,6 +130,92 @@ func extractTypeDesc(data []byte) (typeBytes, descBytes []byte) {
 	return data[:idx], bytes.TrimSpace(data[idx:])
 }
 
+func formatAlerts(text string) string {
+	if text == "" {
+		return ""
+	}
+
+	var hasAlert bool
+
+	prefixes := []string{"NOTE:", "TODO:", "INFO:", "WARNING:", "WARN:", "IMPORTANT:", "FIXME:", "BUG:", "TIP:", "CAUTION:"}
+
+	for _, p := range prefixes {
+		if strings.Contains(text, p) {
+			hasAlert = true
+
+			break
+		}
+	}
+
+	if !hasAlert {
+		return text
+	}
+
+	lines := strings.Split(text, "\n")
+
+	var sb strings.Builder
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if len(trimmed) > 0 {
+			leadingSpaces := line[:len(line)-len(trimmed)]
+
+			if strings.HasPrefix(trimmed, "NOTE:") {
+				sb.WriteString(leadingSpaces)
+				sb.WriteString("ℹ️ **NOTE:**")
+				sb.WriteString(trimmed[5:])
+			} else if strings.HasPrefix(trimmed, "TODO:") {
+				sb.WriteString(leadingSpaces)
+				sb.WriteString("📝 **TODO:**")
+				sb.WriteString(trimmed[5:])
+			} else if strings.HasPrefix(trimmed, "INFO:") {
+				sb.WriteString(leadingSpaces)
+				sb.WriteString("ℹ️ **INFO:**")
+				sb.WriteString(trimmed[5:])
+			} else if strings.HasPrefix(trimmed, "WARNING:") {
+				sb.WriteString(leadingSpaces)
+				sb.WriteString("⚠️ **WARNING:**")
+				sb.WriteString(trimmed[8:])
+			} else if strings.HasPrefix(trimmed, "WARN:") {
+				sb.WriteString(leadingSpaces)
+				sb.WriteString("⚠️ **WARN:**")
+				sb.WriteString(trimmed[5:])
+			} else if strings.HasPrefix(trimmed, "IMPORTANT:") {
+				sb.WriteString(leadingSpaces)
+				sb.WriteString("❗ **IMPORTANT:**")
+				sb.WriteString(trimmed[10:])
+			} else if strings.HasPrefix(trimmed, "FIXME:") {
+				sb.WriteString(leadingSpaces)
+				sb.WriteString("🔧 **FIXME:**")
+				sb.WriteString(trimmed[6:])
+			} else if strings.HasPrefix(trimmed, "BUG:") {
+				sb.WriteString(leadingSpaces)
+				sb.WriteString("🐛 **BUG:**")
+				sb.WriteString(trimmed[4:])
+			} else if strings.HasPrefix(trimmed, "TIP:") {
+				sb.WriteString(leadingSpaces)
+				sb.WriteString("💡 **TIP:**")
+				sb.WriteString(trimmed[4:])
+			} else if strings.HasPrefix(trimmed, "CAUTION:") {
+				sb.WriteString(leadingSpaces)
+				sb.WriteString("🛑 **CAUTION:**")
+				sb.WriteString(trimmed[8:])
+			} else {
+				sb.WriteString(line)
+			}
+		} else {
+			sb.WriteString(line)
+		}
+
+		if i < len(lines)-1 {
+			sb.WriteByte('\n')
+		}
+	}
+
+	return sb.String()
+}
+
 func extractNameParent(data []byte) (name, parent, descBytes []byte) {
 	data = bytes.TrimSpace(data)
 
@@ -161,7 +250,7 @@ func extractNameParent(data []byte) (name, parent, descBytes []byte) {
 	return name, parent, descBytes
 }
 
-func parseLuaDoc(comments []byte) LuaDoc {
+func parseLuaDoc(comments []byte, enableAlerts bool) LuaDoc {
 	var (
 		doc       LuaDoc
 		descLines [][]byte
@@ -363,6 +452,22 @@ func parseLuaDoc(comments []byte) LuaDoc {
 
 	if len(descLines) > 0 {
 		doc.Description = string(bytes.Join(descLines, []byte("\n")))
+	}
+
+	if enableAlerts {
+		doc.Description = formatAlerts(doc.Description)
+
+		for i := range doc.Params {
+			doc.Params[i].Desc = formatAlerts(doc.Params[i].Desc)
+		}
+
+		for i := range doc.Returns {
+			doc.Returns[i].Desc = formatAlerts(doc.Returns[i].Desc)
+		}
+
+		for i := range doc.Fields {
+			doc.Fields[i].Desc = formatAlerts(doc.Fields[i].Desc)
+		}
 	}
 
 	return doc

@@ -327,26 +327,33 @@
                         "markdownDescription": "Enable CodeLens annotations (e.g., reference counts) above function definitions.",
                         "order": 6
                     },
+                    "lugo.features.formatAlerts": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Format special comment tags (e.g., `NOTE:`, `TODO:`) with emojis and bold text in hovers.",
+                        "order": 7
+                    },
                     "lugo.features.formatting": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable the built-in Lua formatter for inline format fixing and document formatting.",
-                        "order": 7
+                        "order": 8
                     },
                     "lugo.features.formatOpinionated": {
                         "type": "boolean",
                         "default": false,
                         "scope": "resource",
                         "markdownDescription": "Apply opinionated formatting tweaks (e.g., forcing blank lines between unrelated statements, before returns).",
-                        "order": 8
+                        "order": 9
                     },
                     "lugo.completion.suggestFunctionParams": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Automatically insert function parameters as snippets when autocompleting a function call.",
-                        "order": 9
+                        "order": 10
                     }
                 }
             },

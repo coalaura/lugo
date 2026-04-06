@@ -604,7 +604,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 	for _, c := range tree.Comments {
 		raw := tree.Source[c.Start:c.End]
 		if bytes.Contains(raw, []byte("@class")) || bytes.Contains(raw, []byte("@alias")) {
-			luadoc := parseLuaDoc(raw)
+			luadoc := parseLuaDoc(raw, s.FeatureFormatAlerts)
 
 			var typeName string
 
