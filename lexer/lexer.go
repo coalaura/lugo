@@ -390,6 +390,8 @@ func (l *Lexer) readString(start uint32, quote byte) token.Token {
 			read++
 
 			break
+		} else if c == '\n' {
+			break
 		} else {
 			read++
 		}

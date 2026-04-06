@@ -2,6 +2,7 @@ package ast
 
 import (
 	"bytes"
+	"unicode/utf8"
 	"unsafe"
 
 	"github.com/coalaura/lugo/token"
@@ -147,7 +148,31 @@ func (t *Tree) Position(offset uint32) (line, col uint32) {
 	lineIdx := uint32(low - 1)
 
 	if uint(lineIdx) < uint(len(lines)) {
-		return lineIdx, offset - lines[lineIdx]
+		safeOffset := min(offset, uint32(len(t.Source)))
+
+		startOffset := min(lines[lineIdx], safeOffset)
+
+		colBytes := t.Source[startOffset:safeOffset]
+
+		var col uint32
+
+		for i := 0; i < len(colBytes); {
+			if colBytes[i] < utf8.RuneSelf {
+				col++
+				i++
+				continue
+			}
+
+			r, size := utf8.DecodeRune(colBytes[i:])
+			if r > 0xFFFF {
+				col += 2 // Surrogate pair
+			} else {
+				col += 1
+			}
+			i += size
+		}
+
+		return lineIdx, col
 	}
 
 	return 0, 0
@@ -158,7 +183,36 @@ func (t *Tree) Offset(line, col uint32) uint32 {
 	lines := t.LineOffsets
 
 	if uint(line) < uint(len(lines)) {
-		offset := lines[line] + col
+		lineStart := lines[line]
+		rem := t.Source[lineStart:]
+
+		var (
+			currentCol uint32
+			i          int
+		)
+
+		for i < len(rem) && currentCol < col {
+			if rem[i] == '\n' {
+				break
+			}
+
+			if rem[i] < utf8.RuneSelf {
+				currentCol++
+				i++
+				continue
+			}
+
+			r, size := utf8.DecodeRune(rem[i:])
+			if r > 0xFFFF {
+				currentCol += 2
+			} else {
+				currentCol += 1
+			}
+
+			i += size
+		}
+
+		offset := lineStart + uint32(i)
 
 		if offset > uint32(len(t.Source)) {
 			return uint32(len(t.Source))
