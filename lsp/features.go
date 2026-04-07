@@ -741,8 +741,11 @@ func (s *Server) handleCompletion(req Request) {
 			// 2. Fields assigned to this table later (via its local definition)
 			recDef := tDoc.getDefForValue(tableID)
 			if recDef != ast.InvalidNode {
+				recDefNode := tDoc.Tree.Nodes[recDef]
+				recHash := ast.HashBytes(tDoc.Source[recDefNode.Start:recDefNode.End])
+
 				for _, fd := range tDoc.Resolver.FieldDefs {
-					if fd.ReceiverDef == recDef {
+					if fd.ReceiverDef == recDef && fd.ReceiverHash == recHash {
 						node := tDoc.Tree.Nodes[fd.NodeID]
 						label := ast.String(tDoc.Source[node.Start:node.End])
 

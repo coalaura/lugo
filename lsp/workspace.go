@@ -782,8 +782,11 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 		if exportNode.Kind == ast.KindIdent {
 			exportDef := doc.Resolver.References[doc.ExportedNode]
 			if exportDef != ast.InvalidNode {
+				exportDefNode := doc.Tree.Nodes[exportDef]
+				exportHash := ast.HashBytes(doc.Source[exportDefNode.Start:exportDefNode.End])
+
 				for _, fd := range doc.Resolver.FieldDefs {
-					if fd.ReceiverDef == exportDef {
+					if fd.ReceiverDef == exportDef && fd.ReceiverHash == exportHash {
 						propName := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
 
 						isRoot := isRootLevel(doc.Tree, fd.NodeID)

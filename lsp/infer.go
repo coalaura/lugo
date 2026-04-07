@@ -217,6 +217,22 @@ func (doc *Document) InferType(id ast.NodeID) TypeSet {
 			if typeSet.CustomName == "" {
 				typeSet.CustomName = rightType.CustomName
 			}
+
+			if rightType.DeclNode != ast.InvalidNode {
+				typeSet.DeclNode = rightType.DeclNode
+				typeSet.DeclURI = rightType.DeclURI
+			} else if leftType.DeclNode != ast.InvalidNode {
+				typeSet.DeclNode = leftType.DeclNode
+				typeSet.DeclURI = leftType.DeclURI
+			}
+
+			if rightType.MetaNode != ast.InvalidNode {
+				typeSet.MetaNode = rightType.MetaNode
+				typeSet.MetaURI = rightType.MetaURI
+			} else if leftType.MetaNode != ast.InvalidNode {
+				typeSet.MetaNode = leftType.MetaNode
+				typeSet.MetaURI = leftType.MetaURI
+			}
 		}
 	case ast.KindUnaryExpr:
 		src := doc.Source[node.Start:node.End]
@@ -499,8 +515,11 @@ func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 
 		recDef := tDoc.getDefForValue(tableID)
 		if recDef != ast.InvalidNode {
+			recDefNode := tDoc.Tree.Nodes[recDef]
+			recHash := ast.HashBytes(tDoc.Source[recDefNode.Start:recDefNode.End])
+
 			for _, fd := range tDoc.Resolver.FieldDefs {
-				if fd.ReceiverDef == recDef && fd.PropHash == propHash {
+				if fd.ReceiverDef == recDef && fd.ReceiverHash == recHash && fd.PropHash == propHash {
 					valID := tDoc.getAssignedValue(fd.NodeID)
 					if valID != ast.InvalidNode {
 						rt := tDoc.InferType(valID)
@@ -539,7 +558,7 @@ func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 		recDef, recHash, _ := doc.Resolver.GetReceiverContext(node.Left)
 
 		for _, fd := range doc.Resolver.FieldDefs {
-			if (recDef != ast.InvalidNode && fd.ReceiverDef == recDef) || (recDef == ast.InvalidNode && recHash != 0 && fd.ReceiverHash == recHash) {
+			if fd.ReceiverHash == recHash && (recDef == ast.InvalidNode || fd.ReceiverDef == recDef) {
 				if fd.PropHash == propHash {
 					valID := doc.getAssignedValue(fd.NodeID)
 					if valID != ast.InvalidNode {
@@ -813,9 +832,12 @@ func (doc *Document) getIndexTable(metaNodeID ast.NodeID) (*Document, ast.NodeID
 	if indexValID == ast.InvalidNode {
 		recDef := doc.getDefForValue(metaNodeID)
 		if recDef != ast.InvalidNode {
+			recDefNode := doc.Tree.Nodes[recDef]
+			recHash := ast.HashBytes(doc.Source[recDefNode.Start:recDefNode.End])
+
 			propHash := ast.HashBytes([]byte("__index"))
 			for _, fd := range doc.Resolver.FieldDefs {
-				if fd.ReceiverDef == recDef && fd.PropHash == propHash {
+				if fd.ReceiverDef == recDef && fd.ReceiverHash == recHash && fd.PropHash == propHash {
 					indexValID = doc.getAssignedValue(fd.NodeID)
 					if indexValID == ast.InvalidNode {
 						indexValID = fd.NodeID
