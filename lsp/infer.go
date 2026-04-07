@@ -661,7 +661,14 @@ func (doc *Document) inferCallExpr(node ast.Node) TypeSet {
 				if ok && res.kind == ast.KindString {
 					targetDoc := doc.Server.resolveModule(doc.URI, res.str)
 					if targetDoc != nil && targetDoc.ExportedNode != ast.InvalidNode {
-						return targetDoc.InferType(targetDoc.ExportedNode)
+						t := targetDoc.InferType(targetDoc.ExportedNode)
+
+						if t.DeclNode == ast.InvalidNode && targetDoc.Tree.Nodes[targetDoc.ExportedNode].Kind == ast.KindTableExpr {
+							t.DeclNode = targetDoc.ExportedNode
+							t.DeclURI = targetDoc.URI
+						}
+
+						return t
 					}
 				}
 			} else if bytes.Equal(funcName, []byte("setmetatable")) && node.Count >= 2 && node.Extra+1 < uint32(len(doc.Tree.ExtraList)) {
@@ -893,13 +900,29 @@ func (doc *Document) extractArrayElementType(t TypeSet) TypeSet {
 		if targetDoc != nil {
 			node := targetDoc.Tree.Nodes[t.DeclNode]
 			if node.Kind == ast.KindTableExpr {
+				var elemType TypeSet
+
 				for i := uint16(0); i < node.Count; i++ {
 					childID := targetDoc.Tree.ExtraList[node.Extra+uint32(i)]
 
 					child := targetDoc.Tree.Nodes[childID]
 					if child.Kind != ast.KindRecordField && child.Kind != ast.KindIndexField {
-						return targetDoc.InferType(childID)
+						rt := targetDoc.InferType(childID)
+						elemType.Basics |= rt.Basics
+
+						if elemType.CustomName == "" {
+							elemType.CustomName = rt.CustomName
+						}
+
+						if elemType.DeclNode == ast.InvalidNode && rt.DeclNode != ast.InvalidNode {
+							elemType.DeclNode = rt.DeclNode
+							elemType.DeclURI = rt.DeclURI
+						}
 					}
+				}
+
+				if elemType.Basics != TypeUnknown || elemType.CustomName != "" {
+					return elemType
 				}
 			}
 		}
@@ -1014,7 +1037,6 @@ func (doc *Document) checkTypeCondition(condID ast.NodeID, targetName []byte) Ty
 	// Look for: type(x) == "..."
 	if cond.Kind == ast.KindBinaryExpr && cond.Extra == uint32(token.Eq) {
 		left := doc.Tree.Nodes[cond.Left]
-		right := doc.Tree.Nodes[cond.Right]
 
 		if left.Kind == ast.KindCallExpr {
 			fnID := left.Left
@@ -1030,14 +1052,9 @@ func (doc *Document) checkTypeCondition(condID ast.NodeID, targetName []byte) Ty
 							argName := doc.Source[doc.Tree.Nodes[argID].Start:doc.Tree.Nodes[argID].End]
 
 							if bytes.Equal(argName, targetName) {
-								if right.Kind == ast.KindString {
-									s := doc.Source[right.Start:right.End]
-
-									if len(s) >= 2 {
-										s = s[1 : len(s)-1]
-									}
-
-									return ParseTypeString(string(s))
+								res, ok := doc.evalNode(cond.Right, 0)
+								if ok && res.kind == ast.KindString {
+									return ParseTypeString(res.str)
 								}
 							}
 						}
