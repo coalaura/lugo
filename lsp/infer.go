@@ -79,10 +79,6 @@ func ParseTypeString(tStr string) TypeSet {
 }
 
 func (typeSet TypeSet) Format() string {
-	if typeSet.Basics&TypeAny != 0 {
-		return "any"
-	}
-
 	var parts []string
 
 	if typeSet.Basics&TypeNumber != 0 {
@@ -119,6 +115,14 @@ func (typeSet TypeSet) Format() string {
 
 	if typeSet.Basics&TypeNil != 0 {
 		parts = append(parts, "nil")
+	}
+
+	if typeSet.Basics&TypeAny != 0 {
+		if len(parts) == 0 {
+			return "any"
+		}
+
+		parts = append(parts, "any")
 	}
 
 	if len(parts) == 0 {
@@ -186,11 +190,7 @@ func (doc *Document) InferType(id ast.NodeID) TypeSet {
 				typeSet.CustomName = rightType.CustomName
 				typeSet.Basics = rightType.Basics
 			} else {
-				if leftType.Basics == TypeUnknown || rightType.Basics == TypeUnknown || leftType.Basics&TypeAny != 0 || rightType.Basics&TypeAny != 0 {
-					typeSet.Basics = TypeAny
-				} else {
-					typeSet.Basics = TypeNumber
-				}
+				typeSet.Basics = TypeNumber
 			}
 		case token.Concat:
 			typeSet.Basics = TypeString
@@ -464,21 +464,7 @@ func (doc *Document) inferLoopVariable(defID, nameListID ast.NodeID) TypeSet {
 func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 	leftType := doc.InferType(node.Left)
 
-	var (
-		t         TypeSet
-		targetDoc *Document
-	)
-
-	if leftType.DeclNode != ast.InvalidNode && leftType.DeclURI != "" {
-		targetDoc = doc
-		if leftType.DeclURI != doc.URI {
-			if doc.Server != nil {
-				targetDoc = doc.Server.Documents[leftType.DeclURI]
-			} else {
-				targetDoc = nil
-			}
-		}
-	}
+	var t TypeSet
 
 	rightNode := doc.Tree.Nodes[node.Right]
 	if rightNode.Kind != ast.KindIdent {
@@ -488,8 +474,29 @@ func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 	fieldName := doc.Source[rightNode.Start:rightNode.End]
 	propHash := ast.HashBytes(fieldName)
 
+	mergeType := func(rt TypeSet) {
+		if rt.Basics == TypeUnknown && rt.CustomName == "" {
+			t.Basics |= TypeAny
+		} else {
+			t.Basics |= rt.Basics
+			if t.CustomName == "" {
+				t.CustomName = rt.CustomName
+			}
+
+			if t.DeclNode == ast.InvalidNode && rt.DeclNode != ast.InvalidNode {
+				t.DeclNode = rt.DeclNode
+				t.DeclURI = rt.DeclURI
+			}
+
+			if t.MetaNode == ast.InvalidNode && rt.MetaNode != ast.InvalidNode {
+				t.MetaNode = rt.MetaNode
+				t.MetaURI = rt.MetaURI
+			}
+		}
+	}
+
 	checkTableFields := func(tDoc *Document, tableID ast.NodeID) {
-		if tableID == ast.InvalidNode || int(tableID) >= len(tDoc.Tree.Nodes) || (t.Basics != TypeUnknown || t.CustomName != "") {
+		if tableID == ast.InvalidNode || int(tableID) >= len(tDoc.Tree.Nodes) {
 			return
 		}
 
@@ -505,7 +512,7 @@ func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 					if key.Kind == ast.KindIdent {
 						keyName := tDoc.Source[key.Start:key.End]
 						if bytes.Equal(keyName, fieldName) {
-							t = tDoc.InferType(field.Right)
+							mergeType(tDoc.InferType(field.Right))
 							return
 						}
 					}
@@ -522,116 +529,91 @@ func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 				if fd.ReceiverDef == recDef && fd.ReceiverHash == recHash && fd.PropHash == propHash {
 					valID := tDoc.getAssignedValue(fd.NodeID)
 					if valID != ast.InvalidNode {
-						rt := tDoc.InferType(valID)
-						if rt.Basics == TypeUnknown && rt.CustomName == "" {
-							t.Basics |= TypeAny
-						} else {
-							t.Basics |= rt.Basics
-							if t.CustomName == "" {
-								t.CustomName = rt.CustomName
-							}
-
-							if t.DeclNode == ast.InvalidNode && rt.DeclNode != ast.InvalidNode {
-								t.DeclNode = rt.DeclNode
-								t.DeclURI = rt.DeclURI
-							}
-
-							if t.MetaNode == ast.InvalidNode && rt.MetaNode != ast.InvalidNode {
-								t.MetaNode = rt.MetaNode
-								t.MetaURI = rt.MetaURI
-							}
-						}
+						mergeType(tDoc.InferType(valID))
+					} else {
+						t.Basics |= TypeAny
 					}
-					return
 				}
 			}
 		}
 	}
 
-	// 1. Check initial table literal and its subsequent assignments
-	if targetDoc != nil {
-		checkTableFields(targetDoc, leftType.DeclNode)
+	// 1. Target doc declarations
+	if leftType.DeclNode != ast.InvalidNode && leftType.DeclURI != "" {
+		targetDoc := doc
+		if leftType.DeclURI != doc.URI {
+			if doc.Server != nil {
+				targetDoc = doc.Server.Documents[leftType.DeclURI]
+			} else {
+				targetDoc = nil
+			}
+		}
+
+		if targetDoc != nil {
+			checkTableFields(targetDoc, leftType.DeclNode)
+		}
 	}
 
-	// 2. Check subsequent assignments on the local variable itself
-	if t.Basics == TypeUnknown && t.CustomName == "" {
-		recDef, recHash, _ := doc.Resolver.GetReceiverContext(node.Left)
+	// 2. Current doc reassignments/fields on the local reference
+	recDef, recHash, _ := doc.Resolver.GetReceiverContext(node.Left)
 
-		for _, fd := range doc.Resolver.FieldDefs {
-			if fd.ReceiverHash == recHash && (recDef == ast.InvalidNode || fd.ReceiverDef == recDef) {
-				if fd.PropHash == propHash {
-					valID := doc.getAssignedValue(fd.NodeID)
+	for _, fd := range doc.Resolver.FieldDefs {
+		if fd.ReceiverHash == recHash && (recDef == ast.InvalidNode || fd.ReceiverDef == recDef) {
+			if fd.PropHash == propHash {
+				valID := doc.getAssignedValue(fd.NodeID)
+				if valID != ast.InvalidNode {
+					mergeType(doc.InferType(valID))
+				} else {
+					t.Basics |= TypeAny
+				}
+			}
+		}
+	}
+
+	// 3. Metatables
+	if leftType.MetaNode != ast.InvalidNode {
+		metaDoc := doc
+		if leftType.MetaURI != "" && leftType.MetaURI != doc.URI && doc.Server != nil {
+			metaDoc = doc.Server.Documents[leftType.MetaURI]
+		}
+
+		if metaDoc != nil {
+			indexDoc, indexTableID := metaDoc.getIndexTable(leftType.MetaNode)
+			if indexDoc != nil && indexTableID != ast.InvalidNode {
+				checkTableFields(indexDoc, indexTableID)
+			}
+		}
+	}
+
+	// 4. Global Classes
+	if leftType.CustomName != "" && doc.Server != nil {
+		currClassName := leftType.CustomName
+		for range 10 {
+			if currClassName == "" {
+				break
+			}
+
+			classHash := ast.HashBytes([]byte(currClassName))
+			if syms, ok := doc.Server.getGlobalSymbols(doc, classHash, propHash); ok && len(syms) > 0 {
+				sym := syms[0]
+				if gDoc, ok := doc.Server.Documents[sym.URI]; ok {
+					valID := gDoc.getAssignedValue(sym.NodeID)
 					if valID != ast.InvalidNode {
-						rt := doc.InferType(valID)
-						if rt.Basics == TypeUnknown && rt.CustomName == "" {
-							t.Basics |= TypeAny
-						} else {
-							t.Basics |= rt.Basics
-							if t.CustomName == "" {
-								t.CustomName = rt.CustomName
-							}
-
-							if t.DeclNode == ast.InvalidNode && rt.DeclNode != ast.InvalidNode {
-								t.DeclNode = rt.DeclNode
-								t.DeclURI = rt.DeclURI
-							}
-
-							if t.MetaNode == ast.InvalidNode && rt.MetaNode != ast.InvalidNode {
-								t.MetaNode = rt.MetaNode
-								t.MetaURI = rt.MetaURI
-							}
-						}
+						mergeType(gDoc.InferType(valID))
+					} else {
+						t.Basics |= TypeAny
 					}
-				}
-			}
-		}
-	}
 
-	// 3. Check Metatable __index
-	if t.Basics == TypeUnknown && t.CustomName == "" {
-		if leftType.MetaNode != ast.InvalidNode {
-			metaDoc := doc
-			if leftType.MetaURI != "" && leftType.MetaURI != doc.URI && doc.Server != nil {
-				metaDoc = doc.Server.Documents[leftType.MetaURI]
-			}
-
-			if metaDoc != nil {
-				indexDoc, indexTableID := metaDoc.getIndexTable(leftType.MetaNode)
-				if indexDoc != nil && indexTableID != ast.InvalidNode {
-					checkTableFields(indexDoc, indexTableID)
-				}
-			}
-		}
-
-		if t.Basics == TypeUnknown && t.CustomName == "" && leftType.CustomName != "" && doc.Server != nil {
-			currClassName := leftType.CustomName
-			for i := 0; i < 10; i++ {
-				if currClassName == "" {
 					break
 				}
-
-				classHash := ast.HashBytes([]byte(currClassName))
-				if syms, ok := doc.Server.getGlobalSymbols(doc, classHash, propHash); ok && len(syms) > 0 {
-					sym := syms[0]
-					if gDoc, ok := doc.Server.Documents[sym.URI]; ok {
-						valID := gDoc.getAssignedValue(sym.NodeID)
-						if valID != ast.InvalidNode {
-							t = gDoc.InferType(valID)
-						} else {
-							t.Basics = TypeAny
-						}
-
-						break
-					}
-				}
-
-				classSyms, ok := doc.Server.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: classHash}]
-				if !ok || len(classSyms) == 0 {
-					break
-				}
-
-				currClassName = classSyms[0].Parent
 			}
+
+			classSyms, ok := doc.Server.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: classHash}]
+			if !ok || len(classSyms) == 0 {
+				break
+			}
+
+			currClassName = classSyms[0].Parent
 		}
 	}
 
@@ -1012,10 +994,10 @@ func (doc *Document) ContextualType(id ast.NodeID, offset uint32, base TypeSet) 
 
 				// Narrow type if we are statically inside a successful type check block
 				if offset >= block.Start && offset <= block.End {
-					narrowed := doc.checkTypeCondition(node.Left, identName)
+					narrowed := doc.checkTypeCondition(node.Left, identName, base)
 
-					if narrowed.Basics != TypeUnknown || narrowed.CustomName != "" {
-						return narrowed
+					if narrowed.Basics != base.Basics || narrowed.CustomName != base.CustomName {
+						base = narrowed
 					}
 				}
 			}
@@ -1027,42 +1009,79 @@ func (doc *Document) ContextualType(id ast.NodeID, offset uint32, base TypeSet) 
 	return base
 }
 
-func (doc *Document) checkTypeCondition(condID ast.NodeID, targetName []byte) TypeSet {
+func (doc *Document) checkTypeCondition(condID ast.NodeID, targetName []byte, base TypeSet) TypeSet {
 	if condID == ast.InvalidNode {
-		return TypeSet{}
+		return base
 	}
 
 	cond := doc.Tree.Nodes[condID]
 
-	// Look for: type(x) == "..."
-	if cond.Kind == ast.KindBinaryExpr && cond.Extra == uint32(token.Eq) {
-		left := doc.Tree.Nodes[cond.Left]
+	if cond.Kind == ast.KindIdent {
+		name := doc.Source[cond.Start:cond.End]
+		if bytes.Equal(name, targetName) {
+			base.Basics &^= TypeNil
 
-		if left.Kind == ast.KindCallExpr {
-			fnID := left.Left
+			return base
+		}
+	}
 
-			if doc.Tree.Nodes[fnID].Kind == ast.KindIdent {
-				fnName := doc.Source[doc.Tree.Nodes[fnID].Start:doc.Tree.Nodes[fnID].End]
+	if cond.Kind == ast.KindBinaryExpr {
+		op := token.Kind(cond.Extra)
 
-				if bytes.Equal(fnName, []byte("type")) {
-					if left.Count > 0 {
-						argID := doc.Tree.ExtraList[left.Extra]
+		switch op {
+		case token.NotEq:
+			lNode := doc.Tree.Nodes[cond.Left]
+			rNode := doc.Tree.Nodes[cond.Right]
 
-						if doc.Tree.Nodes[argID].Kind == ast.KindIdent {
-							argName := doc.Source[doc.Tree.Nodes[argID].Start:doc.Tree.Nodes[argID].End]
+			if lNode.Kind == ast.KindIdent && rNode.Kind == ast.KindNil {
+				if bytes.Equal(doc.Source[lNode.Start:lNode.End], targetName) {
+					base.Basics &^= TypeNil
 
-							if bytes.Equal(argName, targetName) {
-								res, ok := doc.evalNode(cond.Right, 0)
-								if ok && res.kind == ast.KindString {
-									return ParseTypeString(res.str)
+					return base
+				}
+			} else if rNode.Kind == ast.KindIdent && lNode.Kind == ast.KindNil {
+				if bytes.Equal(doc.Source[rNode.Start:rNode.End], targetName) {
+					base.Basics &^= TypeNil
+
+					return base
+				}
+			}
+		case token.Eq:
+			lNode := doc.Tree.Nodes[cond.Left]
+			rNode := doc.Tree.Nodes[cond.Right]
+
+			checkTypeCall := func(callNode, strNode ast.Node) {
+				if callNode.Kind == ast.KindCallExpr && strNode.Kind == ast.KindString {
+					fnID := callNode.Left
+					if doc.Tree.Nodes[fnID].Kind == ast.KindIdent {
+						fnName := doc.Source[doc.Tree.Nodes[fnID].Start:doc.Tree.Nodes[fnID].End]
+
+						if bytes.Equal(fnName, []byte("type")) && callNode.Count > 0 {
+							argID := doc.Tree.ExtraList[callNode.Extra]
+
+							if doc.Tree.Nodes[argID].Kind == ast.KindIdent {
+								argName := doc.Source[doc.Tree.Nodes[argID].Start:doc.Tree.Nodes[argID].End]
+
+								if bytes.Equal(argName, targetName) {
+									res, ok := doc.evalNode(cond.Right, 0)
+									if !ok {
+										res, ok = doc.evalNode(cond.Left, 0)
+									}
+
+									if ok && res.kind == ast.KindString {
+										base = ParseTypeString(res.str)
+									}
 								}
 							}
 						}
 					}
 				}
 			}
+
+			checkTypeCall(lNode, rNode)
+			checkTypeCall(rNode, lNode)
 		}
 	}
 
-	return TypeSet{}
+	return base
 }
