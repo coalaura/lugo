@@ -180,12 +180,12 @@ func (s *Server) publishDiagnostics(uri string) {
 					suggestCache[identStr] = suggestion
 				}
 
-				msg := fmt.Sprintf("Undefined global '%s'.", identStr)
+				msg := "Undefined global '" + identStr + "'."
 
 				var diagData any
 
 				if suggestion != "" {
-					msg = fmt.Sprintf("Undefined global '%s'. Did you mean '%s'?", identStr, suggestion)
+					msg = "Undefined global '" + identStr + "'. Did you mean '" + suggestion + "'?"
 					diagData = suggestion
 				}
 
@@ -252,7 +252,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				Range:    getNodeRange(doc.Tree, defID),
 				Severity: SeverityWarning,
 				Code:     "implicit-global",
-				Message:  fmt.Sprintf("Implicit global creation '%s'. Did you forget the 'local' keyword?", ast.String(identBytes)),
+				Message:  "Implicit global creation '" + ast.String(identBytes) + "'. Did you forget the 'local' keyword?",
 			})
 		}
 	}
@@ -293,7 +293,7 @@ func (s *Server) publishDiagnostics(uri string) {
 					Range:    r,
 					Severity: SeverityWarning,
 					Code:     "used-ignored-var",
-					Message:  fmt.Sprintf("Variable '%s' is used but its name starts with '_' (conventionally reserved for unused variables).", ast.String(nameBytes)),
+					Message:  "Variable '" + ast.String(nameBytes) + "' is used but its name starts with '_' (conventionally reserved for unused variables).",
 					Data:     float64(defID),
 				})
 			}
@@ -344,7 +344,7 @@ func (s *Server) publishDiagnostics(uri string) {
 					msg = "Unused vararg '...'. Remove it from the parameter list if it is not needed."
 					code = "unused-vararg"
 				} else {
-					msg = fmt.Sprintf("Unused %s '%s'.", category, ast.String(nameBytes))
+					msg = "Unused " + category + " '" + ast.String(nameBytes) + "'."
 
 					if category == "parameter" || category == "loop variable" {
 						msg += " Prefix with '_' to ignore."
@@ -394,7 +394,7 @@ func (s *Server) publishDiagnostics(uri string) {
 						Range:    r,
 						Severity: SeverityWarning,
 						Code:     "shadow-global",
-						Message:  fmt.Sprintf("%s variable '%s' shadows a known global.", varType, ast.String(nameBytes)),
+						Message:  varType + " variable '" + ast.String(nameBytes) + "' shadows a known global.",
 					})
 				} else {
 					hash := ast.HashBytes(nameBytes)
@@ -438,7 +438,7 @@ func (s *Server) publishDiagnostics(uri string) {
 							Range:              r,
 							Severity:           SeverityWarning,
 							Code:               "shadow-global",
-							Message:            fmt.Sprintf("%s variable '%s' shadows a global definition.", varType, ast.String(nameBytes)),
+							Message:            varType + " variable '" + ast.String(nameBytes) + "' shadows a global definition.",
 							RelatedInformation: related,
 						})
 					}
@@ -482,7 +482,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				Range:              getNodeRange(doc.Tree, pair.Shadowing),
 				Severity:           SeverityWarning,
 				Code:               "shadow-outer",
-				Message:            fmt.Sprintf("%s variable '%s' shadows a variable from an outer scope.", varType, ast.String(nameBytes)),
+				Message:            varType + " variable '" + ast.String(nameBytes) + "' shadows a variable from an outer scope.",
 				RelatedInformation: related,
 			})
 		}

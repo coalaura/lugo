@@ -154,12 +154,27 @@ func (t *Tree) Position(offset uint32) (line, col uint32) {
 
 		colBytes := t.Source[startOffset:safeOffset]
 
+		var hasNonASCII bool
+
+		for i := range colBytes {
+			if colBytes[i] >= utf8.RuneSelf {
+				hasNonASCII = true
+				break
+			}
+		}
+
+		if !hasNonASCII {
+			return lineIdx, uint32(len(colBytes))
+		}
+
 		var col uint32
 
 		for i := 0; i < len(colBytes); {
 			if colBytes[i] < utf8.RuneSelf {
 				col++
+
 				i++
+
 				continue
 			}
 
@@ -169,6 +184,7 @@ func (t *Tree) Position(offset uint32) (line, col uint32) {
 			} else {
 				col += 1
 			}
+
 			i += size
 		}
 
@@ -285,7 +301,7 @@ func (t *Tree) NodeAt(offset uint32) NodeID {
 				}
 			} else {
 				// Linear scan for unordered or small extra lists
-				for i := uint16(0); i < node.Count; i++ {
+				for i := range node.Count {
 					check(t.ExtraList[node.Extra+uint32(i)])
 				}
 			}
@@ -307,7 +323,7 @@ func (t *Tree) IndexOfExtra(listNodeID, targetID NodeID) int {
 
 	node := t.Nodes[listNodeID]
 
-	for i := uint16(0); i < node.Count; i++ {
+	for i := range node.Count {
 		if t.ExtraList[node.Extra+uint32(i)] == targetID {
 			return int(i)
 		}
