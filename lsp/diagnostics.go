@@ -1604,18 +1604,7 @@ func (s *Server) isSideEffectFree(doc *Document, id ast.NodeID) bool {
 		}
 
 		if len(nameBytes) > 0 {
-			if hasPrefixFold(nameBytes, []byte("get")) ||
-				hasPrefixFold(nameBytes, []byte("is")) ||
-				hasPrefixFold(nameBytes, []byte("has")) ||
-				hasPrefixFold(nameBytes, []byte("can")) ||
-				hasPrefixFold(nameBytes, []byte("unpack")) ||
-				hasPrefixFold(nameBytes, []byte("math.")) ||
-				hasPrefixFold(nameBytes, []byte("type")) ||
-				hasPrefixFold(nameBytes, []byte("tostring")) ||
-				hasPrefixFold(nameBytes, []byte("tonumber")) ||
-				hasPrefixFold(nameBytes, []byte("pairs")) ||
-				hasPrefixFold(nameBytes, []byte("ipairs")) {
-
+			if hasPrefixFold(nameBytes, "get") || hasPrefixFold(nameBytes, "is") || hasPrefixFold(nameBytes, "has") || hasPrefixFold(nameBytes, "can") || hasPrefixFold(nameBytes, "unpack") || hasPrefixFold(nameBytes, "math.") || hasPrefixFold(nameBytes, "type") || hasPrefixFold(nameBytes, "tostring") || hasPrefixFold(nameBytes, "tonumber") || hasPrefixFold(nameBytes, "pairs") || hasPrefixFold(nameBytes, "ipairs") {
 				// Check args
 				for i := uint16(0); i < node.Count; i++ {
 					if node.Extra+uint32(i) >= uint32(len(doc.Tree.ExtraList)) || !s.isSideEffectFree(doc, doc.Tree.ExtraList[node.Extra+uint32(i)]) {

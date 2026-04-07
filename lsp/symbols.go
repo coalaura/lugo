@@ -511,7 +511,7 @@ func (s *Server) handleWorkspaceSymbol(req Request) {
 		return
 	}
 
-	queryLower := []byte(strings.ToLower(params.Query))
+	queryLower := strings.ToLower(params.Query)
 
 	var (
 		results []SymbolInformation
@@ -520,7 +520,7 @@ func (s *Server) handleWorkspaceSymbol(req Request) {
 
 	for key, syms := range s.GlobalIndex {
 		for _, sym := range syms {
-			if !containsFold([]byte(sym.Name), queryLower) {
+			if !containsFold(sym.Name, queryLower) {
 				continue
 			}
 

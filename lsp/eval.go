@@ -193,9 +193,10 @@ func (doc *Document) EvaluateExpression(id ast.NodeID) (string, bool) {
 func formatEvalResult(val evalResult) (string, bool) {
 	switch val.kind {
 	case ast.KindNumber:
-		if val.num == math.Trunc(val.num) {
+		if val.num == math.Trunc(val.num) && val.num >= math.MinInt64 && val.num <= math.MaxInt64 {
 			return strconv.FormatInt(int64(val.num), 10), true
 		}
+
 		return strconv.FormatFloat(val.num, 'g', 14, 64), true
 	case ast.KindString:
 		return strconv.Quote(val.str), true
@@ -328,7 +329,7 @@ func applyOp(left, right evalResult, op token.Kind) (evalResult, bool) {
 		case ast.KindString:
 			str1 = left.str
 		case ast.KindNumber:
-			if left.num == math.Trunc(left.num) {
+			if left.num == math.Trunc(left.num) && left.num >= math.MinInt64 && left.num <= math.MaxInt64 {
 				str1 = strconv.FormatInt(int64(left.num), 10)
 			} else {
 				str1 = strconv.FormatFloat(left.num, 'g', 14, 64)
@@ -341,7 +342,7 @@ func applyOp(left, right evalResult, op token.Kind) (evalResult, bool) {
 		case ast.KindString:
 			str2 = right.str
 		case ast.KindNumber:
-			if right.num == math.Trunc(right.num) {
+			if right.num == math.Trunc(right.num) && right.num >= math.MinInt64 && right.num <= math.MaxInt64 {
 				str2 = strconv.FormatInt(int64(right.num), 10)
 			} else {
 				str2 = strconv.FormatFloat(right.num, 'g', 14, 64)

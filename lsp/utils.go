@@ -19,20 +19,6 @@ func setCfg[T comparable](dst *T, value T, flag *bool) {
 	}
 }
 
-func mapsEqualStringBool(a, b map[string]bool) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	for k, av := range a {
-		if bv, ok := b[k]; !ok || bv != av {
-			return false
-		}
-	}
-
-	return true
-}
-
 // Fast, zero-allocation Levenshtein distance for strings up to 63 bytes.
 func levenshteinFast(str1, str2 string, maxDist int) int {
 	if len(str1) > len(str2) {
@@ -77,7 +63,7 @@ func levenshteinFast(str1, str2 string, maxDist int) int {
 			insCost := prevRow[j+1] + 1
 			subCost := prevRow[j] + cost
 
-			minCost := min(subCost, min(insCost, delCost))
+			minCost := min(subCost, insCost, delCost)
 
 			currRow[j+1] = minCost
 
@@ -96,7 +82,7 @@ func levenshteinFast(str1, str2 string, maxDist int) int {
 	return prevRow[len1]
 }
 
-func containsFold(text, queryLower []byte) bool {
+func containsFold(text, queryLower string) bool {
 	if len(queryLower) == 0 {
 		return true
 	}
@@ -108,7 +94,7 @@ func containsFold(text, queryLower []byte) bool {
 	for i := 0; i <= len(text)-len(queryLower); i++ {
 		match := true
 
-		for j := range queryLower {
+		for j := 0; j < len(queryLower); j++ {
 			charText := text[i+j]
 
 			if charText >= 'A' && charText <= 'Z' {
@@ -136,19 +122,19 @@ func containsFold(text, queryLower []byte) bool {
 	return false
 }
 
-func hasPrefixFold(text, prefix []byte) bool {
+func hasPrefixFold(text []byte, prefix string) bool {
 	if len(text) < len(prefix) {
 		return false
 	}
 
-	for i, charPrefix := range prefix {
+	for i := 0; i < len(prefix); i++ {
 		charText := text[i]
 
 		if charText >= 'A' && charText <= 'Z' {
 			charText += 32 // fast to-lower
 		}
 
-		if charText != charPrefix {
+		if charText != prefix[i] {
 			return false
 		}
 	}

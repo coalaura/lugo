@@ -274,15 +274,17 @@ func (doc *Document) LocalsAt(offset uint32) iter.Seq2[[]byte, ast.NodeID] {
 
 					switch stmtNode.Kind {
 					case ast.KindLocalAssign:
-						nameList := doc.Tree.Nodes[stmtNode.Left]
+						if offset >= stmtNode.End {
+							nameList := doc.Tree.Nodes[stmtNode.Left]
 
-						// Iterate backwards to support `local a, a = 1, 2`
-						for j := int(nameList.Count) - 1; j >= 0; j-- {
-							identID := doc.Tree.ExtraList[nameList.Extra+uint32(j)]
-							identNode := doc.Tree.Nodes[identID]
+							// Iterate backwards to support `local a, a = 1, 2`
+							for j := int(nameList.Count) - 1; j >= 0; j-- {
+								identID := doc.Tree.ExtraList[nameList.Extra+uint32(j)]
+								identNode := doc.Tree.Nodes[identID]
 
-							if !yield(doc.Source[identNode.Start:identNode.End], identID) {
-								return
+								if !yield(doc.Source[identNode.Start:identNode.End], identID) {
+									return
+								}
 							}
 						}
 					case ast.KindLocalFunction:

@@ -14,7 +14,7 @@ func ReadMessage(r *bufio.Reader) ([]byte, error) {
 	var length int
 
 	for {
-		line, err := r.ReadSlice('\n')
+		line, err := r.ReadBytes('\n')
 		if err != nil {
 			return nil, err
 		}
