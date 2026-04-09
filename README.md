@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/coalaura/lugo/actions/workflows/test.yml/badge.svg)](https://github.com/coalaura/lugo/actions/workflows/test.yml)
 
-A ridiculously fast, zero-allocation Lua 5.4 parser and Language Server (LSP) written in Go. 
+A ridiculously fast, zero-allocation Lua 5.4 parser and Language Server (LSP) written in Go.
 
 Lugo is built from the ground up for maximum performance. By iterating over source code using a flat-array/arena architecture (`[]Node`) and storing only byte offsets, it heavily eliminates pointer allocations, heap strings and garbage collection pressure.
 
@@ -73,12 +73,13 @@ Lugo performs workspace-wide analysis to catch bugs before runtime:
 
 ## FiveM Support (Optional)
 
-Lugo includes first-class, built-in support for FiveM resource development. When enabled via the `lugo.fivem.enabled` setting, Lugo will automatically parse `fxmanifest.lua` and `__resource.lua` files to accurately map your project structure.
+Lugo includes first-class, built-in support for FiveM resource development. When enabled via the `lugo.fivem.enabled` setting, Lugo will automatically parse `fxmanifest.lua` and `__resource.lua` files to accurately map your project structure, enabling resource-aware completions and diagnostics.
 
 * **Environment Isolation:** Automatically detects whether a file is `client`, `server`, or `shared`. Client files cannot see server-only globals, and vice versa.
 * **Resource Scoping:** Globals defined in one resource will not leak into another resource.
 * **Cross-Resource Includes:** Understands `@resource_name/file.lua` syntax in manifests for cross-resource dependencies.
 * **Unaccounted File Warnings:** Warns you if a `.lua` file exists in your workspace but is missing from the resource manifest, preventing "script not running" headaches.
+* **Export Validation:** Validates `exports.resource_name:methodName()` cross-resource calls, warning you if the resource or the specific export is unknown.
 
 ## Installation
 
@@ -158,7 +159,13 @@ lspconfig.lugo.setup({
 		featureFormatting = true,
 		formatOpinionated = false,
 		suggestFunctionParams = true,
-		featureFiveM = false -- Set to true if working on FiveM resources
+		featureFormatAlerts = true,
+
+		-- FiveM Support
+		featureFiveM = false, -- Set to true if working on FiveM resources
+		diagFiveMUnaccountedFile = true,
+		diagFiveMUnknownExport = true,
+		diagFiveMUnknownResource = true
 	}
 })
 ```
@@ -168,7 +175,6 @@ lspconfig.lugo.setup({
 You can configure Lugo via your VS Code `settings.json` (also available via the settings UI under **Extensions -> Lugo LSP**):
 
 **Workspace & Environment**
-* `lugo.fivem.enabled`: Enable FiveM support. Scopes globals and diagnostics to their respective resources (using `fxmanifest.lua` / `__resource.lua`).
 * `lugo.workspace.libraryPaths`: An array of absolute paths to external Lua libraries to index.
 * `lugo.workspace.ignoreGlobs`: Additional glob patterns to ignore during indexing. Inherits VS Code's `files.exclude` automatically.
 * `lugo.environment.knownGlobals`: Global variables to ignore when reporting undefined globals. Supports wildcards (e.g., `N_0x*`).
@@ -209,8 +215,15 @@ You can configure Lugo via your VS Code `settings.json` (also available via the 
 * `lugo.features.documentHighlight`: Enable document highlights for variables and function/method calls.
 * `lugo.features.hoverEvaluation`: Evaluate and display the result of constant expressions on hover (e.g., `1 + 2` -> `3`).
 * `lugo.features.codeLens`: Enable CodeLens annotations (e.g., reference counts) above function definitions.
+* `lugo.features.formatAlerts`: Format special comment tags (e.g., `NOTE:`, `TODO:`) with emojis and bold text in hovers.
 * `lugo.features.formatting`: Enable the built-in Lua formatter for inline format fixing and document formatting.
 * `lugo.features.formatOpinionated`: Apply opinionated formatting tweaks (e.g., forcing blank lines between unrelated statements).
+
+**FiveM Support**
+* `lugo.fivem.enabled`: Enable FiveM support. Scopes globals and diagnostics to their respective resources (using `fxmanifest.lua` / `__resource.lua`).
+* `lugo.fivem.diagnostics.unaccountedFile`: Toggle warnings for files missing from the resource manifest.
+* `lugo.fivem.diagnostics.unknownExport`: Toggle warnings for calling missing exports on a FiveM resource.
+* `lugo.fivem.diagnostics.unknownResource`: Toggle warnings for referencing unknown FiveM resources via the `exports` global.
 
 ## Commands
 
