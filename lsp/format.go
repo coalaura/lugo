@@ -635,18 +635,18 @@ func (f *Formatter) getStmtKind(tokens []token.Token, startIndex int) StmtKind {
 	return StmtUnknown
 }
 
-func (f *Formatter) wantsBlankLine(a, b StmtKind) bool {
-	if a == StmtUnknown || b == StmtUnknown {
+func (f *Formatter) wantsBlankLine(prev, curr StmtKind) bool {
+	if prev == StmtUnknown || curr == StmtUnknown {
 		return false
 	}
 
 	// Group locals and assignments together
-	if (a == StmtLocal || a == StmtAssign) && (b == StmtLocal || b == StmtAssign) {
+	if (prev == StmtLocal || prev == StmtAssign) && (curr == StmtLocal || curr == StmtAssign) {
 		return false
 	}
 
 	// Group consecutive function calls together
-	if a == StmtCall && b == StmtCall {
+	if prev == StmtCall && curr == StmtCall {
 		return false
 	}
 
@@ -703,15 +703,7 @@ func (f *Formatter) isFunctionSignatureEnd(tokens []token.Token, rParenIdx int) 
 }
 
 func (f *Formatter) isWord(k token.Kind) bool {
-	if k >= token.And && k <= token.While {
-		return true
-	}
-
-	if k == token.Ident || k == token.Number || k == token.String {
-		return true
-	}
-
-	return false
+	return (k >= token.And && k <= token.While) || k == token.Ident || k == token.Number || k == token.String
 }
 
 func (f *Formatter) isKeyword(k token.Kind) bool {

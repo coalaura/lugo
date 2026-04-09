@@ -232,25 +232,25 @@ func reindentNodeText(doc *Document, id ast.NodeID, targetIndent string) string 
 }
 
 func matchGlob(pattern, path string) bool {
-	pLen, tLen := len(pattern), len(path)
+	patLen, pathLen := len(pattern), len(path)
 
 	var (
-		p int
-		t int
+		patIdx  int
+		pathIdx int
 	)
 
-	for p < pLen {
-		if pattern[p] == '*' {
-			isDouble := p+1 < pLen && pattern[p+1] == '*'
+	for patIdx < patLen {
+		if pattern[patIdx] == '*' {
+			isDouble := patIdx+1 < patLen && pattern[patIdx+1] == '*'
 			if isDouble {
-				p += 2
+				patIdx += 2
 
-				if p == pLen {
+				if patIdx == patLen {
 					return true
 				}
 
-				for i := t; i <= tLen; i++ {
-					if matchGlob(pattern[p:], path[i:]) {
+				for i := pathIdx; i <= pathLen; i++ {
+					if matchGlob(pattern[patIdx:], path[i:]) {
 						return true
 					}
 				}
@@ -258,37 +258,37 @@ func matchGlob(pattern, path string) bool {
 				return false
 			}
 
-			p++
+			patIdx++
 
-			if p == pLen {
-				return strings.IndexByte(path[t:], '/') == -1 && strings.IndexByte(path[t:], '\\') == -1
+			if patIdx == patLen {
+				return strings.IndexByte(path[pathIdx:], '/') == -1 && strings.IndexByte(path[pathIdx:], '\\') == -1
 			}
 
-			for i := t; i <= tLen; i++ {
-				if i > t && (path[i-1] == '/' || path[i-1] == '\\') {
+			for i := pathIdx; i <= pathLen; i++ {
+				if i > pathIdx && (path[i-1] == '/' || path[i-1] == '\\') {
 					break
 				}
 
-				if matchGlob(pattern[p:], path[i:]) {
+				if matchGlob(pattern[patIdx:], path[i:]) {
 					return true
 				}
 			}
 
 			return false
-		} else if pattern[p] == '?' {
-			if t == tLen {
+		} else if pattern[patIdx] == '?' {
+			if pathIdx == pathLen {
 				return false
 			}
 
-			p++
-			t++
+			patIdx++
+			pathIdx++
 		} else {
-			if t == tLen {
+			if pathIdx == pathLen {
 				return false
 			}
 
-			charPattern := pattern[p]
-			charPath := path[t]
+			charPattern := pattern[patIdx]
+			charPath := path[pathIdx]
 
 			if charPattern >= 'A' && charPattern <= 'Z' {
 				charPattern += 32
@@ -310,12 +310,12 @@ func matchGlob(pattern, path string) bool {
 				return false
 			}
 
-			p++
-			t++
+			patIdx++
+			pathIdx++
 		}
 	}
 
-	return t == tLen
+	return pathIdx == pathLen
 }
 
 func getImplicitSelfOffset(ctx *SymbolContext, callNode ast.Node, targetDoc *Document, defID ast.NodeID) int {
@@ -408,12 +408,12 @@ func isLoopVariable(tree *ast.Tree, defID ast.NodeID) bool {
 	parentNode := tree.Nodes[parentID]
 	if parentNode.Kind == ast.KindForNum && parentNode.Left == defID {
 		return true
-	} else if parentNode.Kind == ast.KindNameList {
+	}
+
+	if parentNode.Kind == ast.KindNameList {
 		grandParentID := parentNode.Parent
 		if grandParentID != ast.InvalidNode && int(grandParentID) < len(tree.Nodes) {
-			if tree.Nodes[grandParentID].Kind == ast.KindForIn {
-				return true
-			}
+			return tree.Nodes[grandParentID].Kind == ast.KindForIn
 		}
 	}
 
@@ -452,20 +452,27 @@ func isWriteAccess(tree *ast.Tree, nodeID ast.NodeID) bool {
 	case ast.KindMethodName:
 		return parentNode.Right == nodeID
 	case ast.KindMemberExpr:
-		if parentNode.Right == nodeID {
-			grandParentID := parentNode.Parent
-			if grandParentID != ast.InvalidNode && int(grandParentID) < len(tree.Nodes) {
-				grandParentNode := tree.Nodes[grandParentID]
-				if grandParentNode.Kind == ast.KindExprList {
-					greatGrandParentID := grandParentNode.Parent
-					if greatGrandParentID != ast.InvalidNode && int(greatGrandParentID) < len(tree.Nodes) {
-						greatGrandParentNode := tree.Nodes[greatGrandParentID]
-
-						return greatGrandParentNode.Kind == ast.KindAssign && greatGrandParentNode.Left == grandParentID
-					}
-				}
-			}
+		if parentNode.Right != nodeID {
+			return false
 		}
+
+		grandParentID := parentNode.Parent
+		if grandParentID == ast.InvalidNode || int(grandParentID) >= len(tree.Nodes) {
+			return false
+		}
+
+		grandParentNode := tree.Nodes[grandParentID]
+		if grandParentNode.Kind != ast.KindExprList {
+			return false
+		}
+
+		greatGrandParentID := grandParentNode.Parent
+		if greatGrandParentID == ast.InvalidNode || int(greatGrandParentID) >= len(tree.Nodes) {
+			return false
+		}
+
+		greatGrandParentNode := tree.Nodes[greatGrandParentID]
+		return greatGrandParentNode.Kind == ast.KindAssign && greatGrandParentNode.Left == grandParentID
 	}
 
 	return false
@@ -482,17 +489,17 @@ func isLHSOfAssignment(doc *Document, nodeID ast.NodeID) bool {
 	}
 
 	parentNode := doc.Tree.Nodes[parentID]
-	if parentNode.Kind == ast.KindExprList {
-		grandParentID := parentNode.Parent
-		if grandParentID != ast.InvalidNode && int(grandParentID) < len(doc.Tree.Nodes) {
-			grandParentNode := doc.Tree.Nodes[grandParentID]
-			if (grandParentNode.Kind == ast.KindAssign || grandParentNode.Kind == ast.KindLocalAssign) && grandParentNode.Left == parentID {
-				return true
-			}
-		}
+	if parentNode.Kind != ast.KindExprList {
+		return false
 	}
 
-	return false
+	grandParentID := parentNode.Parent
+	if grandParentID == ast.InvalidNode || int(grandParentID) >= len(doc.Tree.Nodes) {
+		return false
+	}
+
+	grandParentNode := doc.Tree.Nodes[grandParentID]
+	return (grandParentNode.Kind == ast.KindAssign || grandParentNode.Kind == ast.KindLocalAssign) && grandParentNode.Left == parentID
 }
 
 func isTerminal(tree *ast.Tree, id ast.NodeID) bool {

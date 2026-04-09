@@ -374,25 +374,29 @@ func (r *Resolver) getTableReceiver(id ast.NodeID) (ast.NodeID, []byte) {
 		}
 
 		grandParentNode := r.Tree.Nodes[grandParentID]
+		if (grandParentNode.Kind != ast.KindAssign && grandParentNode.Kind != ast.KindLocalAssign) || grandParentNode.Right != parentID {
+			return ast.InvalidNode, nil
+		}
 
-		if (grandParentNode.Kind == ast.KindAssign || grandParentNode.Kind == ast.KindLocalAssign) && grandParentNode.Right == parentID {
-			idx := r.Tree.IndexOfExtra(parentID, id)
-			if idx != -1 {
-				lhsNode := r.Tree.Nodes[grandParentNode.Left]
-				if uint16(idx) < lhsNode.Count {
-					leftID := r.Tree.ExtraList[lhsNode.Extra+uint32(idx)]
+		idx := r.Tree.IndexOfExtra(parentID, id)
+		if idx == -1 {
+			return ast.InvalidNode, nil
+		}
 
-					if grandParentNode.Kind == ast.KindLocalAssign {
-						return leftID, r.source(leftID)
-					} else if r.Tree.Nodes[leftID].Kind == ast.KindIdent {
-						return r.References[leftID], r.source(leftID)
-					} else if r.Tree.Nodes[leftID].Kind == ast.KindMemberExpr {
-						defID, _, recBytes := r.getReceiverContextArena(leftID)
+		lhsNode := r.Tree.Nodes[grandParentNode.Left]
+		if uint16(idx) >= lhsNode.Count {
+			return ast.InvalidNode, nil
+		}
 
-						return defID, recBytes
-					}
-				}
-			}
+		leftID := r.Tree.ExtraList[lhsNode.Extra+uint32(idx)]
+
+		if grandParentNode.Kind == ast.KindLocalAssign {
+			return leftID, r.source(leftID)
+		} else if r.Tree.Nodes[leftID].Kind == ast.KindIdent {
+			return r.References[leftID], r.source(leftID)
+		} else if r.Tree.Nodes[leftID].Kind == ast.KindMemberExpr {
+			defID, _, recBytes := r.getReceiverContextArena(leftID)
+			return defID, recBytes
 		}
 
 		return ast.InvalidNode, nil

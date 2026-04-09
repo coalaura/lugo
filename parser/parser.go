@@ -31,36 +31,34 @@ var (
 	stopBlockElseIf = token.NewTokenSet() // Handled dynamically if needed
 )
 
-var precedences = [256]int{}
-
-func init() {
-	precedences[token.Or] = Or
-	precedences[token.And] = And
-	precedences[token.Less] = Comparison
-	precedences[token.LessEq] = Comparison
-	precedences[token.Greater] = Comparison
-	precedences[token.GreaterEq] = Comparison
-	precedences[token.Eq] = Comparison
-	precedences[token.NotEq] = Comparison
-	precedences[token.BitOr] = BitOr
-	precedences[token.BitXor] = BitXor
-	precedences[token.BitAnd] = BitAnd
-	precedences[token.ShiftLeft] = BitShift
-	precedences[token.ShiftRight] = BitShift
-	precedences[token.Concat] = Concat
-	precedences[token.Plus] = Term
-	precedences[token.Minus] = Term
-	precedences[token.Asterisk] = Factor
-	precedences[token.Slash] = Factor
-	precedences[token.FloorSlash] = Factor
-	precedences[token.Modulo] = Factor
-	precedences[token.Caret] = Power
-	precedences[token.LParen] = CallIndex
-	precedences[token.LBrack] = CallIndex
-	precedences[token.Dot] = CallIndex
-	precedences[token.String] = CallIndex
-	precedences[token.LBrace] = CallIndex
-	precedences[token.Colon] = CallIndex
+var precedences = [256]int{
+	token.Or:         Or,
+	token.And:        And,
+	token.Less:       Comparison,
+	token.LessEq:     Comparison,
+	token.Greater:    Comparison,
+	token.GreaterEq:  Comparison,
+	token.Eq:         Comparison,
+	token.NotEq:      Comparison,
+	token.BitOr:      BitOr,
+	token.BitXor:     BitXor,
+	token.BitAnd:     BitAnd,
+	token.ShiftLeft:  BitShift,
+	token.ShiftRight: BitShift,
+	token.Concat:     Concat,
+	token.Plus:       Term,
+	token.Minus:      Term,
+	token.Asterisk:   Factor,
+	token.Slash:      Factor,
+	token.FloorSlash: Factor,
+	token.Modulo:     Factor,
+	token.Caret:      Power,
+	token.LParen:     CallIndex,
+	token.LBrack:     CallIndex,
+	token.Dot:        CallIndex,
+	token.String:     CallIndex,
+	token.LBrace:     CallIndex,
+	token.Colon:      CallIndex,
 }
 
 type ParseError struct {

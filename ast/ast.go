@@ -405,8 +405,8 @@ func computeLineOffsets(source []byte, lines []uint32) []uint32 {
 func HashBytes(b []byte) uint64 {
 	var hash uint64 = 14695981039346656037
 
-	for _, c := range b {
-		hash ^= uint64(c)
+	for _, char := range b {
+		hash ^= uint64(char)
 		hash *= 1099511628211
 	}
 
@@ -418,18 +418,18 @@ func HashBytes(b []byte) uint64 {
 func HashBytesConcat(a, sep, b []byte) uint64 {
 	var hash uint64 = 14695981039346656037
 
-	for _, c := range a {
-		hash ^= uint64(c)
+	for _, char := range a {
+		hash ^= uint64(char)
 		hash *= 1099511628211
 	}
 
-	for _, c := range sep {
-		hash ^= uint64(c)
+	for _, char := range sep {
+		hash ^= uint64(char)
 		hash *= 1099511628211
 	}
 
-	for _, c := range b {
-		hash ^= uint64(c)
+	for _, char := range b {
+		hash ^= uint64(char)
 		hash *= 1099511628211
 	}
 

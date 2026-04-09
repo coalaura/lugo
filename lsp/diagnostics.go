@@ -44,7 +44,10 @@ func (s *Server) publishDiagnostics(uri string) {
 		return
 	}
 
-	doc := s.Documents[uri]
+	doc, ok := s.Documents[uri]
+	if !ok || doc == nil {
+		return
+	}
 
 	if s.FeatureFiveM && doc.IsFiveMManifest {
 		WriteMessage(s.Writer, OutgoingNotification{
@@ -495,65 +498,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			}
 
 			if shouldReportShadow {
-				varType := "Local"
-				if isLoopVar {
-					varType = "Loop"
-				}
-
-				if s.isKnownGlobal(nameBytes) {
-					s.diagBuf = append(s.diagBuf, Diagnostic{
-						Range:    r,
-						Severity: SeverityWarning,
-						Code:     "shadow-global",
-						Message:  varType + " variable '" + ast.String(nameBytes) + "' shadows a known global.",
-					})
-				} else {
-					hash := ast.HashBytes(nameBytes)
-
-					if syms, exists := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]; exists && len(syms) > 0 {
-						var visibleSym *GlobalSymbol
-
-						for _, sym := range syms {
-							if tgtDoc, ok := s.Documents[sym.URI]; ok && canSee(tgtDoc) {
-								visibleSym = &sym
-
-								break
-							}
-						}
-
-						if visibleSym == nil {
-							continue
-						}
-
-						sym := *visibleSym
-
-						var related []DiagnosticRelatedInformation
-
-						if symDoc, ok := s.Documents[sym.URI]; ok {
-							var fromFile string
-
-							if sym.URI != uri {
-								fromFile = " in " + filepath.Base(symDoc.Path)
-							}
-
-							related = append(related, DiagnosticRelatedInformation{
-								Location: Location{
-									URI:   sym.URI,
-									Range: getNodeRange(symDoc.Tree, sym.NodeID),
-								},
-								Message: fmt.Sprintf("Global '%s' defined here%s", ast.String(nameBytes), fromFile),
-							})
-						}
-
-						s.diagBuf = append(s.diagBuf, Diagnostic{
-							Range:              r,
-							Severity:           SeverityWarning,
-							Code:               "shadow-global",
-							Message:            varType + " variable '" + ast.String(nameBytes) + "' shadows a global definition.",
-							RelatedInformation: related,
-						})
-					}
-				}
+				s.checkGlobalShadowing(doc, uri, nameBytes, isLoopVar, r, canSee)
 			}
 		}
 	}
@@ -573,6 +518,7 @@ func (s *Server) publishDiagnostics(uri string) {
 
 			node := doc.Tree.Nodes[pair.Shadowing]
 			nameBytes := doc.Source[node.Start:node.End]
+			nameStr := ast.String(nameBytes)
 
 			var related []DiagnosticRelatedInformation
 
@@ -581,10 +527,11 @@ func (s *Server) publishDiagnostics(uri string) {
 					URI:   uri,
 					Range: getNodeRange(doc.Tree, pair.Shadowed),
 				},
-				Message: fmt.Sprintf("Outer local '%s' defined here", ast.String(nameBytes)),
+				Message: "Outer local '" + nameStr + "' defined here",
 			})
 
 			varType := "Local"
+
 			if isLoopVar {
 				varType = "Loop"
 			}
@@ -593,7 +540,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				Range:              getNodeRange(doc.Tree, pair.Shadowing),
 				Severity:           SeverityWarning,
 				Code:               "shadow-outer",
-				Message:            varType + " variable '" + ast.String(nameBytes) + "' shadows a variable from an outer scope.",
+				Message:            varType + " variable '" + nameStr + "' shadows a variable from an outer scope.",
 				RelatedInformation: related,
 			})
 		}
@@ -737,25 +684,23 @@ func (s *Server) publishDiagnostics(uri string) {
 				}
 			}
 
-			if s.DiagRedundantReturn {
-				if node.Left == ast.InvalidNode || doc.Tree.Nodes[node.Left].Count == 0 {
-					parentID := node.Parent
-					if parentID != ast.InvalidNode {
-						parentNode := doc.Tree.Nodes[parentID]
-						if parentNode.Kind == ast.KindBlock && parentNode.Count > 0 && doc.Tree.ExtraList[parentNode.Extra+uint32(parentNode.Count-1)] == nodeID {
-							grandParentID := parentNode.Parent
-							if grandParentID != ast.InvalidNode {
-								grandParentNode := doc.Tree.Nodes[grandParentID]
-								if grandParentNode.Kind == ast.KindFunctionExpr || grandParentNode.Kind == ast.KindFile {
-									s.diagBuf = append(s.diagBuf, Diagnostic{
-										Range:    getNodeRange(doc.Tree, nodeID),
-										Severity: SeverityWarning,
-										Code:     "redundant-return",
-										Tags:     []DiagnosticTag{Unnecessary},
-										Message:  "Redundant return statement. The function will exit here anyway.",
-										Data:     float64(nodeID),
-									})
-								}
+			if s.DiagRedundantReturn && (node.Left == ast.InvalidNode || doc.Tree.Nodes[node.Left].Count == 0) {
+				parentID := node.Parent
+				if parentID != ast.InvalidNode {
+					parentNode := doc.Tree.Nodes[parentID]
+					if parentNode.Kind == ast.KindBlock && parentNode.Count > 0 && doc.Tree.ExtraList[parentNode.Extra+uint32(parentNode.Count-1)] == nodeID {
+						grandParentID := parentNode.Parent
+						if grandParentID != ast.InvalidNode {
+							grandParentNode := doc.Tree.Nodes[grandParentID]
+							if grandParentNode.Kind == ast.KindFunctionExpr || grandParentNode.Kind == ast.KindFile {
+								s.diagBuf = append(s.diagBuf, Diagnostic{
+									Range:    getNodeRange(doc.Tree, nodeID),
+									Severity: SeverityWarning,
+									Code:     "redundant-return",
+									Tags:     []DiagnosticTag{Unnecessary},
+									Message:  "Redundant return statement. The function will exit here anyway.",
+									Data:     float64(nodeID),
+								})
 							}
 						}
 					}
@@ -765,7 +710,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			if s.DiagUnreachableCode {
 				var terminalFound bool
 
-				for j := uint16(0); j < node.Count; j++ {
+				for j := range node.Count {
 					stmtID := doc.Tree.ExtraList[node.Extra+uint32(j)]
 
 					if terminalFound {
@@ -974,7 +919,7 @@ func (s *Server) publishDiagnostics(uri string) {
 									Range:    getNodeRange(doc.Tree, fieldNode.Left),
 									Severity: SeverityWarning,
 									Code:     "duplicate-field",
-									Message:  fmt.Sprintf("Duplicate field '%s' in table.", ast.String(keyBytes)),
+									Message:  "Duplicate field '" + ast.String(keyBytes) + "' in table.",
 									RelatedInformation: []DiagnosticRelatedInformation{
 										{
 											Location: Location{URI: uri, Range: getNodeRange(doc.Tree, prevID)},
@@ -1423,21 +1368,20 @@ func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID)
 
 		switch parentNode.Kind {
 		case ast.KindMemberExpr, ast.KindMethodName, ast.KindIndexExpr:
-			if parentNode.Left == curr {
-				if isLHSOfAssignment(doc, parentID) {
-					return true
-				}
-
-				curr = parentID
-
-				continue
+			if parentNode.Left != curr {
+				return true
 			}
 
-			return true
+			if isLHSOfAssignment(doc, parentID) {
+				return true
+			}
+
+			curr = parentID
 		case ast.KindLocalAssign, ast.KindAssign:
 			if parentNode.Left == curr {
 				return false
 			}
+
 			if parentNode.Right == curr {
 				if int(parentNode.Left) < len(doc.Tree.Nodes) {
 					lhsList := doc.Tree.Nodes[parentNode.Left]
@@ -1463,12 +1407,8 @@ func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID)
 			}
 
 			curr = parentID
-
-			continue
 		case ast.KindParenExpr, ast.KindBinaryExpr, ast.KindUnaryExpr:
 			curr = parentID
-
-			continue
 		default:
 			return true
 		}
@@ -1526,32 +1466,8 @@ func (s *Server) isGlobalGuarded(doc *Document, refID ast.NodeID, nameBytes []by
 			idx := doc.Tree.IndexOfExtra(parentID, curr)
 
 			if idx > 0 {
-				for i := idx - 1; i >= 0; i-- {
-					prevStmtID := doc.Tree.ExtraList[parentNode.Extra+uint32(i)]
-					prevStmt := doc.Tree.Nodes[prevStmtID]
-
-					// `while not VAR do ... end`
-					if prevStmt.Kind == ast.KindWhile {
-						if s.checksForGlobalNegative(doc, prevStmt.Left, nameBytes) {
-							return true
-						}
-					}
-
-					// `repeat ... until VAR`
-					if prevStmt.Kind == ast.KindRepeat {
-						if s.checksForGlobal(doc, prevStmt.Right, nameBytes) {
-							return true
-						}
-					}
-
-					// `if not VAR then return end`
-					if prevStmt.Kind == ast.KindIf {
-						if s.checksForGlobalNegative(doc, prevStmt.Left, nameBytes) {
-							if isTerminal(doc.Tree, prevStmt.Right) {
-								return true
-							}
-						}
-					}
+				if s.isGuardedByPreviousStatements(doc, parentNode, idx, nameBytes) {
+					return true
 				}
 			}
 		}
@@ -1791,6 +1707,101 @@ func (s *Server) isSideEffectFree(doc *Document, id ast.NodeID) bool {
 	}
 
 	return false
+}
+
+func (s *Server) isGuardedByPreviousStatements(doc *Document, blockNode ast.Node, currIdx int, nameBytes []byte) bool {
+	for i := currIdx - 1; i >= 0; i-- {
+		prevStmtID := doc.Tree.ExtraList[blockNode.Extra+uint32(i)]
+		prevStmt := doc.Tree.Nodes[prevStmtID]
+
+		// `while not VAR do ... end`
+		if prevStmt.Kind == ast.KindWhile {
+			if s.checksForGlobalNegative(doc, prevStmt.Left, nameBytes) {
+				return true
+			}
+		}
+
+		// `repeat ... until VAR`
+		if prevStmt.Kind == ast.KindRepeat {
+			if s.checksForGlobal(doc, prevStmt.Right, nameBytes) {
+				return true
+			}
+		}
+
+		// `if not VAR then return end`
+		if prevStmt.Kind == ast.KindIf {
+			if s.checksForGlobalNegative(doc, prevStmt.Left, nameBytes) {
+				if isTerminal(doc.Tree, prevStmt.Right) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+func (s *Server) checkGlobalShadowing(doc *Document, uri string, nameBytes []byte, isLoopVar bool, r Range, canSee func(*Document) bool) {
+	varType := "Local"
+
+	if isLoopVar {
+		varType = "Loop"
+	}
+
+	if s.isKnownGlobal(nameBytes) {
+		s.diagBuf = append(s.diagBuf, Diagnostic{
+			Range:    r,
+			Severity: SeverityWarning,
+			Code:     "shadow-global",
+			Message:  varType + " variable '" + ast.String(nameBytes) + "' shadows a known global.",
+		})
+	} else {
+		hash := ast.HashBytes(nameBytes)
+
+		if syms, exists := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]; exists && len(syms) > 0 {
+			var visibleSym *GlobalSymbol
+
+			for _, sym := range syms {
+				if tgtDoc, ok := s.Documents[sym.URI]; ok && canSee(tgtDoc) {
+					visibleSym = &sym
+
+					break
+				}
+			}
+
+			if visibleSym == nil {
+				return
+			}
+
+			sym := *visibleSym
+
+			var related []DiagnosticRelatedInformation
+
+			if symDoc, ok := s.Documents[sym.URI]; ok {
+				var fromFile string
+
+				if sym.URI != uri {
+					fromFile = " in " + filepath.Base(symDoc.Path)
+				}
+
+				related = append(related, DiagnosticRelatedInformation{
+					Location: Location{
+						URI:   sym.URI,
+						Range: getNodeRange(symDoc.Tree, sym.NodeID),
+					},
+					Message: fmt.Sprintf("Global '%s' defined here%s", ast.String(nameBytes), fromFile),
+				})
+			}
+
+			s.diagBuf = append(s.diagBuf, Diagnostic{
+				Range:              r,
+				Severity:           SeverityWarning,
+				Code:               "shadow-global",
+				Message:            varType + " variable '" + ast.String(nameBytes) + "' shadows a global definition.",
+				RelatedInformation: related,
+			})
+		}
+	}
 }
 
 func (s *Server) isStaticallyConstant(doc *Document, id ast.NodeID) bool {

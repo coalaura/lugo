@@ -75,8 +75,10 @@ func (doc *Document) findPartialEval(offset uint32) (uint32, uint32, string, boo
 		return 0, 0, "", false
 	}
 
-	var chainRoot ast.NodeID = ast.InvalidNode
-	var chainOp token.Kind
+	var (
+		chainRoot ast.NodeID = ast.InvalidNode
+		chainOp   token.Kind
+	)
 
 	// 1. Climb up to find the root of the current associative operator chain
 	temp := curr
@@ -107,8 +109,11 @@ func (doc *Document) findPartialEval(offset uint32) (uint32, uint32, string, boo
 	}
 
 	// 2. Flatten the tree into an array of operands (left-to-right)
-	var operands []ast.NodeID
-	var flatten func(id ast.NodeID)
+	var (
+		operands []ast.NodeID
+		flatten  func(id ast.NodeID)
+	)
+
 	flatten = func(id ast.NodeID) {
 		node := doc.Tree.Nodes[id]
 		if node.Kind == ast.KindBinaryExpr && token.Kind(node.Extra) == chainOp {
@@ -118,11 +123,12 @@ func (doc *Document) findPartialEval(offset uint32) (uint32, uint32, string, boo
 			operands = append(operands, id)
 		}
 	}
+
 	flatten(chainRoot)
 
 	// 3. Find the contiguous segment of evaluable constants that the cursor is inside
-	var bestStart, bestEnd int = -1, -1
-	var currentStart int = -1
+	bestStart, bestEnd := -1, -1
+	currentStart := -1
 
 	for i, opID := range operands {
 		_, ok := doc.evalNode(opID, 0)

@@ -83,36 +83,48 @@ func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {
 			return ast.InvalidNode
 		case ast.KindNameList:
 			grandParentID := doc.Tree.Nodes[parentID].Parent
-			if grandParentID != ast.InvalidNode {
-				grandParentNode := doc.Tree.Nodes[grandParentID]
-				if grandParentNode.Kind == ast.KindLocalAssign && grandParentNode.Right != ast.InvalidNode {
-					idx := doc.Tree.IndexOfExtra(parentID, curr)
-					if idx != -1 {
-						rhsNode := doc.Tree.Nodes[grandParentNode.Right]
-						if uint16(idx) < rhsNode.Count {
-							return doc.Tree.ExtraList[rhsNode.Extra+uint32(idx)]
-						}
-					}
-				}
+			if grandParentID == ast.InvalidNode {
+				return ast.InvalidNode
 			}
 
-			return ast.InvalidNode
+			grandParentNode := doc.Tree.Nodes[grandParentID]
+			if grandParentNode.Kind != ast.KindLocalAssign || grandParentNode.Right == ast.InvalidNode {
+				return ast.InvalidNode
+			}
+
+			idx := doc.Tree.IndexOfExtra(parentID, curr)
+			if idx == -1 {
+				return ast.InvalidNode
+			}
+
+			rhsNode := doc.Tree.Nodes[grandParentNode.Right]
+			if uint16(idx) >= rhsNode.Count {
+				return ast.InvalidNode
+			}
+
+			return doc.Tree.ExtraList[rhsNode.Extra+uint32(idx)]
 		case ast.KindExprList:
 			grandParentID := doc.Tree.Nodes[parentID].Parent
-			if grandParentID != ast.InvalidNode {
-				grandParentNode := doc.Tree.Nodes[grandParentID]
-				if grandParentNode.Kind == ast.KindAssign && grandParentNode.Left == parentID && grandParentNode.Right != ast.InvalidNode {
-					idx := doc.Tree.IndexOfExtra(parentID, curr)
-					if idx != -1 {
-						rhsNode := doc.Tree.Nodes[grandParentNode.Right]
-						if uint16(idx) < rhsNode.Count {
-							return doc.Tree.ExtraList[rhsNode.Extra+uint32(idx)]
-						}
-					}
-				}
+			if grandParentID == ast.InvalidNode {
+				return ast.InvalidNode
 			}
 
-			return ast.InvalidNode
+			grandParentNode := doc.Tree.Nodes[grandParentID]
+			if grandParentNode.Kind != ast.KindAssign || grandParentNode.Left != parentID || grandParentNode.Right == ast.InvalidNode {
+				return ast.InvalidNode
+			}
+
+			idx := doc.Tree.IndexOfExtra(parentID, curr)
+			if idx == -1 {
+				return ast.InvalidNode
+			}
+
+			rhsNode := doc.Tree.Nodes[grandParentNode.Right]
+			if uint16(idx) >= rhsNode.Count {
+				return ast.InvalidNode
+			}
+
+			return doc.Tree.ExtraList[rhsNode.Extra+uint32(idx)]
 		case ast.KindMemberExpr, ast.KindMethodName:
 			curr = parentID
 		default:

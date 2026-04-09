@@ -1385,7 +1385,7 @@ func (s *Server) handleSignatureHelp(req Request) {
 					}
 
 					if pDoc.Desc != "" {
-						docContent = &MarkupContent{Kind: "markdown", Value: pDoc.Desc}
+						docContent = new(MarkupContent{Kind: "markdown", Value: pDoc.Desc})
 					}
 				}
 
@@ -1410,7 +1410,7 @@ func (s *Server) handleSignatureHelp(req Request) {
 				var docContent *MarkupContent
 
 				if p.Desc != "" {
-					docContent = &MarkupContent{Kind: "markdown", Value: p.Desc}
+					docContent = new(MarkupContent{Kind: "markdown", Value: p.Desc})
 				}
 
 				labels = append(labels, label)
@@ -1425,7 +1425,7 @@ func (s *Server) handleSignatureHelp(req Request) {
 		var funcDoc *MarkupContent
 
 		if luadoc.Description != "" {
-			funcDoc = &MarkupContent{Kind: "markdown", Value: luadoc.Description}
+			funcDoc = new(MarkupContent{Kind: "markdown", Value: luadoc.Description})
 		}
 
 		signatures = append(signatures, SignatureInformation{
@@ -1977,9 +1977,9 @@ func (s *Server) handleSelectionRange(req Request) {
 		for currID != ast.InvalidNode {
 			node := doc.Tree.Nodes[currID]
 
-			sr := &SelectionRange{
+			sr := new(SelectionRange{
 				Range: getRange(doc.Tree, node.Start, node.End),
-			}
+			})
 
 			if first == nil {
 				first = sr
@@ -2172,7 +2172,7 @@ func (s *Server) handleCodeLensResolve(req Request) {
 
 	ctx := s.resolveSymbolAt(uri, identNode.Start)
 	if ctx == nil {
-		codeLens.Command = &Command{Title: "0 references", Command: ""}
+		codeLens.Command = new(Command{Title: "0 references", Command: ""})
 
 		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: codeLens})
 
@@ -2200,11 +2200,11 @@ func (s *Server) handleCodeLensResolve(req Request) {
 		args = []any{uri, codeLens.Range.Start, locations}
 	}
 
-	codeLens.Command = &Command{
+	codeLens.Command = new(Command{
 		Title:     title,
 		Command:   cmd,
 		Arguments: args,
-	}
+	})
 
 	WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: codeLens})
 }

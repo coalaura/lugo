@@ -250,7 +250,7 @@ func (s *Server) getDocFileEnv(res *FiveMResource, doc *Document) FileEnv {
 	if len(doc.URI) > len(res.RootURI) {
 		relPath = doc.URI[len(res.RootURI)+1:]
 	} else {
-		relPath = doc.URI
+		relPath = ""
 	}
 
 	var env FileEnv = EnvUnknown
@@ -263,7 +263,10 @@ func (s *Server) getDocFileEnv(res *FiveMResource, doc *Document) FileEnv {
 	}
 
 	if env == EnvUnknown {
-		var isClient bool
+		var (
+			isClient bool
+			isServer bool
+		)
 
 		for _, glob := range res.ClientGlobs {
 			if matchGlob(glob, relPath) {
@@ -272,8 +275,6 @@ func (s *Server) getDocFileEnv(res *FiveMResource, doc *Document) FileEnv {
 				break
 			}
 		}
-
-		var isServer bool
 
 		for _, glob := range res.ServerGlobs {
 			if matchGlob(glob, relPath) {

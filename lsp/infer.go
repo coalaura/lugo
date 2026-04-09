@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"bytes"
+	"iter"
 	"strings"
 
 	"github.com/coalaura/lugo/ast"
@@ -33,12 +34,39 @@ type TypeSet struct {
 	Basics     BasicType
 }
 
+func splitUnionType(tStr string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		var (
+			depth int
+			start int
+		)
+
+		for i := 0; i < len(tStr); i++ {
+			char := tStr[i]
+
+			if char == '(' || char == '<' || char == '{' || char == '[' {
+				depth++
+			} else if char == ')' || char == '>' || char == '}' || char == ']' {
+				depth--
+			} else if char == '|' && depth <= 0 {
+				if !yield(strings.TrimSpace(tStr[start:i])) {
+					return
+				}
+
+				start = i + 1
+			}
+		}
+
+		if start < len(tStr) {
+			yield(strings.TrimSpace(tStr[start:]))
+		}
+	}
+}
+
 func ParseTypeString(tStr string) TypeSet {
 	var typeSet TypeSet
 
-	for part := range strings.SplitSeq(tStr, "|") {
-		part = strings.TrimSpace(part)
-
+	for part := range splitUnionType(tStr) {
 		if strings.HasSuffix(part, "?") {
 			part = part[:len(part)-1]
 
@@ -924,9 +952,10 @@ func (doc *Document) extractArrayElementType(t TypeSet) TypeSet {
 }
 
 func (doc *Document) inferFunctionReturnType(funcExprID ast.NodeID) TypeSet {
-	var t TypeSet
-
-	var walk func(id ast.NodeID)
+	var (
+		t    TypeSet
+		walk func(id ast.NodeID)
+	)
 
 	walk = func(id ast.NodeID) {
 		if id == ast.InvalidNode {
