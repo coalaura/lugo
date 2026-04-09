@@ -375,6 +375,20 @@
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for files that are not referenced in the resource manifest (`fxmanifest.lua`).",
                         "order": 2
+                    },
+                    "lugo.fivem.diagnostics.unknownExport": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for calling missing or unknown exports on a FiveM resource.",
+                        "order": 3
+                    },
+                    "lugo.fivem.diagnostics.unknownResource": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for referencing unknown FiveM resources via the `exports` global.",
+                        "order": 4
                     }
                 }
             }

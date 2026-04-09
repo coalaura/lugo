@@ -108,6 +108,8 @@ type Server struct {
 
 	FeatureFiveM             bool
 	DiagFiveMUnaccountedFile bool
+	DiagFiveMUnknownExport   bool
+	DiagFiveMUnknownResource bool
 }
 
 func NewServer(version string) *Server {
@@ -233,6 +235,8 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 
 	setCfg(&s.FeatureFiveM, opts.FeatureFiveM, &needsReindex)
 	setCfg(&s.DiagFiveMUnaccountedFile, opts.DiagFiveMUnaccountedFile, &needsRepublish)
+	setCfg(&s.DiagFiveMUnknownExport, opts.DiagFiveMUnknownExport, &needsRepublish)
+	setCfg(&s.DiagFiveMUnknownResource, opts.DiagFiveMUnknownResource, &needsRepublish)
 
 	return needsReindex, needsRepublish
 }

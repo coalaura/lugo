@@ -88,6 +88,8 @@ function buildInitializationOptions() {
 
 		featureFiveM: lugoConfig.get("fivem.enabled") === true,
 		diagFiveMUnaccountedFile: lugoConfig.get("fivem.diagnostics.unaccountedFile") !== false,
+		diagFiveMUnknownExport: lugoConfig.get("fivem.diagnostics.unknownExport") !== false,
+		diagFiveMUnknownResource: lugoConfig.get("fivem.diagnostics.unknownResource") !== false,
 	};
 }
 
@@ -95,7 +97,7 @@ function scheduleConfigUpdate() {
 	clearTimeout(debounce);
 
 	debounce = setTimeout(() => {
-		if (!client || !client.isRunning()) {
+		if (!client?.isRunning()) {
 			return;
 		}
 
@@ -108,7 +110,7 @@ function scheduleConfigUpdate() {
 async function activate(context) {
 	const stdProvider = {
 		provideTextDocumentContent: uri => {
-			if (!client || !client.isRunning()) {
+			if (!client?.isRunning()) {
 				return "";
 			}
 

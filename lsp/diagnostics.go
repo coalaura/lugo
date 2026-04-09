@@ -155,7 +155,7 @@ func (s *Server) publishDiagnostics(uri string) {
 									}
 								}
 
-								if !isExported {
+								if !isExported && s.DiagFiveMUnknownExport {
 									s.diagBuf = append(s.diagBuf, Diagnostic{
 										Range:    getNodeRange(doc.Tree, errNode),
 										Severity: SeverityWarning,
@@ -192,7 +192,7 @@ func (s *Server) publishDiagnostics(uri string) {
 							}
 						}
 
-						if resName != "" && errNode != ast.InvalidNode {
+						if resName != "" && errNode != ast.InvalidNode && s.DiagFiveMUnknownResource {
 							if _, ok := s.FiveMResourceByName[resName]; !ok {
 								s.diagBuf = append(s.diagBuf, Diagnostic{
 									Range:    getNodeRange(doc.Tree, errNode),

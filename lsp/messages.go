@@ -141,6 +141,8 @@ type InitializationOptions struct {
 
 	FeatureFiveM             bool `json:"featureFiveM"`
 	DiagFiveMUnaccountedFile bool `json:"diagFiveMUnaccountedFile"`
+	DiagFiveMUnknownExport   bool `json:"diagFiveMUnknownExport"`
+	DiagFiveMUnknownResource bool `json:"diagFiveMUnknownResource"`
 }
 
 type ServerCapabilities struct {
