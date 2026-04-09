@@ -16,6 +16,7 @@ var (
 	tagGeneric    = []byte("@generic")
 	tagOverload   = []byte("@overload")
 	tagSee        = []byte("@see")
+	tagExport     = []byte("@export")
 
 	kwPublic    = []byte("public ")
 	kwPrivate   = []byte("private ")
@@ -71,6 +72,7 @@ type LuaDoc struct {
 	Class         *LuaDocClass
 	Type          *LuaDocType
 	Alias         *LuaDocAlias
+	Export        string
 	Generics      []LuaDocGeneric
 	Params        []LuaDocParam
 	Returns       []LuaDocReturn
@@ -403,6 +405,10 @@ func parseLuaDoc(comments []byte, enableAlerts bool) LuaDoc {
 			activeTag = ""
 
 			doc.See = append(doc.See, string(bytes.TrimSpace(after)))
+		} else if after, ok := bytes.CutPrefix(line, tagExport); ok {
+			activeTag = ""
+
+			doc.Export = string(bytes.TrimSpace(after))
 		} else {
 			if len(line) > 0 {
 				if line[0] != '@' { // Ignore @meta, @diagnostic, etc.

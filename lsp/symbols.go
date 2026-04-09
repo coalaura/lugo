@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"iter"
+	"slices"
 	"strings"
 
 	"github.com/coalaura/lugo/ast"
@@ -60,17 +61,18 @@ type RefKey struct {
 }
 
 type SymbolContext struct {
-	TargetDoc   *Document
-	IdentName   string
-	DisplayName string
-	TargetURI   string
-	GlobalDefs  []GlobalSymbol
-	GKey        GlobalKey
-	IdentNodeID ast.NodeID
-	TargetDefID ast.NodeID
-	RecDefID    ast.NodeID
-	IsProp      bool
-	IsGlobal    bool
+	TargetDoc      *Document
+	IdentName      string
+	DisplayName    string
+	TargetURI      string
+	GlobalDefs     []GlobalSymbol
+	GKey           GlobalKey
+	IdentNodeID    ast.NodeID
+	TargetDefID    ast.NodeID
+	RecDefID       ast.NodeID
+	IsProp         bool
+	IsGlobal       bool
+	FiveMExportRes string
 }
 
 func (s *Server) handleDefinition(req Request) {
@@ -377,7 +379,7 @@ func (s *Server) handleDocumentSymbol(req Request) {
 							targetFuncID = valID
 							targetDoc = ctx.TargetDoc
 
-							paramOffset = getImplicitSelfOffset(node, ctx.TargetDoc, ctx.TargetDefID)
+							paramOffset = getImplicitSelfOffset(ctx, node, ctx.TargetDoc, ctx.TargetDefID)
 						}
 					}
 				}
@@ -620,9 +622,10 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 	parentID := identNode.Parent
 
 	var (
-		gKey   GlobalKey
-		isProp bool
-		recDef ast.NodeID = ast.InvalidNode
+		gKey      GlobalKey
+		isProp    bool
+		recDef    ast.NodeID = ast.InvalidNode
+		exportRes string
 	)
 
 	if parentID != ast.InvalidNode && int(parentID) < len(doc.Tree.Nodes) {
@@ -677,6 +680,10 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 						gKey.ReceiverHash = ast.HashBytesConcat([]byte("module:"), nil, []byte(targetDoc.URI))
 					}
 				}
+
+				if s.FeatureFiveM {
+					exportRes = s.getFiveMExportResource(doc, recID)
+				}
 			}
 		} else if isRecordKey {
 			isProp = true
@@ -724,15 +731,16 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 	}
 
 	ctx := &SymbolContext{
-		TargetDoc:   doc,
-		TargetURI:   uri,
-		IdentNodeID: nodeID,
-		IdentName:   identName,
-		DisplayName: displayName,
-		IsProp:      isProp,
-		GKey:        gKey,
-		IsGlobal:    isGlobal,
-		RecDefID:    recDef,
+		TargetDoc:      doc,
+		TargetURI:      uri,
+		IdentNodeID:    nodeID,
+		IdentName:      identName,
+		DisplayName:    displayName,
+		IsProp:         isProp,
+		GKey:           gKey,
+		IsGlobal:       isGlobal,
+		RecDefID:       recDef,
+		FiveMExportRes: exportRes,
 	}
 
 	if defID != ast.InvalidNode {
@@ -745,9 +753,11 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 					ctx.GKey = exp.Key
 
 					if gSyms, ok := s.getGlobalSymbols(doc, ctx.GKey.ReceiverHash, ctx.GKey.PropHash); ok {
-						bestDefs := s.getBestDefsForContext(doc, nodeID, gSyms)
+						bestDefs := s.getBestDefsForContext(ctx, doc, nodeID, gSyms)
+
 						ctx.GlobalDefs = bestDefs
 					}
+
 					break
 				}
 			}
@@ -783,16 +793,89 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 	}
 
 	if ctx.TargetDefID == ast.InvalidNode && gKey.PropHash != 0 {
-		if gSyms, ok := s.getGlobalSymbols(doc, gKey.ReceiverHash, gKey.PropHash); ok {
-			bestDefs := s.getBestDefsForContext(doc, nodeID, gSyms)
+		var resolved bool
 
-			ctx.GlobalDefs = bestDefs
+		if ctx.FiveMExportRes != "" {
+			if resObj, ok := s.FiveMResourceByName[ctx.FiveMExportRes]; ok {
+				var isExported bool
 
-			if len(bestDefs) > 0 {
-				if gDoc, docOk := s.Documents[bestDefs[0].URI]; docOk {
-					ctx.TargetDoc = gDoc
-					ctx.TargetDefID = bestDefs[0].NodeID
-					ctx.TargetURI = bestDefs[0].URI
+				if slices.Contains(resObj.ClientExports, identName) || slices.Contains(resObj.ServerExports, identName) {
+					isExported = true
+				}
+
+				var resDefs []GlobalSymbol
+
+				for _, d := range s.Documents {
+					if s.getDocResourceRoot(d) == resObj.RootURI {
+						for _, exp := range d.FiveMLuaExports {
+							if exp.Name == identName {
+								resDefs = append(resDefs, GlobalSymbol{
+									URI:    d.URI,
+									NodeID: exp.NodeID,
+								})
+
+								isExported = true
+							}
+						}
+					}
+				}
+
+				if isExported {
+					if len(resDefs) == 0 {
+						if gSyms, ok := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: gKey.PropHash}]; ok {
+							for _, sym := range gSyms {
+								if symDoc, ok := s.Documents[sym.URI]; ok {
+									if s.getDocResourceRoot(symDoc) == resObj.RootURI {
+										resDefs = append(resDefs, sym)
+									}
+								}
+							}
+						}
+					}
+
+					if len(resDefs) > 0 {
+						bestDefs := s.getBestDefsForContext(ctx, doc, nodeID, resDefs)
+						ctx.GlobalDefs = bestDefs
+
+						if len(bestDefs) > 0 {
+							if gDoc, docOk := s.Documents[bestDefs[0].URI]; docOk {
+								ctx.TargetDoc = gDoc
+								ctx.TargetDefID = bestDefs[0].NodeID
+								ctx.TargetURI = bestDefs[0].URI
+
+								resolved = true
+							}
+						}
+					}
+				} else {
+					for _, d := range s.Documents {
+						for _, exp := range d.FiveMLuaExports {
+							if exp.Name == identName {
+								resDefs = append(resDefs, GlobalSymbol{
+									URI:    d.URI,
+									NodeID: exp.NodeID,
+								})
+
+								isExported = true
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if !resolved {
+			if gSyms, ok := s.getGlobalSymbols(doc, gKey.ReceiverHash, gKey.PropHash); ok {
+				bestDefs := s.getBestDefsForContext(ctx, doc, nodeID, gSyms)
+
+				ctx.GlobalDefs = bestDefs
+
+				if len(bestDefs) > 0 {
+					if gDoc, docOk := s.Documents[bestDefs[0].URI]; docOk {
+						ctx.TargetDoc = gDoc
+						ctx.TargetDefID = bestDefs[0].NodeID
+						ctx.TargetURI = bestDefs[0].URI
+					}
 				}
 			}
 		}
@@ -801,7 +884,71 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 	return ctx
 }
 
-func (s *Server) getBestDefsForContext(doc *Document, identNodeID ast.NodeID, defs []GlobalSymbol) []GlobalSymbol {
+func (s *Server) getFiveMExportResource(doc *Document, nodeID ast.NodeID) string {
+	if !s.FeatureFiveM || nodeID == ast.InvalidNode || int(nodeID) >= len(doc.Tree.Nodes) {
+		return ""
+	}
+
+	node := doc.Tree.Nodes[nodeID]
+
+	switch node.Kind {
+	case ast.KindString:
+		pID := node.Parent
+		if pID != ast.InvalidNode && int(pID) < len(doc.Tree.Nodes) {
+			pNode := doc.Tree.Nodes[pID]
+			if pNode.Kind == ast.KindIndexExpr && pNode.Right == nodeID {
+				node = pNode
+				nodeID = pID
+			}
+		}
+	case ast.KindIdent:
+		pID := node.Parent
+		if pID != ast.InvalidNode && int(pID) < len(doc.Tree.Nodes) {
+			pNode := doc.Tree.Nodes[pID]
+			if pNode.Kind == ast.KindMemberExpr && pNode.Right == nodeID {
+				node = pNode
+				nodeID = pID
+			}
+		}
+	}
+
+	switch node.Kind {
+	case ast.KindIndexExpr:
+		if int(node.Left) < len(doc.Tree.Nodes) && doc.Tree.Nodes[node.Left].Kind == ast.KindIdent {
+			leftNode := doc.Tree.Nodes[node.Left]
+			leftName := doc.Source[leftNode.Start:leftNode.End]
+
+			if bytes.Equal(leftName, []byte("exports")) && doc.Resolver.References[node.Left] == ast.InvalidNode {
+				if int(node.Right) < len(doc.Tree.Nodes) {
+					rightNode := doc.Tree.Nodes[node.Right]
+
+					if rightNode.Kind == ast.KindString {
+						return unquoteLuaString(string(doc.Source[rightNode.Start:rightNode.End]))
+					}
+				}
+			}
+		}
+	case ast.KindMemberExpr:
+		if int(node.Left) < len(doc.Tree.Nodes) && doc.Tree.Nodes[node.Left].Kind == ast.KindIdent {
+			leftNode := doc.Tree.Nodes[node.Left]
+			leftName := doc.Source[leftNode.Start:leftNode.End]
+
+			if bytes.Equal(leftName, []byte("exports")) && doc.Resolver.References[node.Left] == ast.InvalidNode {
+				if int(node.Right) < len(doc.Tree.Nodes) {
+					rightNode := doc.Tree.Nodes[node.Right]
+
+					if rightNode.Kind == ast.KindIdent {
+						return string(doc.Source[rightNode.Start:rightNode.End])
+					}
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
+func (s *Server) getBestDefsForContext(ctx *SymbolContext, doc *Document, identNodeID ast.NodeID, defs []GlobalSymbol) []GlobalSymbol {
 	if len(defs) <= 1 {
 		return defs
 	}
@@ -849,12 +996,37 @@ func (s *Server) getBestDefsForContext(doc *Document, identNodeID ast.NodeID, de
 				var paramOffset int
 
 				if isMethodCall {
-					paramOffset = getImplicitSelfOffset(ast.Node{Kind: ast.KindMethodCall}, tDoc, def.NodeID)
+					paramOffset = getImplicitSelfOffset(ctx, ast.Node{Kind: ast.KindMethodCall}, tDoc, def.NodeID)
 				} else {
-					paramOffset = getImplicitSelfOffset(ast.Node{Kind: ast.KindCallExpr}, tDoc, def.NodeID)
+					paramOffset = getImplicitSelfOffset(ctx, ast.Node{Kind: ast.KindCallExpr}, tDoc, def.NodeID)
 				}
 
-				expectedArgs := int(funcNode.Count) - paramOffset
+				var (
+					expectedArgs int
+					hasVararg    bool
+				)
+
+				if funcNode.Count > 0 {
+					expectedArgs = int(funcNode.Count) - paramOffset
+
+					lastParamID := tDoc.Tree.ExtraList[funcNode.Extra+uint32(funcNode.Count-1)]
+					if tDoc.Tree.Nodes[lastParamID].Kind == ast.KindVararg {
+						hasVararg = true
+					}
+				} else {
+					luadoc := parseLuaDoc(tDoc.getCommentsAbove(def.NodeID), false)
+
+					expectedArgs = len(luadoc.Params) - paramOffset
+
+					for _, p := range luadoc.Params {
+						if p.Name == "..." {
+							hasVararg = true
+
+							break
+						}
+					}
+				}
+
 				if expectedArgs < 0 {
 					expectedArgs = 0
 				}
@@ -867,12 +1039,9 @@ func (s *Server) getBestDefsForContext(doc *Document, identNodeID ast.NodeID, de
 					score = 1
 				}
 
-				if funcNode.Count > 0 {
-					lastParamID := tDoc.Tree.ExtraList[funcNode.Extra+uint32(funcNode.Count-1)]
-					if tDoc.Tree.Nodes[lastParamID].Kind == ast.KindVararg {
-						if activeCallArgs >= expectedArgs-1 {
-							score = 2
-						}
+				if hasVararg {
+					if activeCallArgs >= expectedArgs-1 {
+						score = 2
 					}
 				}
 
@@ -1072,7 +1241,7 @@ func (s *Server) removeDocumentGlobals(uri string, doc *Document) {
 			var n int
 
 			for _, sym := range syms {
-				if sym.URI != uri || sym.NodeID != exp.NodeID {
+				if sym.URI != uri {
 					syms[n] = sym
 
 					n++
@@ -1371,6 +1540,12 @@ func (s *Server) isKnownGlobal(name []byte) bool {
 
 	for _, glob := range s.KnownGlobalGlobs {
 		if matchGlob(glob, strName) {
+			return true
+		}
+	}
+
+	if s.FeatureFiveM {
+		if strName == "source" || strName == "exports" {
 			return true
 		}
 	}

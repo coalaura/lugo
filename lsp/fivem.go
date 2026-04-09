@@ -26,6 +26,8 @@ type FiveMResource struct {
 	ClientCrossIncludes []string
 	ServerCrossIncludes []string
 	SharedCrossIncludes []string
+	ClientExports       []string
+	ServerExports       []string
 }
 
 func (r *FiveMResource) Equal(other *FiveMResource) bool {
@@ -62,6 +64,14 @@ func (r *FiveMResource) Equal(other *FiveMResource) bool {
 	}
 
 	if !slices.Equal(r.SharedCrossIncludes, other.SharedCrossIncludes) {
+		return false
+	}
+
+	if !slices.Equal(r.ClientExports, other.ClientExports) {
+		return false
+	}
+
+	if !slices.Equal(r.ServerExports, other.ServerExports) {
 		return false
 	}
 
@@ -125,6 +135,8 @@ func (s *Server) parseFiveMManifest(doc *Document) *FiveMResource {
 				targetCross *[]string
 			)
 
+			var targetExports *[]string
+
 			switch funcName {
 			case "client_script", "client_scripts":
 				targetGlobs = &res.ClientGlobs
@@ -135,9 +147,50 @@ func (s *Server) parseFiveMManifest(doc *Document) *FiveMResource {
 			case "shared_script", "shared_scripts", "file", "files":
 				targetGlobs = &res.SharedGlobs
 				targetCross = &res.SharedCrossIncludes
+			case "export", "exports", "client_export", "client_exports":
+				targetExports = &res.ClientExports
+			case "server_export", "server_exports":
+				targetExports = &res.ServerExports
 			}
 
-			if targetGlobs != nil && targetCross != nil {
+			if targetExports != nil {
+				for j := uint16(0); j < node.Count; j++ {
+					if node.Extra+uint32(j) >= uint32(len(doc.Tree.ExtraList)) {
+						continue
+					}
+
+					argID := doc.Tree.ExtraList[node.Extra+uint32(j)]
+					if int(argID) >= len(doc.Tree.Nodes) {
+						continue
+					}
+
+					argNode := doc.Tree.Nodes[argID]
+
+					if argNode.Kind == ast.KindString {
+						strVal := unquoteLuaString(string(doc.Source[argNode.Start:argNode.End]))
+
+						*targetExports = append(*targetExports, strVal)
+					} else if argNode.Kind == ast.KindTableExpr {
+						for k := uint16(0); k < argNode.Count; k++ {
+							if argNode.Extra+uint32(k) >= uint32(len(doc.Tree.ExtraList)) {
+								continue
+							}
+
+							fieldID := doc.Tree.ExtraList[argNode.Extra+uint32(k)]
+							if int(fieldID) >= len(doc.Tree.Nodes) {
+								continue
+							}
+
+							fieldNode := doc.Tree.Nodes[fieldID]
+							if fieldNode.Kind == ast.KindString {
+								strVal := unquoteLuaString(string(doc.Source[fieldNode.Start:fieldNode.End]))
+
+								*targetExports = append(*targetExports, strVal)
+							}
+						}
+					}
+				}
+			} else if targetGlobs != nil && targetCross != nil {
 				for j := uint16(0); j < node.Count; j++ {
 					if node.Extra+uint32(j) >= uint32(len(doc.Tree.ExtraList)) {
 						continue

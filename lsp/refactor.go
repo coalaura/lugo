@@ -1905,7 +1905,7 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 								break
 							}
 
-							paramOffset := getImplicitSelfOffset(node, tDoc, def.NodeID)
+							paramOffset := getImplicitSelfOffset(ctx, node, tDoc, def.NodeID)
 
 							expectedArgs := int(funcNode.Count) - paramOffset
 							if expectedArgs < 0 {

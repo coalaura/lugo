@@ -278,6 +278,16 @@ func (doc *Document) inferIdent(id ast.NodeID) TypeSet {
 	}
 
 	if targetDef == ast.InvalidNode {
+		if doc.Server != nil && doc.Server.FeatureFiveM {
+			if bytes.Equal(identName, []byte("source")) {
+				return TypeSet{Basics: TypeNumber}
+			}
+
+			if bytes.Equal(identName, []byte("exports")) {
+				return TypeSet{Basics: TypeTable}
+			}
+		}
+
 		return TypeSet{}
 	}
 

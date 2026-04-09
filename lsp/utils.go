@@ -318,7 +318,11 @@ func matchGlob(pattern, path string) bool {
 	return t == tLen
 }
 
-func getImplicitSelfOffset(callNode ast.Node, targetDoc *Document, defID ast.NodeID) int {
+func getImplicitSelfOffset(ctx *SymbolContext, callNode ast.Node, targetDoc *Document, defID ast.NodeID) int {
+	if ctx != nil && ctx.FiveMExportRes != "" {
+		return 0
+	}
+
 	if targetDoc == nil || defID == ast.InvalidNode || int(defID) >= len(targetDoc.Tree.Nodes) {
 		return 0
 	}

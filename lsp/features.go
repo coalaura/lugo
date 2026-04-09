@@ -472,6 +472,33 @@ func (s *Server) handleCompletion(req Request) {
 			return label, PlainTextTextFormat
 		}
 
+		if node.Count == 0 {
+			rawComments := dDoc.getCommentsAbove(valID)
+			luadoc := parseLuaDoc(rawComments, false)
+
+			if len(luadoc.Params) > 0 {
+				var params []string
+
+				snippetIdx := 1
+
+				for _, p := range luadoc.Params {
+					if isMethod && snippetIdx == 1 && p.Name == "self" {
+						continue
+					}
+
+					if p.Name == "..." {
+						params = append(params, fmt.Sprintf("${%d:...}", snippetIdx))
+					} else {
+						params = append(params, fmt.Sprintf("${%d:%s}", snippetIdx, p.Name))
+					}
+
+					snippetIdx++
+				}
+
+				return fmt.Sprintf("%s(%s)", label, strings.Join(params, ", ")), SnippetTextFormat
+			}
+		}
+
 		var params []string
 
 		snippetIdx := 1
@@ -507,6 +534,38 @@ func (s *Server) handleCompletion(req Request) {
 		}
 
 		return fmt.Sprintf("%s(%s)", label, strings.Join(params, ", ")), SnippetTextFormat
+	}
+
+	currID := doc.Tree.NodeAt(offset)
+	if s.FeatureFiveM && currID != ast.InvalidNode {
+		currNode := doc.Tree.Nodes[currID]
+		if currNode.Kind == ast.KindString {
+			pID := currNode.Parent
+			if pID != ast.InvalidNode {
+				pNode := doc.Tree.Nodes[pID]
+				if pNode.Kind == ast.KindIndexExpr && pNode.Right == currID {
+					if doc.Tree.Nodes[pNode.Left].Kind == ast.KindIdent {
+						identName := doc.Source[doc.Tree.Nodes[pNode.Left].Start:doc.Tree.Nodes[pNode.Left].End]
+						if bytes.Equal(identName, []byte("exports")) && doc.Resolver.References[pNode.Left] == ast.InvalidNode {
+							for _, res := range s.FiveMResources {
+								addCompletion(res.Name, FieldCompletion, "resource", false, "1", res.Name, PlainTextTextFormat)
+							}
+
+							WriteMessage(s.Writer, Response{
+								RPC: "2.0",
+								ID:  req.ID,
+								Result: CompletionList{
+									IsIncomplete: false,
+									Items:        items,
+								},
+							})
+
+							return
+						}
+					}
+				}
+			}
+		}
 	}
 
 	var (
@@ -561,6 +620,32 @@ func (s *Server) handleCompletion(req Request) {
 		for i >= 0 {
 			c := doc.Source[i]
 
+			if c == ']' {
+				bracketDepth := 1
+
+				i--
+
+				for i >= 0 {
+					if doc.Source[i] == ']' {
+						bracketDepth++
+					} else if doc.Source[i] == '[' {
+						bracketDepth--
+
+						if bracketDepth == 0 {
+							break
+						}
+					}
+
+					i--
+				}
+
+				if i >= 0 {
+					i-- // step over '['
+				}
+
+				continue
+			}
+
 			isIdentChar := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.'
 
 			if !isIdentChar {
@@ -579,30 +664,98 @@ func (s *Server) handleCompletion(req Request) {
 
 	s.Log.Printf("Completion requested at offset %d. isMember=%v, recName=%s\n", offset, isMember, ast.String(recName))
 
-	if isMember && len(recName) > 0 {
-		recHash := ast.HashBytes(recName)
+	if isMember {
+		var (
+			recHash  uint64
+			rootName []byte
+		)
 
-		var rootName []byte
+		if len(recName) > 0 {
+			recHash = ast.HashBytes(recName)
 
-		for i, c := range recName {
-			if c == '.' || c == ':' {
-				rootName = recName[:i]
+			for i, c := range recName {
+				if c == '.' || c == ':' || c == '[' {
+					rootName = recName[:i]
 
-				break
+					break
+				}
+			}
+
+			if rootName == nil {
+				rootName = recName
 			}
 		}
 
-		if rootName == nil {
-			rootName = recName
+		recNodeID := doc.Tree.NodeAt(uint32(endId - 1))
+		if recNodeID != ast.InvalidNode {
+			pID := doc.Tree.Nodes[recNodeID].Parent
+			if pID != ast.InvalidNode {
+				pNode := doc.Tree.Nodes[pID]
+				if (pNode.Kind == ast.KindMemberExpr || pNode.Kind == ast.KindMethodCall) && pNode.Right == recNodeID {
+					recNodeID = pID
+				}
+			}
 		}
 
 		var recDef ast.NodeID = ast.InvalidNode
 
-		for name, defID := range doc.LocalsAt(offset) {
-			if bytes.Equal(name, rootName) {
-				recDef = defID
+		if len(rootName) > 0 {
+			for name, defID := range doc.LocalsAt(offset) {
+				if bytes.Equal(name, rootName) {
+					recDef = defID
 
-				break
+					break
+				}
+			}
+		}
+
+		if s.FeatureFiveM && recNodeID != ast.InvalidNode {
+			exportRes := s.getFiveMExportResource(doc, recNodeID)
+			if exportRes != "" {
+				if resObj, ok := s.FiveMResourceByName[exportRes]; ok {
+					addExportCompletions := func(exports []string, detail string) {
+						for _, exp := range exports {
+							if syms, ok := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes([]byte(exp))}]; ok {
+								var (
+									funcValID ast.NodeID = ast.InvalidNode
+									targetDoc *Document
+								)
+
+								for _, sym := range syms {
+									if symDoc, ok := s.Documents[sym.URI]; ok && s.getDocResourceRoot(symDoc) == resObj.RootURI {
+										valID := symDoc.getAssignedValue(sym.NodeID)
+										if valID != ast.InvalidNode && symDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+											funcValID = valID
+											targetDoc = symDoc
+
+											break
+										}
+									}
+								}
+
+								insertText := exp
+								insertFormat := PlainTextTextFormat
+
+								if funcValID != ast.InvalidNode {
+									insertText, insertFormat = buildFuncSnippet(exp, targetDoc, funcValID, isColon)
+								}
+
+								addCompletion(exp, FunctionCompletion, detail, false, "1", insertText, insertFormat)
+							} else {
+								addCompletion(exp, FunctionCompletion, detail, false, "1", exp, PlainTextTextFormat)
+							}
+						}
+					}
+
+					addExportCompletions(resObj.ClientExports, "client export")
+					addExportCompletions(resObj.ServerExports, "server export")
+				}
+			} else if len(rootName) > 0 && bytes.Equal(rootName, []byte("exports")) && recDef == ast.InvalidNode {
+				for _, res := range s.FiveMResources {
+					if s.isValidIdentifier(res.Name) {
+						addCompletion(res.Name, FieldCompletion, "resource", false, "1", res.Name, PlainTextTextFormat)
+					}
+				}
 			}
 		}
 
@@ -620,8 +773,113 @@ func (s *Server) handleCompletion(req Request) {
 			}
 		}
 
+		if s.FeatureFiveM && len(rootName) > 0 && bytes.Equal(rootName, []byte("exports")) && recDef == ast.InvalidNode {
+			var exportRes string
+
+			if bytes.HasPrefix(recName, []byte("exports[")) && bytes.HasSuffix(recName, []byte("]")) {
+				inner := recName[8 : len(recName)-1]
+
+				exportRes = unquoteLuaString(string(inner))
+			} else if bytes.HasPrefix(recName, []byte("exports.")) {
+				exportRes = string(recName[8:])
+			}
+
+			if exportRes != "" {
+				if resObj, ok := s.FiveMResourceByName[exportRes]; ok {
+					addExportCompletions := func(exports []string, detail string) {
+						for _, exp := range exports {
+							var (
+								funcValID ast.NodeID = ast.InvalidNode
+								targetDoc *Document
+							)
+
+							for _, d := range s.Documents {
+								if s.getDocResourceRoot(d) == resObj.RootURI {
+									for _, luaExp := range d.FiveMLuaExports {
+										if luaExp.Name == exp {
+											funcValID = luaExp.NodeID
+											targetDoc = d
+
+											break
+										}
+									}
+								}
+
+								if targetDoc != nil {
+									break
+								}
+							}
+
+							if targetDoc == nil {
+								for _, d := range s.Documents {
+									for _, luaExp := range d.FiveMLuaExports {
+										if luaExp.Name == exp {
+											funcValID = luaExp.NodeID
+											targetDoc = d
+
+											break
+										}
+									}
+
+									if targetDoc != nil {
+										break
+									}
+								}
+
+								if syms, ok := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes([]byte(exp))}]; ok {
+									for _, sym := range syms {
+										if symDoc, ok := s.Documents[sym.URI]; ok && s.getDocResourceRoot(symDoc) == resObj.RootURI {
+											valID := symDoc.getAssignedValue(sym.NodeID)
+											if valID != ast.InvalidNode && symDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+												funcValID = valID
+												targetDoc = symDoc
+
+												break
+											}
+										}
+									}
+								}
+							}
+
+							insertText := exp
+							insertFormat := PlainTextTextFormat
+
+							if funcValID != ast.InvalidNode && targetDoc != nil && targetDoc.Tree.Nodes[funcValID].Kind == ast.KindFunctionExpr {
+								insertText, insertFormat = buildFuncSnippet(exp, targetDoc, funcValID, isColon)
+							}
+
+							addCompletion(exp, FunctionCompletion, detail, false, "1", insertText, insertFormat)
+						}
+					}
+
+					addExportCompletions(resObj.ClientExports, "client export")
+					addExportCompletions(resObj.ServerExports, "server export")
+
+					var dynamicExports []string
+
+					for _, d := range s.Documents {
+						for _, exp := range d.FiveMLuaExports {
+							if !slices.Contains(resObj.ClientExports, exp.Name) && !slices.Contains(resObj.ServerExports, exp.Name) && !slices.Contains(dynamicExports, exp.Name) {
+								dynamicExports = append(dynamicExports, exp.Name)
+							}
+						}
+					}
+
+					if len(dynamicExports) > 0 {
+						addExportCompletions(dynamicExports, "lua export")
+					}
+				}
+			} else if bytes.Equal(recName, []byte("exports")) {
+				for _, res := range s.FiveMResources {
+					if s.isValidIdentifier(res.Name) {
+						addCompletion(res.Name, FieldCompletion, "resource", false, "1", res.Name, PlainTextTextFormat)
+					}
+				}
+			}
+		}
+
 		for _, fd := range doc.Resolver.FieldDefs {
-			if fd.ReceiverHash == recHash && (recDef == ast.InvalidNode || fd.ReceiverDef == recDef) {
+			if recHash != 0 && fd.ReceiverHash == recHash && (recDef == ast.InvalidNode || fd.ReceiverDef == recDef) {
 				node := doc.Tree.Nodes[fd.NodeID]
 
 				kind := FieldCompletion
@@ -656,17 +914,6 @@ func (s *Server) handleCompletion(req Request) {
 			validRecs[modHash] = true
 		}
 
-		recNodeID := doc.Tree.NodeAt(uint32(endId - 1))
-		if recNodeID != ast.InvalidNode {
-			pID := doc.Tree.Nodes[recNodeID].Parent
-			if pID != ast.InvalidNode {
-				pNode := doc.Tree.Nodes[pID]
-				if (pNode.Kind == ast.KindMemberExpr || pNode.Kind == ast.KindMethodCall) && pNode.Right == recNodeID {
-					recNodeID = pID
-				}
-			}
-		}
-
 		var recType TypeSet
 
 		if recNodeID != ast.InvalidNode {
@@ -676,7 +923,7 @@ func (s *Server) handleCompletion(req Request) {
 		if recType.CustomName != "" {
 			currClassName := recType.CustomName
 
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				if currClassName == "" {
 					break
 				}
@@ -906,6 +1153,27 @@ func (s *Server) handleCompletion(req Request) {
 		for _, kw := range luaKeywords {
 			addCompletion(kw, KeywordCompletion, "keyword", false, "3", kw, PlainTextTextFormat)
 		}
+
+		currID := doc.Tree.NodeAt(offset)
+		if s.FeatureFiveM && currID != ast.InvalidNode {
+			currNode := doc.Tree.Nodes[currID]
+			if currNode.Kind == ast.KindString {
+				pID := currNode.Parent
+				if pID != ast.InvalidNode {
+					pNode := doc.Tree.Nodes[pID]
+					if pNode.Kind == ast.KindIndexExpr && pNode.Right == currID {
+						if int(pNode.Left) < len(doc.Tree.Nodes) && doc.Tree.Nodes[pNode.Left].Kind == ast.KindIdent {
+							identName := doc.Source[doc.Tree.Nodes[pNode.Left].Start:doc.Tree.Nodes[pNode.Left].End]
+							if bytes.Equal(identName, []byte("exports")) && doc.Resolver.References[pNode.Left] == ast.InvalidNode {
+								for _, res := range s.FiveMResources {
+									addCompletion(res.Name, FieldCompletion, "resource", false, "1", res.Name, PlainTextTextFormat)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	WriteMessage(s.Writer, Response{
@@ -1083,48 +1351,75 @@ func (s *Server) handleSignatureHelp(req Request) {
 			paramDocs[p.Name] = p
 		}
 
-		paramOffset := getImplicitSelfOffset(callNode, tDoc, def.NodeID)
+		paramOffset := getImplicitSelfOffset(ctx, callNode, tDoc, def.NodeID)
 
-		for i := uint16(0); i < funcNode.Count; i++ {
-			if funcNode.Extra+uint32(i) >= uint32(len(tDoc.Tree.ExtraList)) {
-				continue
-			}
-
-			pID := tDoc.Tree.ExtraList[funcNode.Extra+uint32(i)]
-			if pID == ast.InvalidNode || int(pID) >= len(tDoc.Tree.Nodes) {
-				continue
-			}
-
-			pNode := tDoc.Tree.Nodes[pID]
-			if pNode.Start > pNode.End || pNode.End > uint32(len(tDoc.Source)) {
-				continue
-			}
-
-			pName := ast.String(tDoc.Source[pNode.Start:pNode.End])
-
-			if i == 0 && paramOffset == 1 && pName == "self" {
-				continue
-			}
-
-			label := pName
-
-			var docContent *MarkupContent
-
-			if pDoc, ok := paramDocs[pName]; ok {
-				if pDoc.Type != "" {
-					label += ": " + pDoc.Type
+		if funcNode.Count > 0 {
+			for i := uint16(0); i < funcNode.Count; i++ {
+				if funcNode.Extra+uint32(i) >= uint32(len(tDoc.Tree.ExtraList)) {
+					continue
 				}
 
-				if pDoc.Desc != "" {
-					docContent = &MarkupContent{Kind: "markdown", Value: pDoc.Desc}
+				pID := tDoc.Tree.ExtraList[funcNode.Extra+uint32(i)]
+				if pID == ast.InvalidNode || int(pID) >= len(tDoc.Tree.Nodes) {
+					continue
 				}
-			}
 
-			labels = append(labels, label)
-			paramsInfo = append(paramsInfo, ParameterInformation{
-				Label:         label,
-				Documentation: docContent,
-			})
+				pNode := tDoc.Tree.Nodes[pID]
+				if pNode.Start > pNode.End || pNode.End > uint32(len(tDoc.Source)) {
+					continue
+				}
+
+				pName := ast.String(tDoc.Source[pNode.Start:pNode.End])
+
+				if i == 0 && paramOffset == 1 && pName == "self" {
+					continue
+				}
+
+				label := pName
+
+				var docContent *MarkupContent
+
+				if pDoc, ok := paramDocs[pName]; ok {
+					if pDoc.Type != "" {
+						label += ": " + pDoc.Type
+					}
+
+					if pDoc.Desc != "" {
+						docContent = &MarkupContent{Kind: "markdown", Value: pDoc.Desc}
+					}
+				}
+
+				labels = append(labels, label)
+
+				paramsInfo = append(paramsInfo, ParameterInformation{
+					Label:         label,
+					Documentation: docContent,
+				})
+			}
+		} else {
+			for i, p := range luadoc.Params {
+				if i == 0 && paramOffset == 1 && p.Name == "self" {
+					continue
+				}
+
+				label := p.Name
+				if p.Type != "" {
+					label += ": " + p.Type
+				}
+
+				var docContent *MarkupContent
+
+				if p.Desc != "" {
+					docContent = &MarkupContent{Kind: "markdown", Value: p.Desc}
+				}
+
+				labels = append(labels, label)
+
+				paramsInfo = append(paramsInfo, ParameterInformation{
+					Label:         label,
+					Documentation: docContent,
+				})
+			}
 		}
 
 		var funcDoc *MarkupContent
@@ -1294,7 +1589,7 @@ func (s *Server) handleInlayHint(req Request) {
 			continue
 		}
 
-		paramOffset := getImplicitSelfOffset(node, ctx.TargetDoc, ctx.TargetDefID)
+		paramOffset := getImplicitSelfOffset(ctx, node, ctx.TargetDoc, ctx.TargetDefID)
 
 		funcNode := ctx.TargetDoc.Tree.Nodes[valID]
 

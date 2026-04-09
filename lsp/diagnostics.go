@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -95,6 +96,116 @@ func (s *Server) publishDiagnostics(uri string) {
 				}
 			}
 		}
+
+		for i := 1; i < len(doc.Tree.Nodes); i++ {
+			node := doc.Tree.Nodes[i]
+
+			// 1. Check for valid export access
+			if node.Kind == ast.KindMethodCall || node.Kind == ast.KindMemberExpr {
+				exportRes := s.getFiveMExportResource(doc, node.Left)
+				if exportRes != "" {
+					if resObj, ok := s.FiveMResourceByName[exportRes]; ok {
+						var (
+							methodName string
+							errNode    ast.NodeID
+						)
+
+						switch node.Kind {
+						case ast.KindMethodCall:
+							rightNode := doc.Tree.Nodes[node.Right]
+							methodName = string(doc.Source[rightNode.Start:rightNode.End])
+							errNode = node.Right
+						case ast.KindMemberExpr:
+							rightNode := doc.Tree.Nodes[node.Right]
+							methodName = string(doc.Source[rightNode.Start:rightNode.End])
+							errNode = node.Right
+						}
+
+						if methodName != "" {
+							isExported := slices.Contains(resObj.ClientExports, methodName) || slices.Contains(resObj.ServerExports, methodName)
+
+							if !isExported {
+								for _, d := range s.Documents {
+									if s.getDocResourceRoot(d) == resObj.RootURI {
+										for _, exp := range d.FiveMLuaExports {
+											if exp.Name == methodName {
+												isExported = true
+
+												break
+											}
+										}
+									}
+
+									if isExported {
+										break
+									}
+								}
+
+								for _, d := range s.Documents {
+									for _, exp := range d.FiveMLuaExports {
+										if exp.Name == methodName {
+											isExported = true
+
+											break
+										}
+									}
+
+									if isExported {
+										break
+									}
+								}
+
+								if !isExported {
+									s.diagBuf = append(s.diagBuf, Diagnostic{
+										Range:    getNodeRange(doc.Tree, errNode),
+										Severity: SeverityWarning,
+										Code:     "fivem-unknown-export",
+										Message:  fmt.Sprintf("Resource '%s' does not export '%s'.", exportRes, methodName),
+									})
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// 2. Check for valid resource in exports
+			if node.Kind == ast.KindMemberExpr || node.Kind == ast.KindIndexExpr {
+				if doc.Tree.Nodes[node.Left].Kind == ast.KindIdent {
+					leftNode := doc.Tree.Nodes[node.Left]
+					if bytes.Equal(doc.Source[leftNode.Start:leftNode.End], []byte("exports")) && doc.Resolver.References[node.Left] == ast.InvalidNode {
+						var (
+							resName string
+							errNode ast.NodeID
+						)
+
+						switch node.Kind {
+						case ast.KindMemberExpr:
+							rightNode := doc.Tree.Nodes[node.Right]
+							resName = string(doc.Source[rightNode.Start:rightNode.End])
+							errNode = node.Right
+						case ast.KindIndexExpr:
+							rightNode := doc.Tree.Nodes[node.Right]
+							if rightNode.Kind == ast.KindString {
+								resName = unquoteLuaString(string(doc.Source[rightNode.Start:rightNode.End]))
+								errNode = node.Right
+							}
+						}
+
+						if resName != "" && errNode != ast.InvalidNode {
+							if _, ok := s.FiveMResourceByName[resName]; !ok {
+								s.diagBuf = append(s.diagBuf, Diagnostic{
+									Range:    getNodeRange(doc.Tree, errNode),
+									Severity: SeverityWarning,
+									Code:     "fivem-unknown-resource",
+									Message:  fmt.Sprintf("Unknown FiveM resource '%s'.", resName),
+								})
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// 1. Parse Errors
@@ -130,7 +241,7 @@ func (s *Server) publishDiagnostics(uri string) {
 	if s.DiagUndefinedGlobals {
 		if s.suggestCache == nil {
 			s.suggestCache = make(map[string]string, 256)
-		} else if len(s.suggestCache) > 4096 {
+		} else {
 			clear(s.suggestCache)
 		}
 
@@ -1018,12 +1129,32 @@ func (s *Server) publishDiagnostics(uri string) {
 							if valID != ast.InvalidNode && int(valID) < len(tDoc.Tree.Nodes) && tDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
 								funcNode := tDoc.Tree.Nodes[valID]
 
-								var hasVararg bool
+								var (
+									hasVararg    bool
+									expectedArgs int
+								)
+
+								paramOffset := getImplicitSelfOffset(ctx, node, tDoc, def.NodeID)
 
 								if funcNode.Count > 0 {
 									lastParamID := tDoc.Tree.ExtraList[funcNode.Extra+uint32(funcNode.Count-1)]
 									if tDoc.Tree.Nodes[lastParamID].Kind == ast.KindVararg {
 										hasVararg = true
+									}
+
+									expectedArgs = max(int(funcNode.Count)-paramOffset, 0)
+								} else {
+									luadoc := parseLuaDoc(tDoc.getCommentsAbove(def.NodeID), false)
+									if len(luadoc.Params) > 0 {
+										for _, p := range luadoc.Params {
+											if p.Name == "..." {
+												hasVararg = true
+
+												break
+											}
+										}
+
+										expectedArgs = max(len(luadoc.Params)-paramOffset, 0)
 									}
 								}
 
@@ -1031,13 +1162,6 @@ func (s *Server) publishDiagnostics(uri string) {
 									matchedAny = true
 
 									break
-								}
-
-								paramOffset := getImplicitSelfOffset(node, tDoc, def.NodeID)
-
-								expectedArgs := int(funcNode.Count) - paramOffset
-								if expectedArgs < 0 {
-									expectedArgs = 0
 								}
 
 								if int(node.Count) <= expectedArgs {
@@ -1229,6 +1353,26 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 	}
 
+	var n int
+
+	for _, diag := range s.diagBuf {
+		line := diag.Range.Start.Line
+
+		if s.isDiagnosticDisabled(doc, line) {
+			continue
+		}
+
+		s.diagBuf[n] = diag
+
+		n++
+	}
+
+	s.diagBuf = s.diagBuf[:n]
+
+	if s.diagBuf == nil {
+		s.diagBuf = make([]Diagnostic, 0)
+	}
+
 	WriteMessage(s.Writer, OutgoingNotification{
 		RPC:    "2.0",
 		Method: "textDocument/publishDiagnostics",
@@ -1237,6 +1381,33 @@ func (s *Server) publishDiagnostics(uri string) {
 			Diagnostics: s.diagBuf,
 		},
 	})
+}
+
+func (s *Server) isDiagnosticDisabled(doc *Document, line uint32) bool {
+	checkLine := func(l uint32, tag []byte) bool {
+		if int(l) >= len(doc.Tree.LineOffsets) {
+			return false
+		}
+
+		start := doc.Tree.LineOffsets[l]
+		end := uint32(len(doc.Source))
+
+		if int(l)+1 < len(doc.Tree.LineOffsets) {
+			end = doc.Tree.LineOffsets[l+1]
+		}
+
+		return bytes.Contains(doc.Source[start:end], tag)
+	}
+
+	if checkLine(line, []byte("---@diagnostic disable-line")) {
+		return true
+	}
+
+	if line > 0 && checkLine(line-1, []byte("---@diagnostic disable-next-line")) {
+		return true
+	}
+
+	return false
 }
 
 func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID) bool {

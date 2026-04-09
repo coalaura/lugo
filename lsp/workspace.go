@@ -567,6 +567,34 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 	res.Resolve(rootID)
 	res.Cleanup()
 
+	if s.FeatureFiveM {
+		doc.FiveMLuaExports = doc.FiveMLuaExports[:0]
+
+		for i := 1; i < len(tree.Nodes); i++ {
+			node := tree.Nodes[i]
+			if node.Kind == ast.KindCallExpr && int(node.Left) < len(tree.Nodes) {
+				leftNode := tree.Nodes[node.Left]
+				if leftNode.Kind == ast.KindIdent && doc.Resolver.References[node.Left] == ast.InvalidNode {
+					if bytes.Equal(doc.Source[leftNode.Start:leftNode.End], []byte("exports")) {
+						if node.Count >= 2 && node.Extra+1 < uint32(len(tree.ExtraList)) {
+							arg1ID := tree.ExtraList[node.Extra]
+							arg2ID := tree.ExtraList[node.Extra+1]
+
+							if int(arg1ID) < len(tree.Nodes) && tree.Nodes[arg1ID].Kind == ast.KindString {
+								exportName := unquoteLuaString(string(doc.Source[tree.Nodes[arg1ID].Start:tree.Nodes[arg1ID].End]))
+
+								doc.FiveMLuaExports = append(doc.FiveMLuaExports, FiveMLuaExport{
+									Name:   exportName,
+									NodeID: arg2ID,
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	doc.ExportedNode = ast.InvalidNode
 
 	if rootID != ast.InvalidNode && int(rootID) < len(tree.Nodes) {
@@ -601,45 +629,147 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 		}
 	}
 
-	for _, c := range tree.Comments {
-		raw := tree.Source[c.Start:c.End]
-		if bytes.Contains(raw, []byte("@class")) || bytes.Contains(raw, []byte("@alias")) {
-			luadoc := parseLuaDoc(raw, s.FeatureFormatAlerts)
+	for i := 0; i < len(tree.Comments); {
+		startComment := tree.Comments[i]
+		lastComment := startComment
 
-			var typeName string
+		for j := i + 1; j < len(tree.Comments); j++ {
+			nextC := tree.Comments[j]
 
-			if luadoc.Class != nil && luadoc.Class.Name != "" {
-				typeName = luadoc.Class.Name
-			} else if luadoc.Alias != nil && luadoc.Alias.Name != "" {
-				typeName = luadoc.Alias.Name
-			}
+			l1, _ := tree.Position(lastComment.End)
+			l2, _ := tree.Position(nextC.Start)
 
-			if typeName != "" {
-				nameBytes := []byte(typeName)
-
-				var (
-					recHash  uint64
-					propHash uint64
-				)
-
-				lastDot := bytes.LastIndexByte(nameBytes, '.')
-				if lastDot != -1 {
-					recHash = ast.HashBytes(nameBytes[:lastDot])
-					propHash = ast.HashBytes(nameBytes[lastDot+1:])
-				} else {
-					recHash = 0
-					propHash = ast.HashBytes(nameBytes)
-				}
-
-				var parentName string
-
-				if luadoc.Class != nil {
-					parentName = luadoc.Class.Parent
-				}
-
-				s.setGlobalSymbol(GlobalKey{ReceiverHash: recHash, PropHash: propHash}, uri, ast.InvalidNode, typeName, parentName, true, luadoc.IsDeprecated, luadoc.DeprecatedMsg)
+			if l2 <= l1+1 {
+				lastComment = nextC
+			} else {
+				break
 			}
 		}
+
+		fullBlock := tree.Source[startComment.Start:lastComment.End]
+
+		if !bytes.Contains(fullBlock, []byte("@class")) && !bytes.Contains(fullBlock, []byte("@alias")) && !bytes.Contains(fullBlock, []byte("@export")) {
+			for j := i + 1; j < len(tree.Comments); j++ {
+				if tree.Comments[j].Start <= lastComment.End {
+					i = j
+				} else {
+					break
+				}
+			}
+
+			i++
+
+			continue
+		}
+
+		s.sharedCommentBuf = s.sharedCommentBuf[:0]
+		cleaned := cleanLuaCommentBytes(s.sharedCommentBuf, fullBlock)
+
+		luadoc := parseLuaDoc(cleaned, s.FeatureFormatAlerts)
+
+		var virtualNodeID ast.NodeID = ast.InvalidNode
+
+		if luadoc.Export != "" && s.FeatureFiveM {
+			virtualNodeID = ast.NodeID(len(tree.Nodes))
+
+			tree.Nodes = append(tree.Nodes, ast.Node{
+				Kind:   ast.KindFunctionExpr,
+				Start:  lastComment.End,
+				End:    lastComment.End,
+				Parent: ast.InvalidNode,
+			})
+
+			doc.FiveMLuaExports = append(doc.FiveMLuaExports, FiveMLuaExport{
+				Name:   luadoc.Export,
+				NodeID: virtualNodeID,
+			})
+		}
+
+		var typeName string
+
+		if luadoc.Class != nil && luadoc.Class.Name != "" {
+			typeName = luadoc.Class.Name
+		} else if luadoc.Alias != nil && luadoc.Alias.Name != "" {
+			typeName = luadoc.Alias.Name
+		}
+
+		if typeName != "" {
+			nameBytes := []byte(typeName)
+
+			var (
+				recHash  uint64
+				propHash uint64
+			)
+
+			lastDot := bytes.LastIndexByte(nameBytes, '.')
+			if lastDot != -1 {
+				recHash = ast.HashBytes(nameBytes[:lastDot])
+				propHash = ast.HashBytes(nameBytes[lastDot+1:])
+			} else {
+				recHash = 0
+				propHash = ast.HashBytes(nameBytes)
+			}
+
+			var parentName string
+
+			if luadoc.Class != nil {
+				parentName = luadoc.Class.Parent
+			}
+
+			if virtualNodeID == ast.InvalidNode {
+				virtualNodeID = ast.NodeID(len(tree.Nodes))
+
+				tree.Nodes = append(tree.Nodes, ast.Node{
+					Kind:   ast.KindTableExpr,
+					Start:  lastComment.End,
+					End:    lastComment.End,
+					Parent: ast.InvalidNode,
+				})
+			}
+
+			s.setGlobalSymbol(GlobalKey{ReceiverHash: recHash, PropHash: propHash}, uri, virtualNodeID, typeName, parentName, true, luadoc.IsDeprecated, luadoc.DeprecatedMsg)
+
+			if len(luadoc.Fields) > 0 {
+				classHash := ast.HashBytes(nameBytes)
+
+				for _, field := range luadoc.Fields {
+					fieldHash := ast.HashBytes([]byte(field.Name))
+
+					var sb strings.Builder
+
+					sb.Grow(len(nameBytes) + 1 + len(field.Name))
+					sb.Write(nameBytes)
+					sb.WriteByte('.')
+					sb.WriteString(field.Name)
+
+					fieldVirtualNodeID := ast.NodeID(len(tree.Nodes))
+
+					var kind ast.NodeKind = ast.KindIdent
+					if strings.Contains(field.Type, "fun") || strings.Contains(field.Type, "function") {
+						kind = ast.KindFunctionExpr
+					}
+
+					tree.Nodes = append(tree.Nodes, ast.Node{
+						Kind:   kind,
+						Start:  lastComment.End,
+						End:    lastComment.End,
+						Parent: ast.InvalidNode,
+					})
+
+					s.setGlobalSymbol(GlobalKey{ReceiverHash: classHash, PropHash: fieldHash}, uri, fieldVirtualNodeID, sb.String(), "", true, luadoc.IsDeprecated, luadoc.DeprecatedMsg)
+				}
+			}
+		}
+
+		for j := i + 1; j < len(tree.Comments); j++ {
+			if tree.Comments[j].Start <= lastComment.End {
+				i = j
+			} else {
+				break
+			}
+		}
+
+		i++
 	}
 
 	for _, defID := range res.GlobalDefs {

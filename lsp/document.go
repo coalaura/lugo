@@ -33,14 +33,27 @@ type Document struct {
 	IsLibrary          bool
 	IsWorkspace        bool
 	IsFiveMManifest    bool
+	FiveMLuaExports    []FiveMLuaExport
 	FiveMResolved      bool
 	EnvResolved        bool
 	ModTime            time.Time
 }
 
+type FiveMLuaExport struct {
+	Name   string
+	NodeID ast.NodeID
+}
+
 func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {
 	if id == ast.InvalidNode {
 		return ast.InvalidNode
+	}
+
+	if int(id) < len(doc.Tree.Nodes) {
+		kind := doc.Tree.Nodes[id].Kind
+		if kind == ast.KindFunctionExpr || kind == ast.KindTableExpr || kind == ast.KindString || kind == ast.KindNumber || kind == ast.KindTrue || kind == ast.KindFalse || kind == ast.KindNil {
+			return id
+		}
 	}
 
 	curr := id
@@ -112,6 +125,20 @@ func (doc *Document) getFunctionParams(funcExprID ast.NodeID, luadoc LuaDoc) str
 	node := doc.Tree.Nodes[funcExprID]
 	if node.Kind != ast.KindFunctionExpr {
 		return ""
+	}
+
+	if node.Count == 0 && len(luadoc.Params) > 0 {
+		var params []string
+
+		for _, p := range luadoc.Params {
+			if p.Type != "" {
+				params = append(params, p.Name+": "+p.Type)
+			} else {
+				params = append(params, p.Name)
+			}
+		}
+
+		return strings.Join(params, ", ")
 	}
 
 	paramTypes := make(map[string]string)
