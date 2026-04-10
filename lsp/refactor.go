@@ -98,7 +98,7 @@ func (s *Server) handleCodeAction(req Request) {
 					}
 				}
 			}
-		case "undefined-global":
+		case "undefined-global", "fivem-unknown-resource":
 			if suggestion, ok := diag.Data.(string); ok && suggestion != "" {
 				actions = append(actions, CodeAction{
 					Title:       fmt.Sprintf("Change to '%s'", suggestion),

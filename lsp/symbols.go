@@ -923,7 +923,7 @@ func (s *Server) getFiveMExportResource(doc *Document, nodeID ast.NodeID) string
 					rightNode := doc.Tree.Nodes[node.Right]
 
 					if rightNode.Kind == ast.KindString {
-						return unquoteLuaString(string(doc.Source[rightNode.Start:rightNode.End]))
+						return strings.ToLower(unquoteLuaString(string(doc.Source[rightNode.Start:rightNode.End])))
 					}
 				}
 			}
@@ -938,7 +938,7 @@ func (s *Server) getFiveMExportResource(doc *Document, nodeID ast.NodeID) string
 					rightNode := doc.Tree.Nodes[node.Right]
 
 					if rightNode.Kind == ast.KindIdent {
-						return string(doc.Source[rightNode.Start:rightNode.End])
+						return strings.ToLower(string(doc.Source[rightNode.Start:rightNode.End]))
 					}
 				}
 			}

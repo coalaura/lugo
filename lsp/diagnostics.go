@@ -196,12 +196,35 @@ func (s *Server) publishDiagnostics(uri string) {
 						}
 
 						if resName != "" && errNode != ast.InvalidNode && s.DiagFiveMUnknownResource {
-							if _, ok := s.FiveMResourceByName[resName]; !ok {
+							lowerResName := strings.ToLower(resName)
+							if _, ok := s.FiveMResourceByName[lowerResName]; !ok {
+								var bestMatch string
+
+								minDist := 3
+
+								for name := range s.FiveMResourceByName {
+									dist := levenshteinFast(lowerResName, name, minDist-1)
+									if dist < minDist {
+										minDist = dist
+										bestMatch = name
+									}
+								}
+
+								msg := fmt.Sprintf("Unknown FiveM resource '%s'.", resName)
+
+								var diagData any
+
+								if bestMatch != "" {
+									msg = fmt.Sprintf("Unknown FiveM resource '%s'. Did you mean '%s'?", resName, bestMatch)
+									diagData = bestMatch
+								}
+
 								s.diagBuf = append(s.diagBuf, Diagnostic{
 									Range:    getNodeRange(doc.Tree, errNode),
 									Severity: SeverityWarning,
 									Code:     "fivem-unknown-resource",
-									Message:  fmt.Sprintf("Unknown FiveM resource '%s'.", resName),
+									Message:  msg,
+									Data:     diagData,
 								})
 							}
 						}
