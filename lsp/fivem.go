@@ -112,7 +112,7 @@ func (s *Server) parseFiveMManifest(doc *Document) *FiveMResource {
 
 	parts := strings.Split(res.RootURI, "/")
 
-	res.Name = parts[len(parts)-1]
+	res.Name = strings.ToLower(parts[len(parts)-1])
 
 	for i := 1; i < len(doc.Tree.Nodes); i++ {
 		node := doc.Tree.Nodes[i]
