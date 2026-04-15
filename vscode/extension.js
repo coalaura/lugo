@@ -48,6 +48,7 @@ function buildInitializationOptions() {
 		libraryPaths: lugoConfig.get("workspace.libraryPaths") || [],
 		ignoreGlobs: ignoreGlobs,
 		knownGlobals: lugoConfig.get("environment.knownGlobals") || [],
+		bannedSymbols: lugoConfig.get("diagnostics.bannedSymbols") || {},
 
 		parserMaxErrors: lugoConfig.get("parser.maxErrors") ?? 50,
 
@@ -85,6 +86,9 @@ function buildInitializationOptions() {
 		featureHoverEval: lugoConfig.get("features.hoverEvaluation") !== false,
 		featureCodeLens: lugoConfig.get("features.codeLens") !== false,
 		featureFormatAlerts: lugoConfig.get("features.formatAlerts") !== false,
+		featureFormatting: lugoConfig.get("features.formatting") !== false,
+		formatOpinionated: lugoConfig.get("features.formatOpinionated") === true,
+		suggestFunctionParams: lugoConfig.get("completion.suggestFunctionParams") !== false,
 
 		featureFiveM: lugoConfig.get("fivem.enabled") === true,
 		diagFiveMUnaccountedFile: lugoConfig.get("fivem.diagnostics.unaccountedFile") !== false,
@@ -153,6 +157,32 @@ async function activate(context) {
 			if (editor) {
 				vscode.commands.executeCommand("lugo.applySafeFixes", editor.document.uri.toString());
 			}
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand("lugo.ignoreDiagnostic", async (uriStr, line, rule, isFile) => {
+			const editor = vscode.window.activeTextEditor;
+
+			if (!editor || editor.document.uri.fsPath !== vscode.Uri.parse(uriStr).fsPath) {
+				return;
+			}
+
+			let insertLine = line,
+				snippetText = "";
+
+			if (isFile) {
+				insertLine = 0;
+				snippetText = `---@diagnostic disable-file ${rule} - \${1:reason}\n`;
+			} else {
+				const targetLine = editor.document.lineAt(line),
+					indent = targetLine.text.match(/^\s*/)[0];
+
+				insertLine = line;
+				snippetText = `${indent}---@diagnostic disable-next-line ${rule} - \${1:reason}\n`;
+			}
+
+			await editor.insertSnippet(new vscode.SnippetString(snippetText), new vscode.Position(insertLine, 0));
 		})
 	);
 

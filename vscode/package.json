@@ -50,6 +50,10 @@
             {
                 "command": "lugo.applySafeFixesFile",
                 "title": "Lugo: Apply Safe Fixes (Current File)"
+            },
+            {
+                "command": "lugo.ignoreDiagnostic",
+                "title": "Lugo: Ignore Diagnostic"
             }
         ],
         "configuration": [
@@ -277,6 +281,13 @@
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for variables that are used but their name starts with `_` (which conventionally marks them as unused).",
                         "order": 26
+                    },
+                    "lugo.diagnostics.bannedSymbols": {
+                        "type": "object",
+                        "default": {},
+                        "scope": "resource",
+                        "markdownDescription": "Map of banned global functions/symbols to a custom warning message (e.g., `{\"print\": \"Use customLogger instead\"}`).",
+                        "order": 27
                     }
                 }
             },

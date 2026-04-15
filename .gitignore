@@ -9,3 +9,4 @@
 !example.ci.json
 node_modules
 bin
+dist

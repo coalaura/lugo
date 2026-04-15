@@ -100,9 +100,10 @@ type CIConfig struct {
 }
 
 type InitializationOptions struct {
-	LibraryPaths []string `json:"libraryPaths,omitempty"`
-	IgnoreGlobs  []string `json:"ignoreGlobs,omitempty"`
-	KnownGlobals []string `json:"knownGlobals,omitempty"`
+	LibraryPaths  []string          `json:"libraryPaths,omitempty"`
+	IgnoreGlobs   []string          `json:"ignoreGlobs,omitempty"`
+	KnownGlobals  []string          `json:"knownGlobals,omitempty"`
+	BannedSymbols map[string]string `json:"bannedSymbols,omitempty"`
 
 	ParserMaxErrors int `json:"parserMaxErrors"`
 
@@ -377,6 +378,7 @@ type CodeActionParams struct {
 
 type CodeActionContext struct {
 	Diagnostics []Diagnostic `json:"diagnostics"`
+	Only        []string     `json:"only,omitempty"`
 }
 
 type CodeAction struct {
@@ -384,6 +386,7 @@ type CodeAction struct {
 	Kind        string         `json:"kind,omitempty"`
 	Diagnostics []Diagnostic   `json:"diagnostics,omitempty"`
 	Edit        *WorkspaceEdit `json:"edit,omitempty"`
+	Command     *Command       `json:"command,omitempty"`
 	Data        any            `json:"data,omitempty"`
 	IsPreferred bool           `json:"isPreferred,omitempty"`
 }

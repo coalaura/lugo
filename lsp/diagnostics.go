@@ -683,7 +683,51 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 	}
 
-	// 7. Syntax, Correctness, Unreachable Code & Ambiguous Returns
+	// 7. Banned Symbols
+	if len(s.BannedSymbols) > 0 {
+		for _, refID := range doc.Resolver.GlobalRefs {
+			node := doc.Tree.Nodes[refID]
+			if node.Start == node.End {
+				continue
+			}
+
+			name := ast.String(doc.Source[node.Start:node.End])
+			if reason, ok := s.BannedSymbols[name]; ok {
+				msg := "Usage of banned symbol '" + name + "'."
+				if reason != "" {
+					msg += " Reason: " + reason
+				}
+
+				s.diagBuf = append(s.diagBuf, Diagnostic{
+					Range:    getNodeRange(doc.Tree, refID),
+					Severity: SeverityWarning,
+					Code:     "banned-symbol",
+					Message:  msg,
+				})
+			}
+		}
+
+		for _, pf := range doc.Resolver.PendingFields {
+			propName := ast.String(doc.Source[doc.Tree.Nodes[pf.PropNodeID].Start:doc.Tree.Nodes[pf.PropNodeID].End])
+			fullName := string(pf.ReceiverName) + "." + propName
+
+			if reason, ok := s.BannedSymbols[fullName]; ok {
+				msg := "Usage of banned symbol '" + fullName + "'."
+				if reason != "" {
+					msg += " Reason: " + reason
+				}
+
+				s.diagBuf = append(s.diagBuf, Diagnostic{
+					Range:    getNodeRange(doc.Tree, pf.PropNodeID),
+					Severity: SeverityWarning,
+					Code:     "banned-symbol",
+					Message:  msg,
+				})
+			}
+		}
+	}
+
+	// 8. Syntax, Correctness, Unreachable Code & Ambiguous Returns
 	for i := 1; i < len(doc.Tree.Nodes); i++ {
 		nodeID := ast.NodeID(i)
 		node := doc.Tree.Nodes[nodeID]
@@ -1332,7 +1376,7 @@ func (s *Server) publishDiagnostics(uri string) {
 	for _, diag := range s.diagBuf {
 		line := diag.Range.Start.Line
 
-		if s.isDiagnosticDisabled(doc, line) {
+		if s.isDiagnosticDisabled(doc, line, diag.Code) {
 			continue
 		}
 
@@ -1362,28 +1406,15 @@ func (s *Server) publishDiagnostics(uri string) {
 	})
 }
 
-func (s *Server) isDiagnosticDisabled(doc *Document, line uint32) bool {
-	checkLine := func(l uint32, tag []byte) bool {
-		if int(l) >= len(doc.Tree.LineOffsets) {
-			return false
-		}
-
-		start := doc.Tree.LineOffsets[l]
-		end := uint32(len(doc.Source))
-
-		if int(l)+1 < len(doc.Tree.LineOffsets) {
-			end = doc.Tree.LineOffsets[l+1]
-		}
-
-		return bytes.Contains(doc.Source[start:end], tag)
-	}
-
-	if checkLine(line, []byte("---@diagnostic disable-line")) {
+func (s *Server) isDiagnosticDisabled(doc *Document, line uint32, code string) bool {
+	if doc.DiagPragmas.FileDisabled["*"] || doc.DiagPragmas.FileDisabled[code] {
 		return true
 	}
 
-	if line > 0 && checkLine(line-1, []byte("---@diagnostic disable-next-line")) {
-		return true
+	if rules, ok := doc.DiagPragmas.LineDisabled[line]; ok {
+		if rules["*"] || rules[code] {
+			return true
+		}
 	}
 
 	return false

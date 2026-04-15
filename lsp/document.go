@@ -12,6 +12,11 @@ import (
 	"github.com/coalaura/lugo/token"
 )
 
+type DiagPragmas struct {
+	FileDisabled map[string]bool
+	LineDisabled map[uint32]map[string]bool
+}
+
 type Document struct {
 	Server             *Server
 	Tree               *ast.Tree
@@ -37,6 +42,74 @@ type Document struct {
 	FiveMResolved      bool
 	EnvResolved        bool
 	ModTime            time.Time
+	DiagPragmas        DiagPragmas
+}
+
+func (doc *Document) parseDiagnosticPragmas() {
+	doc.DiagPragmas.FileDisabled = make(map[string]bool)
+	doc.DiagPragmas.LineDisabled = make(map[uint32]map[string]bool)
+
+	for _, c := range doc.Tree.Comments {
+		src := doc.Source[c.Start:c.End]
+
+		idx := bytes.Index(src, []byte("---@diagnostic"))
+		if idx == -1 {
+			continue
+		}
+
+		rest := src[idx+14:]
+		rest = bytes.TrimLeft(rest, " \t")
+
+		var action string
+
+		if bytes.HasPrefix(rest, []byte("disable-line")) {
+			action = "disable-line"
+			rest = rest[12:]
+		} else if bytes.HasPrefix(rest, []byte("disable-next-line")) {
+			action = "disable-next-line"
+			rest = rest[17:]
+		} else if bytes.HasPrefix(rest, []byte("disable-file")) {
+			action = "disable-file"
+			rest = rest[12:]
+		} else {
+			continue
+		}
+
+		rest = bytes.TrimLeft(rest, " \t")
+		spaceIdx := bytes.IndexByte(rest, ' ')
+
+		var rulesBytes []byte
+
+		if spaceIdx != -1 {
+			rulesBytes = rest[:spaceIdx]
+		} else {
+			rulesBytes = rest
+		}
+
+		rulesStr := string(bytes.TrimSpace(rulesBytes))
+		rules := strings.SplitSeq(rulesStr, ",")
+
+		line, _ := doc.Tree.Position(c.Start)
+
+		if action == "disable-file" {
+			for rule := range rules {
+				doc.DiagPragmas.FileDisabled[strings.TrimSpace(rule)] = true
+			}
+		} else {
+			targetLine := line
+			if action == "disable-next-line" {
+				targetLine = line + 1
+			}
+
+			if doc.DiagPragmas.LineDisabled[targetLine] == nil {
+				doc.DiagPragmas.LineDisabled[targetLine] = make(map[string]bool)
+			}
+
+			for rule := range rules {
+				doc.DiagPragmas.LineDisabled[targetLine][strings.TrimSpace(rule)] = true
+			}
+		}
+	}
 }
 
 type FiveMLuaExport struct {

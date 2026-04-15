@@ -567,6 +567,8 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 	res.Resolve(rootID)
 	res.Cleanup()
 
+	doc.parseDiagnosticPragmas()
+
 	if s.FeatureFiveM {
 		doc.FiveMLuaExports = doc.FiveMLuaExports[:0]
 

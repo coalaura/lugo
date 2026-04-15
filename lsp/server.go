@@ -42,6 +42,7 @@ type Server struct {
 	lowerLibraryPaths []string
 	IgnoreGlobs       []string
 	compiledIgnores   []IgnorePattern
+	BannedSymbols     map[string]string
 
 	// Shared Buffers & Parsers
 	sharedParser     *parser.Parser
@@ -195,6 +196,12 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 
 	if s.setKnownGlobals(opts.KnownGlobals) {
 		needsReindex = true
+	}
+
+	if !maps.Equal(s.BannedSymbols, opts.BannedSymbols) {
+		s.BannedSymbols = opts.BannedSymbols
+
+		needsRepublish = true
 	}
 
 	setCfg(&s.MaxParseErrors, opts.ParserMaxErrors, &needsRepublish)

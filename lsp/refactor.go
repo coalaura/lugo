@@ -46,7 +46,41 @@ func (s *Server) handleCodeAction(req Request) {
 		return
 	}
 
+	seenIgnored := make(map[string]bool)
+
 	for _, diag := range params.Context.Diagnostics {
+		if diag.Code != "" {
+			keyLine := diag.Code + "|line"
+			if !seenIgnored[keyLine] {
+				seenIgnored[keyLine] = true
+
+				actions = append(actions, CodeAction{
+					Title: "Disable diagnostic '" + diag.Code + "' on this line",
+					Kind:  "quickfix",
+					Command: &Command{
+						Title:     "Ignore Diagnostic",
+						Command:   "lugo.ignoreDiagnostic",
+						Arguments: []any{uri, diag.Range.Start.Line, diag.Code, false},
+					},
+				})
+			}
+
+			keyFile := diag.Code + "|file"
+			if !seenIgnored[keyFile] {
+				seenIgnored[keyFile] = true
+
+				actions = append(actions, CodeAction{
+					Title: "Disable diagnostic '" + diag.Code + "' for this file",
+					Kind:  "quickfix",
+					Command: &Command{
+						Title:     "Ignore Diagnostic",
+						Command:   "lugo.ignoreDiagnostic",
+						Arguments: []any{uri, diag.Range.Start.Line, diag.Code, true},
+					},
+				})
+			}
+		}
+
 		switch diag.Code {
 		case "unused-local", "unused-parameter", "unused-loop-var", "unused-vararg", "unused-function", "unreachable-code", "ambiguous-return", "self-assignment", "empty-block", "redundant-return", "redundant-value", "redundant-parameter":
 			hasSafeFixDiag = true
@@ -664,6 +698,30 @@ func (s *Server) handleCodeAction(req Request) {
 				"nodeId": float64(targetMemberToIndex),
 			},
 		})
+	}
+
+	if len(params.Context.Only) > 0 {
+		var n int
+
+		for _, action := range actions {
+			var allowed bool
+
+			for _, onlyKind := range params.Context.Only {
+				if action.Kind == onlyKind || strings.HasPrefix(action.Kind, onlyKind+".") {
+					allowed = true
+
+					break
+				}
+			}
+
+			if allowed {
+				actions[n] = action
+
+				n++
+			}
+		}
+
+		actions = actions[:n]
 	}
 
 	if actions == nil {
