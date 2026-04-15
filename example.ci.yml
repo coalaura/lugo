@@ -1,0 +1,17 @@
+name: Lugo CI
+on: [push, pull_request]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Lugo
+        run: |
+          wget -O lugo_linux_amd64 https://github.com/coalaura/lugo/releases/download/v0.12.2/lugo_v0.12.2_linux_amd64
+          chmod +x lugo_linux_amd64
+
+      - name: Run Lugo LSP in CI mode
+        run: ./lugo_linux_amd64 --ci ci.json

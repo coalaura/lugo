@@ -50,14 +50,16 @@ func (s *Server) publishDiagnostics(uri string) {
 	}
 
 	if s.FeatureFiveM && doc.IsFiveMManifest {
-		WriteMessage(s.Writer, OutgoingNotification{
-			RPC:    "2.0",
-			Method: "textDocument/publishDiagnostics",
-			Params: PublishDiagnosticsParams{
-				URI:         uri,
-				Diagnostics: []Diagnostic{},
-			},
-		})
+		if !s.IsCI {
+			WriteMessage(s.Writer, OutgoingNotification{
+				RPC:    "2.0",
+				Method: "textDocument/publishDiagnostics",
+				Params: PublishDiagnosticsParams{
+					URI:         uri,
+					Diagnostics: []Diagnostic{},
+				},
+			})
+		}
 
 		return
 	}
@@ -251,14 +253,18 @@ func (s *Server) publishDiagnostics(uri string) {
 	}
 
 	if doc.IsMeta {
-		WriteMessage(s.Writer, OutgoingNotification{
-			RPC:    "2.0",
-			Method: "textDocument/publishDiagnostics",
-			Params: PublishDiagnosticsParams{
-				URI:         uri,
-				Diagnostics: s.diagBuf,
-			},
-		})
+		if s.IsCI {
+			s.printCIDiagnostics(uri, s.diagBuf)
+		} else {
+			WriteMessage(s.Writer, OutgoingNotification{
+				RPC:    "2.0",
+				Method: "textDocument/publishDiagnostics",
+				Params: PublishDiagnosticsParams{
+					URI:         uri,
+					Diagnostics: s.diagBuf,
+				},
+			})
+		}
 
 		return
 	}
@@ -1339,6 +1345,11 @@ func (s *Server) publishDiagnostics(uri string) {
 
 	if s.diagBuf == nil {
 		s.diagBuf = make([]Diagnostic, 0)
+	}
+
+	if s.IsCI {
+		s.printCIDiagnostics(uri, s.diagBuf)
+		return
 	}
 
 	WriteMessage(s.Writer, OutgoingNotification{

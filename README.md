@@ -13,7 +13,7 @@ Lugo is built from the ground up for maximum performance. By iterating over sour
 Most Lua language servers struggle when dropped into massive codebases (like game server environments or large modding frameworks). They consume gigabytes of RAM, take minutes to index and lag while typing.
 
 **Lugo is different:**
-* **Blistering Performance:** In real-world benchmarks on modern hardware, Lugo completely cold-indexes massive workspaces (including full AST generation, symbol resolution, and publishing workspace-wide diagnostics) in a matter of seconds.
+* **Blistering Performance:** In real-world benchmarks on modern hardware, Lugo completely cold-indexes massive workspaces (including full AST generation, symbol resolution and publishing workspace-wide diagnostics) in a matter of seconds.
   ```text
   2026-04-06T23:06:52 Starting workspace re-index...
   2026-04-06T23:06:52 Indexing external library: /opt/lua-fivem-sdk
@@ -40,17 +40,17 @@ Lugo implements a comprehensive suite of modern Language Server Protocol feature
 * **Smart Selection (Selection Range):** Press `Shift+Alt+RightArrow` to semantically expand your text selection based on the AST (Identifier -> Call Expression -> Statement -> Block -> Function -> File).
 * **Go to Definition & Hover:** Instant cross-file jumps. Fully parses LuaDoc (`@param`, `@return`, `@field`, `@class`, `@alias`, `@type`, `@generic`, `@overload`, `@see`, `@deprecated`) and renders beautifully formatted function signatures.
 * **Hover Evaluation:** Lugo statically evaluates constant expressions (math, bitwise operations, string concatenation and logic) in real-time, displaying the computed result directly in the hover tooltip.
-* **Advanced Type Inference:** Lazily evaluates and caches types. Supports control-flow type narrowing (e.g., `type(x) == "string"`), loop variable unpacking (`ipairs`/`pairs`), `require` module aliasing/exports, and deep metatable resolution (understands `setmetatable` and `__index` inheritance).
+* **Advanced Type Inference:** Lazily evaluates and caches types. Supports control-flow type narrowing (e.g., `type(x) == "string"`), loop variable unpacking (`ipairs`/`pairs`), `require` module aliasing/exports and deep metatable resolution (understands `setmetatable` and `__index` inheritance).
 * **Find References & Code Lens:** Find all usages of a symbol across your workspace. Automatically embeds clickable Code Lens reference counters directly above function definitions.
 * **Format Alerts:** Automatically formats special comment tags (e.g., `NOTE:`, `TODO:`, `FIXME:`, `WARNING:`) with emojis and bold text in hover tooltips for better visibility.
 * **Rename & Linked Editing Ranges:** Instantly rename symbols across your workspace. Supports Linked Editing for simultaneous, multi-cursor renaming of local variables as you type.
 * **Call Hierarchy:** Visually explore a tree of incoming and outgoing function calls.
 * **Document & Workspace Symbols:** Instant workspace-wide search (`Ctrl+T`) for fully qualified names (e.g., `OP.Math.Round`) and full VS Code "Outline" tree generation.
 * **Signature Help & Inlay Hints:** Real-time active-parameter tooltips and inline parameter name hints with smart implicit `self` offset calculation. Automatically suppresses hints when the argument matches the parameter name to reduce visual noise.
-* **Code Actions (Quick Fixes & Refactoring):** Fast automated fixes for common diagnostics (prefixing unused variables, adding `local`, fixing typos). Includes powerful **AST-aware refactorings**: invert conditions, recursively convert `if` chains to early returns, optimize `table.insert` to `t[#t+1]`, convert between dot/colon method signatures, merge nested `if` statements, split multiple assignments, swap `if`/`else` branches, remove redundant parentheses, convert `for i=1, #t` to `ipairs`, and toggle between dot/bracket table indexing. Includes **bulk Safe Fixes** (via command palette) to automatically clean up unused variables, parameters and assignments across the current file or your entire workspace securely without breaking side-effects.
-* **Full Lua 5.4 Support:** Native parsing, type-inference, and semantic highlighting for `<const>` and `<close>` attributes, `goto` statements, and `::labels::`.
-* **FiveM Resource Isolation:** Native support for parsing `fxmanifest.lua` and `__resource.lua`. Lugo automatically isolates `client`, `server`, and `shared` environments, preventing cross-contamination of globals and providing warnings if a file isn't referenced in the manifest.
-* **File Watching:** Automatically synchronizes with workspace file creations, deletions, and external changes in real-time.
+* **Code Actions (Quick Fixes & Refactoring):** Fast automated fixes for common diagnostics (prefixing unused variables, adding `local`, fixing typos). Includes powerful **AST-aware refactorings**: invert conditions, recursively convert `if` chains to early returns, optimize `table.insert` to `t[#t+1]`, convert between dot/colon method signatures, merge nested `if` statements, split multiple assignments, swap `if`/`else` branches, remove redundant parentheses, convert `for i=1, #t` to `ipairs` and toggle between dot/bracket table indexing. Includes **bulk Safe Fixes** (via command palette) to automatically clean up unused variables, parameters and assignments across the current file or your entire workspace securely without breaking side-effects.
+* **Full Lua 5.4 Support:** Native parsing, type-inference and semantic highlighting for `<const>` and `<close>` attributes, `goto` statements and `::labels::`.
+* **FiveM Resource Isolation:** Native support for parsing `fxmanifest.lua` and `__resource.lua`. Lugo automatically isolates `client`, `server` and `shared` environments, preventing cross-contamination of globals and providing warnings if a file isn't referenced in the manifest.
+* **File Watching:** Automatically synchronizes with workspace file creations, deletions and external changes in real-time.
 * **Built-in Formatter:** A blazingly fast, AST-aware Lua formatter. Elegantly fixes whitespace, enforces indentation rules, strips trailing semicolons, expands minified code and optionally applies opinionated stylistic tweaks (like separating unrelated statements with blank lines).
 * **Folding Ranges:** Accurately fold functions, tables, control flow blocks and multi-line strings/comments.
 * **Virtual Standard Library:** Click on any standard library function to open a syntax-highlighted, read-only virtual tab streaming directly from the Go server's embedded filesystem (`std:///`).
@@ -64,8 +64,8 @@ Lugo performs workspace-wide analysis to catch bugs before runtime:
 * **Shadowing:** Warns when a local or loop variable shadows an outer scope or global, providing a clickable link to the shadowed definition.
 * **Unreachable Code:** Detects dead code after `return`, `break` or `goto`, as well as statically unreachable `elseif` or `else` branches.
 * **Ambiguous Returns:** Catches Lua's infamous newline evaluation trap where expressions on the next line are accidentally returned.
-* **Redundant Code:** Warns about empty blocks (`do end`), self-assignments, redundant parameters, redundant assignment values, and redundant returns (with quick-fixes to remove them).
-* **Sanity Checks:** Detects duplicate fields in table literals, unbalanced assignments, loop variable mutations, and incorrect vararg (`...`) usage.
+* **Redundant Code:** Warns about empty blocks (`do end`), self-assignments, redundant parameters, redundant assignment values and redundant returns (with quick-fixes to remove them).
+* **Sanity Checks:** Detects duplicate fields in table literals, unbalanced assignments, loop variable mutations and incorrect vararg (`...`) usage.
 * **Type Checking:** Optionally catches strictly invalid operations like attempting to call a number or index a non-table.
 * **Format String Validation:** Warns when `string.format` is called with an incorrect number of arguments.
 * **Used Ignored Variables:** Warns when a variable conventionally marked as ignored (prefixed with `_`) is actually used in the code, offering a quick-fix to safely rename it.
@@ -75,7 +75,7 @@ Lugo performs workspace-wide analysis to catch bugs before runtime:
 
 Lugo includes first-class, built-in support for FiveM resource development. When enabled via the `lugo.fivem.enabled` setting, Lugo will automatically parse `fxmanifest.lua` and `__resource.lua` files to accurately map your project structure, enabling resource-aware completions and diagnostics.
 
-* **Environment Isolation:** Automatically detects whether a file is `client`, `server`, or `shared`. Client files cannot see server-only globals, and vice versa.
+* **Environment Isolation:** Automatically detects whether a file is `client`, `server` or `shared`. Client files cannot see server-only globals and vice versa.
 * **Resource Scoping:** Globals defined in one resource will not leak into another resource.
 * **Cross-Resource Includes:** Understands `@resource_name/file.lua` syntax in manifests for cross-resource dependencies.
 * **Unaccounted File Warnings:** Warns you if a `.lua` file exists in your workspace but is missing from the resource manifest, preventing "script not running" headaches.
@@ -87,88 +87,24 @@ Lugo includes first-class, built-in support for FiveM resource development. When
 Simply install the extension from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=coalaura.lugo-vscode). The extension automatically detects your OS and architecture and runs the correct bundled Go binary. No external dependencies are required.
 
 ### Other Editors (Neovim, Helix, etc.)
-Lugo is entirely editor-agnostic and communicates using standard JSON-RPC over `stdio`. You can download the standalone LSP binaries for Windows, Linux, and macOS from the [GitHub Releases](https://github.com/coalaura/lugo/releases) page.
+Lugo is entirely editor-agnostic and communicates using standard JSON-RPC over `stdio`. You can download the standalone LSP binaries for Windows, Linux and macOS from the [GitHub Releases](https://github.com/coalaura/lugo/releases) page.
 
 Because Lugo does not rely on a generic wrapper, you must pass your settings directly into `initializationOptions` when setting up the client.
 
 #### Neovim (`nvim-lspconfig`)
-You can easily add Lugo as a custom server in your `init.lua`:
+You can easily add Lugo as a custom server in your Neovim environment. Since Lugo is standalone, you will need to pass the initialization options directly.
 
-```lua
-local lspconfig = require('lspconfig')
-local configs = require('lspconfig.configs')
+See [**`example.init.lua`**](example.init.lua) for a complete setup snippet.
 
--- Define the custom Lugo server
-if not configs.lugo then
-	configs.lugo = {
-		default_config = {
-			cmd = { '/path/to/your/lugo-linux-amd64' }, -- Update this path
-			filetypes = { 'lua' },
-			root_dir = lspconfig.util.root_pattern('.git', '.luarc.json'),
-			settings = {}
-		}
-	}
-end
+## CI/CD Pipeline Integration
 
--- Setup and pass initialization options directly
-lspconfig.lugo.setup({
-	init_options = {
-		libraryPaths = {},
-		ignoreGlobs = { "**/node_modules/**", "**/.git/**" },
-		knownGlobals = { "vim" },
+Lugo can be run directly in your CI/CD pipelines (like GitHub Actions) to enforce the exact same strictness and diagnostics as your local editor. By passing the `--ci` flag along with a configuration JSON file, Lugo bypasses the standard JSON-RPC loop, indexes your workspace and outputs diagnostics in standard GitHub Actions format (`::warning`, `::error`).
 
-		-- Parser
-		parserMaxErrors = 50,
+This means line-specific annotations will automatically appear in your Pull Request diffs!
 
-		-- Diagnostics
-		diagUndefinedGlobals = true,
-		diagImplicitGlobals = true,
-		diagUnusedLocal = true,
-		diagUnusedFunction = true,
-		diagUnusedParameter = true,
-		diagUnusedLoopVar = true,
-		diagShadowing = true,
-		diagUnreachableCode = true,
-		diagAmbiguousReturns = true,
-		diagDeprecated = true,
-		diagDuplicateField = true,
-		diagUnbalancedAssignment = true,
-		diagDuplicateLocal = true,
-		diagSelfAssignment = true,
-		diagEmptyBlock = true,
-		diagFormatString = true,
-		diagTypeCheck = false, -- Set to true if using strict LuaCATS annotations
-		diagRedundantParameter = true,
-		diagRedundantValue = true,
-		diagRedundantReturn = true,
-		diagLoopVarMutation = true,
-		diagIncorrectVararg = true,
-		diagShadowingLoopVar = true,
-		diagUnreachableElse = true,
-		diagUsedIgnoredVar = true,
-
-		-- Inlay Hints
-		inlayParamHints = true,
-		inlaySuppressMatch = true,
-		inlayImplicitSelf = true,
-
-		-- Editor Features
-		featureDocHighlight = true,
-		featureHoverEval = true,
-		featureCodeLens = true,
-		featureFormatting = true,
-		formatOpinionated = false,
-		suggestFunctionParams = true,
-		featureFormatAlerts = true,
-
-		-- FiveM Support
-		featureFiveM = false, -- Set to true if working on FiveM resources
-		diagFiveMUnaccountedFile = true,
-		diagFiveMUnknownExport = true,
-		diagFiveMUnknownResource = true
-	}
-})
-```
+Check out the examples:
+* [**`example.ci.json`**](example.ci.json) - An example CI configuration file (maps exactly to the LSP `initializationOptions`).
+* [**`example.ci.yml`**](example.ci.yml) - A sample GitHub Actions workflow demonstrating how to download and execute Lugo.
 
 ## Configuration
 

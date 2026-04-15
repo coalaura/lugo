@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,10 +13,17 @@ import (
 var Version = "dev"
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	ciFlag := flag.String("ci", "", "Path to CI configuration JSON file")
+	flag.Parse()
 
 	server := lsp.NewServer(Version)
+
+	if *ciFlag != "" {
+		os.Exit(server.RunCI(*ciFlag))
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	go func() {
 		<-ctx.Done()

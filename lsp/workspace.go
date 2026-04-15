@@ -1046,14 +1046,16 @@ func (s *Server) clearDocument(uri string) {
 
 	delete(s.Documents, uri)
 
-	WriteMessage(s.Writer, OutgoingNotification{
-		RPC:    "2.0",
-		Method: "textDocument/publishDiagnostics",
-		Params: PublishDiagnosticsParams{
-			URI:         uri,
-			Diagnostics: []Diagnostic{},
-		},
-	})
+	if !s.IsCI {
+		WriteMessage(s.Writer, OutgoingNotification{
+			RPC:    "2.0",
+			Method: "textDocument/publishDiagnostics",
+			Params: PublishDiagnosticsParams{
+				URI:         uri,
+				Diagnostics: []Diagnostic{},
+			},
+		})
+	}
 }
 
 func (s *Server) compileIgnorePatterns() {

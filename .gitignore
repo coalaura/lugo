@@ -6,5 +6,6 @@
 !vscode/package.json
 !vscode/language-configuration.json
 !.vscode/launch.json
+!example.ci.json
 node_modules
 bin

@@ -94,6 +94,11 @@ type ExecuteCommandOptions struct {
 	Commands []string `json:"commands"`
 }
 
+type CIConfig struct {
+	WorkspaceFolders []string              `json:"workspaceFolders"`
+	Settings         InitializationOptions `json:"settings"`
+}
+
 type InitializationOptions struct {
 	LibraryPaths []string `json:"libraryPaths,omitempty"`
 	IgnoreGlobs  []string `json:"ignoreGlobs,omitempty"`

@@ -110,6 +110,10 @@ type Server struct {
 	DiagFiveMUnaccountedFile bool
 	DiagFiveMUnknownExport   bool
 	DiagFiveMUnknownResource bool
+
+	IsCI              bool
+	CIDiagnosticCount int
+	CIErrorCount      int
 }
 
 func NewServer(version string) *Server {

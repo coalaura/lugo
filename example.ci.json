@@ -1,0 +1,48 @@
+{
+	"workspaceFolders": [
+		"."
+	],
+	"settings": {
+		"libraryPaths": [],
+		"ignoreGlobs": [
+			"**/node_modules/**",
+			"**/.git/**",
+			"**/dist/**"
+		],
+		"knownGlobals": [
+			"print",
+			"require",
+			"math",
+			"table",
+			"string",
+			"love.*"
+		],
+		"parserMaxErrors": 50,
+		"diagUndefinedGlobals": true,
+		"diagImplicitGlobals": true,
+		"diagUnusedLocal": true,
+		"diagUnusedFunction": true,
+		"diagUnusedParameter": true,
+		"diagUnusedLoopVar": true,
+		"diagShadowing": true,
+		"diagUnreachableCode": true,
+		"diagAmbiguousReturns": true,
+		"diagDeprecated": true,
+		"diagDuplicateField": true,
+		"diagUnbalancedAssignment": true,
+		"diagDuplicateLocal": true,
+		"diagSelfAssignment": true,
+		"diagEmptyBlock": true,
+		"diagFormatString": true,
+		"diagTypeCheck": false,
+		"diagRedundantParameter": true,
+		"diagRedundantValue": true,
+		"diagRedundantReturn": true,
+		"diagLoopVarMutation": true,
+		"diagIncorrectVararg": true,
+		"diagShadowingLoopVar": true,
+		"diagUnreachableElse": true,
+		"diagUsedIgnoredVar": true,
+		"featureFiveM": false
+	}
+}
