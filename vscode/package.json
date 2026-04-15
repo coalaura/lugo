@@ -4,7 +4,7 @@
     "description": "A high-performance, zero-allocation Lua 5.4 parser and Language Server (LSP).",
     "publisher": "coalaura",
     "icon": "logo.png",
-    "version": "0.12.3",
+    "version": "0.12.4",
     "galleryBanner": {
         "color": "#161928",
         "theme": "dark"
@@ -275,19 +275,26 @@
                         "markdownDescription": "Enable diagnostics for unreachable `elseif` or `else` branches (e.g., after an `if true then`).",
                         "order": 25
                     },
+                    "lugo.diagnostics.constantCondition": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Enable diagnostics for conditions that are statically known to be always true or always false.",
+                        "order": 26
+                    },
                     "lugo.diagnostics.usedIgnoredVariable": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for variables that are used but their name starts with `_` (which conventionally marks them as unused).",
-                        "order": 26
+                        "order": 27
                     },
                     "lugo.diagnostics.bannedSymbols": {
                         "type": "object",
                         "default": {},
                         "scope": "resource",
                         "markdownDescription": "Map of banned global functions/symbols to a custom warning message (e.g., `{\"print\": \"Use customLogger instead\"}`).",
-                        "order": 27
+                        "order": 28
                     }
                 }
             },

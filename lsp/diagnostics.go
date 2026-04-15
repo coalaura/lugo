@@ -801,7 +801,7 @@ func (s *Server) publishDiagnostics(uri string) {
 						break
 					}
 
-					if isTerminal(doc.Tree, stmtID) {
+					if isTerminal(doc, stmtID) {
 						terminalFound = true
 					}
 				}
@@ -1008,16 +1008,34 @@ func (s *Server) publishDiagnostics(uri string) {
 				}
 			}
 		case ast.KindIf:
-			if s.DiagUnreachableElse {
-				var foundTruthy bool
+			var foundTruthy bool
 
-				if s.isStaticallyConstant(doc, node.Left) {
-					res, ok := doc.evalNode(node.Left, 0)
-					if ok {
-						isTruthy := res.kind != ast.KindFalse && res.kind != ast.KindNil
-						if isTruthy {
-							foundTruthy = true
-						} else {
+			if s.isStaticallyConstant(doc, node.Left) {
+				res, ok := doc.evalNode(node.Left, 0)
+				if ok {
+					isTruthy := res.kind != ast.KindFalse && res.kind != ast.KindNil
+					if isTruthy {
+						foundTruthy = true
+
+						if s.DiagConstantCondition {
+							s.diagBuf = append(s.diagBuf, Diagnostic{
+								Range:    getNodeRange(doc.Tree, node.Left),
+								Severity: SeverityWarning,
+								Code:     "constant-condition",
+								Message:  "This condition is always true.",
+							})
+						}
+					} else {
+						if s.DiagConstantCondition {
+							s.diagBuf = append(s.diagBuf, Diagnostic{
+								Range:    getNodeRange(doc.Tree, node.Left),
+								Severity: SeverityWarning,
+								Code:     "constant-condition",
+								Message:  "This condition is always false.",
+							})
+						}
+
+						if s.DiagUnreachableElse {
 							s.diagBuf = append(s.diagBuf, Diagnostic{
 								Range:    getNodeRange(doc.Tree, node.Right),
 								Severity: SeverityWarning,
@@ -1028,7 +1046,9 @@ func (s *Server) publishDiagnostics(uri string) {
 						}
 					}
 				}
+			}
 
+			if s.DiagUnreachableElse || s.DiagConstantCondition {
 				for j := uint16(0); j < node.Count; j++ {
 					if node.Extra+uint32(j) >= uint32(len(doc.Tree.ExtraList)) {
 						continue
@@ -1042,13 +1062,15 @@ func (s *Server) publishDiagnostics(uri string) {
 					childNode := doc.Tree.Nodes[childID]
 
 					if foundTruthy {
-						s.diagBuf = append(s.diagBuf, Diagnostic{
-							Range:    getNodeRange(doc.Tree, childID),
-							Severity: SeverityWarning,
-							Code:     "unreachable-branch",
-							Tags:     []DiagnosticTag{Unnecessary},
-							Message:  "This branch is unreachable because a previous condition is always truthy.",
-						})
+						if s.DiagUnreachableElse {
+							s.diagBuf = append(s.diagBuf, Diagnostic{
+								Range:    getNodeRange(doc.Tree, childID),
+								Severity: SeverityWarning,
+								Code:     "unreachable-branch",
+								Tags:     []DiagnosticTag{Unnecessary},
+								Message:  "This branch is unreachable because a previous condition is always truthy.",
+							})
+						}
 
 						continue
 					}
@@ -1060,14 +1082,34 @@ func (s *Server) publishDiagnostics(uri string) {
 								isTruthy := res.kind != ast.KindFalse && res.kind != ast.KindNil
 								if isTruthy {
 									foundTruthy = true
+
+									if s.DiagConstantCondition {
+										s.diagBuf = append(s.diagBuf, Diagnostic{
+											Range:    getNodeRange(doc.Tree, childNode.Left),
+											Severity: SeverityWarning,
+											Code:     "constant-condition",
+											Message:  "This condition is always true.",
+										})
+									}
 								} else {
-									s.diagBuf = append(s.diagBuf, Diagnostic{
-										Range:    getNodeRange(doc.Tree, childNode.Right),
-										Severity: SeverityWarning,
-										Code:     "unreachable-branch",
-										Tags:     []DiagnosticTag{Unnecessary},
-										Message:  "This branch is unreachable because the condition is always falsy.",
-									})
+									if s.DiagConstantCondition {
+										s.diagBuf = append(s.diagBuf, Diagnostic{
+											Range:    getNodeRange(doc.Tree, childNode.Left),
+											Severity: SeverityWarning,
+											Code:     "constant-condition",
+											Message:  "This condition is always false.",
+										})
+									}
+
+									if s.DiagUnreachableElse {
+										s.diagBuf = append(s.diagBuf, Diagnostic{
+											Range:    getNodeRange(doc.Tree, childNode.Right),
+											Severity: SeverityWarning,
+											Code:     "unreachable-branch",
+											Tags:     []DiagnosticTag{Unnecessary},
+											Message:  "This branch is unreachable because the condition is always falsy.",
+										})
+									}
 								}
 							}
 						}
@@ -1796,7 +1838,7 @@ func (s *Server) isGuardedByPreviousStatements(doc *Document, blockNode ast.Node
 		// `if not VAR then return end`
 		if prevStmt.Kind == ast.KindIf {
 			if s.checksForGlobalNegative(doc, prevStmt.Left, nameBytes) {
-				if isTerminal(doc.Tree, prevStmt.Right) {
+				if isTerminal(doc, prevStmt.Right) {
 					return true
 				}
 			}

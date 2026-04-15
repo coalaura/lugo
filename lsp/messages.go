@@ -130,6 +130,7 @@ type InitializationOptions struct {
 	DiagLoopVarMutation      bool `json:"diagLoopVarMutation"`
 	DiagIncorrectVararg      bool `json:"diagIncorrectVararg"`
 	DiagShadowingLoopVar     bool `json:"diagShadowingLoopVar"`
+	DiagConstantCondition    bool `json:"diagConstantCondition"`
 	DiagUnreachableElse      bool `json:"diagUnreachableElse"`
 	DiagUsedIgnoredVar       bool `json:"diagUsedIgnoredVar"`
 

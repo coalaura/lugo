@@ -502,7 +502,9 @@ func isLHSOfAssignment(doc *Document, nodeID ast.NodeID) bool {
 	return (grandParentNode.Kind == ast.KindAssign || grandParentNode.Kind == ast.KindLocalAssign) && grandParentNode.Left == parentID
 }
 
-func isTerminal(tree *ast.Tree, id ast.NodeID) bool {
+func isTerminal(doc *Document, id ast.NodeID) bool {
+	tree := doc.Tree
+
 	if id == ast.InvalidNode || int(id) >= len(tree.Nodes) {
 		return false
 	}
@@ -513,11 +515,11 @@ func isTerminal(tree *ast.Tree, id ast.NodeID) bool {
 	case ast.KindReturn, ast.KindBreak, ast.KindGoto:
 		return true
 	case ast.KindDo:
-		return isTerminal(tree, node.Left)
+		return isTerminal(doc, node.Left)
 	case ast.KindBlock:
 		for i := uint16(0); i < node.Count; i++ {
 			if node.Extra+uint32(i) < uint32(len(tree.ExtraList)) {
-				if isTerminal(tree, tree.ExtraList[node.Extra+uint32(i)]) {
+				if isTerminal(doc, tree.ExtraList[node.Extra+uint32(i)]) {
 					return true
 				}
 			}
@@ -525,7 +527,23 @@ func isTerminal(tree *ast.Tree, id ast.NodeID) bool {
 
 		return false
 	case ast.KindIf:
-		if !isTerminal(tree, node.Right) {
+		var isStaticTrue, isStaticFalse bool
+
+		if doc.Server != nil && doc.Server.isStaticallyConstant(doc, node.Left) {
+			if res, ok := doc.evalNode(node.Left, 0); ok {
+				if res.kind != ast.KindFalse && res.kind != ast.KindNil {
+					isStaticTrue = true
+				} else {
+					isStaticFalse = true
+				}
+			}
+		}
+
+		if isStaticTrue {
+			return isTerminal(doc, node.Right)
+		}
+
+		if !isStaticFalse && !isTerminal(doc, node.Right) {
 			return false
 		}
 
@@ -548,7 +566,22 @@ func isTerminal(tree *ast.Tree, id ast.NodeID) bool {
 
 			switch childNode.Kind {
 			case ast.KindElseIf:
-				if !isTerminal(tree, childNode.Right) {
+				var childStaticTrue, childStaticFalse bool
+				if doc.Server != nil && doc.Server.isStaticallyConstant(doc, childNode.Left) {
+					if res, ok := doc.evalNode(childNode.Left, 0); ok {
+						if res.kind != ast.KindFalse && res.kind != ast.KindNil {
+							childStaticTrue = true
+						} else {
+							childStaticFalse = true
+						}
+					}
+				}
+
+				if childStaticTrue {
+					return isTerminal(doc, childNode.Right)
+				}
+
+				if !childStaticFalse && !isTerminal(doc, childNode.Right) {
 					return false
 				}
 
@@ -558,7 +591,7 @@ func isTerminal(tree *ast.Tree, id ast.NodeID) bool {
 			case ast.KindElse:
 				hasElse = true
 
-				if !isTerminal(tree, childNode.Left) {
+				if !isTerminal(doc, childNode.Left) {
 					return false
 				}
 			}

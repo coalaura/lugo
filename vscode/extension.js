@@ -75,6 +75,7 @@ function buildInitializationOptions() {
 		diagLoopVarMutation: lugoConfig.get("diagnostics.loopVarMutation") !== false,
 		diagIncorrectVararg: lugoConfig.get("diagnostics.incorrectVararg") !== false,
 		diagShadowingLoopVar: lugoConfig.get("diagnostics.shadowingLoopVar") !== false,
+		diagConstantCondition: lugoConfig.get("diagnostics.constantCondition") !== false,
 		diagUnreachableElse: lugoConfig.get("diagnostics.unreachableElse") !== false,
 		diagUsedIgnoredVar: lugoConfig.get("diagnostics.usedIgnoredVariable") !== false,
 

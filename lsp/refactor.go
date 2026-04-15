@@ -479,16 +479,18 @@ func (s *Server) handleCodeAction(req Request) {
 				initID := doc.Tree.ExtraList[node.Extra]
 				limitID := doc.Tree.ExtraList[node.Extra+1]
 
-				initVal, ok := doc.evalNode(initID, 0)
-				if ok && initVal.kind == ast.KindNumber && initVal.num == 1 {
-					if int(limitID) < len(doc.Tree.Nodes) {
-						limitNode := doc.Tree.Nodes[limitID]
-						if limitNode.Kind == ast.KindUnaryExpr {
-							limitSrc := doc.Source[limitNode.Start:limitNode.End]
-							if bytes.HasPrefix(limitSrc, []byte("#")) {
-								targetForNum = curr
+				if int(initID) < len(doc.Tree.Nodes) && doc.Tree.Nodes[initID].Kind == ast.KindNumber {
+					initVal, ok := doc.evalNode(initID, 0)
+					if ok && initVal.kind == ast.KindNumber && initVal.num == 1 {
+						if int(limitID) < len(doc.Tree.Nodes) {
+							limitNode := doc.Tree.Nodes[limitID]
+							if limitNode.Kind == ast.KindUnaryExpr {
+								limitSrc := doc.Source[limitNode.Start:limitNode.End]
+								if bytes.HasPrefix(limitSrc, []byte("#")) {
+									targetForNum = curr
 
-								forNumTable = string(bytes.TrimSpace(limitSrc[1:]))
+									forNumTable = string(bytes.TrimSpace(limitSrc[1:]))
+								}
 							}
 						}
 					}
@@ -498,7 +500,7 @@ func (s *Server) handleCodeAction(req Request) {
 
 		// 8. Convert Index to Member (t["prop"] -> t.prop)
 		if node.Kind == ast.KindIndexExpr && targetIndexToMember == ast.InvalidNode {
-			if int(node.Right) < len(doc.Tree.Nodes) {
+			if int(node.Right) < len(doc.Tree.Nodes) && doc.Tree.Nodes[node.Right].Kind == ast.KindString {
 				res, ok := doc.evalNode(node.Right, 0)
 				if ok && res.kind == ast.KindString {
 					if s.isValidIdentifier(res.str) {
@@ -2001,7 +2003,7 @@ func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []Saf
 					break
 				}
 
-				if isTerminal(doc.Tree, stmtID) {
+				if isTerminal(doc, stmtID) {
 					terminalFound = true
 				}
 			}
@@ -2485,7 +2487,7 @@ func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string
 			}
 		}
 
-		if !isTerminal(doc.Tree, lastEmitted) {
+		if !isTerminal(doc, lastEmitted) {
 			for _, trailID := range trailing {
 				if lastEmitted != ast.InvalidNode {
 					out.WriteString("\n")
@@ -2498,7 +2500,7 @@ func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string
 				lastEmitted = trailID
 			}
 
-			if !isTerminal(doc.Tree, lastEmitted) {
+			if !isTerminal(doc, lastEmitted) {
 				if lastEmitted != ast.InvalidNode {
 					out.WriteString("\n")
 				}

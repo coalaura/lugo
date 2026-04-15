@@ -92,6 +92,7 @@ type Server struct {
 	DiagLoopVarMutation      bool
 	DiagIncorrectVararg      bool
 	DiagShadowingLoopVar     bool
+	DiagConstantCondition    bool
 	DiagUnreachableElse      bool
 	DiagUsedIgnoredVar       bool
 
@@ -229,6 +230,7 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 	setCfg(&s.DiagLoopVarMutation, opts.DiagLoopVarMutation, &needsRepublish)
 	setCfg(&s.DiagIncorrectVararg, opts.DiagIncorrectVararg, &needsRepublish)
 	setCfg(&s.DiagShadowingLoopVar, opts.DiagShadowingLoopVar, &needsRepublish)
+	setCfg(&s.DiagConstantCondition, opts.DiagConstantCondition, &needsRepublish)
 	setCfg(&s.DiagUnreachableElse, opts.DiagUnreachableElse, &needsRepublish)
 	setCfg(&s.DiagUsedIgnoredVar, opts.DiagUsedIgnoredVar, &needsRepublish)
 
