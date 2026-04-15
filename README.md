@@ -64,6 +64,7 @@ Lugo performs workspace-wide analysis to catch bugs before runtime:
 * **Unused Variables:** Granular detection for unused locals, functions, parameters and loop variables.
 * **Shadowing:** Warns when a local or loop variable shadows an outer scope or global, providing a clickable link to the shadowed definition.
 * **Unreachable Code:** Detects dead code after `return`, `break` or `goto`, as well as statically unreachable `elseif` or `else` branches.
+* **Constant Conditions:** Warns when a condition is statically known to be always true or always false.
 * **Ambiguous Returns:** Catches Lua's infamous newline evaluation trap where expressions on the next line are accidentally returned.
 * **Redundant Code:** Warns about empty blocks (`do end`), self-assignments, redundant parameters, redundant assignment values and redundant returns (with quick-fixes to remove them).
 * **Sanity Checks:** Detects duplicate fields in table literals, unbalanced assignments, loop variable mutations and incorrect vararg (`...`) usage.
@@ -142,6 +143,7 @@ You can configure Lugo via your VS Code `settings.json` (also available via the 
 * `lugo.diagnostics.loopVarMutation`: Toggle diagnostics for mutating a loop variable inside the loop body.
 * `lugo.diagnostics.incorrectVararg`: Toggle diagnostics for using the vararg `...` expression outside of a vararg function.
 * `lugo.diagnostics.shadowingLoopVar`: Toggle diagnostics when a loop variable shadows an outer local or global variable.
+* `lugo.diagnostics.constantCondition`: Toggle diagnostics for conditions that are statically known to be always true or always false.
 * `lugo.diagnostics.unreachableElse`: Toggle diagnostics for unreachable `elseif` or `else` branches.
 * `lugo.diagnostics.usedIgnoredVariable`: Toggle diagnostics for variables that are used but their name starts with `_`.
 * `lugo.diagnostics.deprecated`: Toggle warnings for usage of `@deprecated` symbols.
@@ -170,3 +172,4 @@ Available via the VS Code Command Palette (`Ctrl+Shift+P`):
 * **Lugo: Re-index Workspace:** Manually trigger a full workspace re-index.
 * **Lugo: Apply Safe Fixes (Current File):** Automatically clean up unused variables, parameters and assignments in the active file without breaking side-effects.
 * **Lugo: Apply Safe Fixes (Workspace):** Apply all safe fixes across the entire workspace.
+* **Lugo: Ignore Diagnostic:** Instantly adds a `---@diagnostic disable-next-line` (or `disable-file`) comment for the selected rule (Triggered via Quick Fix Code Actions).

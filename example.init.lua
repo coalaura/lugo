@@ -55,6 +55,7 @@ lspconfig.lugo.setup({
 		diagLoopVarMutation = true,
 		diagIncorrectVararg = true,
 		diagShadowingLoopVar = true,
+		diagConstantCondition = true,
 		diagUnreachableElse = true,
 		diagUsedIgnoredVar = true,
 
