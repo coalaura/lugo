@@ -26,6 +26,7 @@ lspconfig.lugo.setup({
 		knownGlobals = {
 			"vim"
 		},
+		bannedSymbols = {},
 
 		-- Parser
 		parserMaxErrors = 50,
