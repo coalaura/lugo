@@ -15,14 +15,14 @@ Most Lua language servers struggle when dropped into massive codebases (like gam
 **Lugo is different:**
 * **Blistering Performance:** In real-world benchmarks on modern hardware, Lugo completely cold-indexes massive workspaces (including full AST generation, symbol resolution and publishing workspace-wide diagnostics) in a matter of seconds.
   ```text
-  2026-04-06T23:06:52 Starting workspace re-index...
-  2026-04-06T23:06:52 Indexing external library: /opt/lua-fivem-sdk
-  2026-04-06T23:06:52 Indexing workspace folder: file:///workspace/server/resources
-  2026-04-06T23:06:54 Indexing workspace folder: file:///workspace/server/framework-assets
-  2026-04-06T23:06:54 Indexing workspace folder: file:///workspace/server/legacy-assets
-  2026-04-06T23:06:54 Re-indexed workspace in 1.9606123s (indexed=3020, unchanged=1, failed=0)
-  2026-04-06T23:06:55 Published diagnostics for 2997 files in 487.4179ms
-  2026-04-06T23:06:55 Total time taken for 28619407 bytes: 2.4480302s
+  Starting workspace re-index...
+  Indexing external library: /opt/lua-fivem-sdk
+  Indexing workspace folder: file:///workspace/server/resources
+  Indexing workspace folder: file:///workspace/server/framework-assets
+  Indexing workspace folder: file:///workspace/server/legacy-assets
+  Re-indexed workspace in 1.5344984s (indexed=3040, unchanged=0, failed=0)
+  Published diagnostics for 3016 files in 695.1437ms
+  Total time taken for 29625243 bytes: 2.2296421s
   ```
 * **Incremental Warm Starts:** Lugo hashes your workspace files. If you trigger a re-index, it skips parsing unchanged files and reuses map memory pools (`clear()`), dropping warm re-indexes to a fraction of a second.
 * **Zero-Allocation Architecture:** The parser, lexer and symbol resolver are designed to never allocate heap strings during normal typing. Tight loops execute inside CPU registers, leveraging SIMD-accelerated byte scanning to maximize cache locality.

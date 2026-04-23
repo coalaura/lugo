@@ -435,16 +435,20 @@ func (doc *Document) LocalsAt(offset uint32) iter.Seq2[[]byte, ast.NodeID] {
 								identID := doc.Tree.ExtraList[nameList.Extra+uint32(j)]
 								identNode := doc.Tree.Nodes[identID]
 
-								if !yield(doc.Source[identNode.Start:identNode.End], identID) {
-									return
+								if identNode.Start <= identNode.End && identNode.End <= uint32(len(doc.Source)) {
+									if !yield(doc.Source[identNode.Start:identNode.End], identID) {
+										return
+									}
 								}
 							}
 						}
 					case ast.KindLocalFunction:
 						identNode := doc.Tree.Nodes[stmtNode.Left]
 
-						if !yield(doc.Source[identNode.Start:identNode.End], stmtNode.Left) {
-							return
+						if identNode.Start <= identNode.End && identNode.End <= uint32(len(doc.Source)) {
+							if !yield(doc.Source[identNode.Start:identNode.End], stmtNode.Left) {
+								return
+							}
 						}
 					}
 				}
@@ -468,8 +472,10 @@ func (doc *Document) LocalsAt(offset uint32) iter.Seq2[[]byte, ast.NodeID] {
 						paramID := doc.Tree.ExtraList[exprNode.Extra+uint32(i)]
 						paramNode := doc.Tree.Nodes[paramID]
 
-						if !yield(doc.Source[paramNode.Start:paramNode.End], paramID) {
-							return
+						if paramNode.Start <= paramNode.End && paramNode.End <= uint32(len(doc.Source)) {
+							if !yield(doc.Source[paramNode.Start:paramNode.End], paramID) {
+								return
+							}
 						}
 					}
 				}
@@ -486,8 +492,10 @@ func (doc *Document) LocalsAt(offset uint32) iter.Seq2[[]byte, ast.NodeID] {
 				if offset > exprsEnd {
 					identNode := doc.Tree.Nodes[node.Left]
 
-					if !yield(doc.Source[identNode.Start:identNode.End], node.Left) {
-						return
+					if identNode.Start <= identNode.End && identNode.End <= uint32(len(doc.Source)) {
+						if !yield(doc.Source[identNode.Start:identNode.End], node.Left) {
+							return
+						}
 					}
 				}
 			case ast.KindForIn:
@@ -499,8 +507,10 @@ func (doc *Document) LocalsAt(offset uint32) iter.Seq2[[]byte, ast.NodeID] {
 						identID := doc.Tree.ExtraList[nameList.Extra+uint32(i)]
 						identNode := doc.Tree.Nodes[identID]
 
-						if !yield(doc.Source[identNode.Start:identNode.End], identID) {
-							return
+						if identNode.Start <= identNode.End && identNode.End <= uint32(len(doc.Source)) {
+							if !yield(doc.Source[identNode.Start:identNode.End], identID) {
+								return
+							}
 						}
 					}
 				}

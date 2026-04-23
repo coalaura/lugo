@@ -281,7 +281,7 @@ func (s *Server) publishDiagnostics(uri string) {
 
 		for _, refID := range doc.Resolver.GlobalRefs {
 			node := doc.Tree.Nodes[refID]
-			if node.Start == node.End || node.End > uint32(len(doc.Source)) {
+			if node.Start >= node.End || node.End > uint32(len(doc.Source)) {
 				continue
 			}
 
@@ -348,7 +348,7 @@ func (s *Server) publishDiagnostics(uri string) {
 		for _, defID := range doc.Resolver.GlobalDefs {
 			node := doc.Tree.Nodes[defID]
 
-			if node.Start == node.End || node.End > uint32(len(doc.Source)) {
+			if node.Start >= node.End || node.End > uint32(len(doc.Source)) {
 				continue
 			}
 
@@ -406,7 +406,7 @@ func (s *Server) publishDiagnostics(uri string) {
 
 		for _, defID := range doc.Resolver.LocalDefs {
 			node := doc.Tree.Nodes[defID]
-			if node.Start == node.End || node.End > uint32(len(doc.Source)) {
+			if node.Start >= node.End || node.End > uint32(len(doc.Source)) {
 				continue
 			}
 
@@ -1782,16 +1782,15 @@ func (s *Server) isSideEffectFree(doc *Document, id ast.NodeID) bool {
 						nameBytes = doc.Source[leftNode.Start:leftNode.End]
 					}
 				} else if leftNode.Kind == ast.KindMemberExpr && leftNode.Right != ast.InvalidNode && int(leftNode.Right) < len(doc.Tree.Nodes) {
-					rightNode := doc.Tree.Nodes[leftNode.Right]
-					if rightNode.Start <= rightNode.End && rightNode.End <= uint32(len(doc.Source)) {
-						nameBytes = doc.Source[rightNode.Start:rightNode.End]
+					if leftNode.Start <= leftNode.End && leftNode.End <= uint32(len(doc.Source)) {
+						nameBytes = doc.Source[leftNode.Start:leftNode.End]
 					}
 				}
 			}
 		}
 
 		if len(nameBytes) > 0 {
-			if hasPrefixFold(nameBytes, "get") || hasPrefixFold(nameBytes, "is") || hasPrefixFold(nameBytes, "has") || hasPrefixFold(nameBytes, "can") || hasPrefixFold(nameBytes, "unpack") || hasPrefixFold(nameBytes, "math.") || hasPrefixFold(nameBytes, "type") || hasPrefixFold(nameBytes, "tostring") || hasPrefixFold(nameBytes, "tonumber") || hasPrefixFold(nameBytes, "pairs") || hasPrefixFold(nameBytes, "ipairs") {
+			if hasPrefixFold(nameBytes, "get") || hasPrefixFold(nameBytes, "is") || hasPrefixFold(nameBytes, "has") || hasPrefixFold(nameBytes, "can") || hasPrefixFold(nameBytes, "unpack") || hasPrefixFold(nameBytes, "math.") || hasPrefixFold(nameBytes, "string.") || hasPrefixFold(nameBytes, "type") || hasPrefixFold(nameBytes, "tostring") || hasPrefixFold(nameBytes, "tonumber") || hasPrefixFold(nameBytes, "pairs") || hasPrefixFold(nameBytes, "ipairs") {
 				// Check args
 				for i := uint16(0); i < node.Count; i++ {
 					if node.Extra+uint32(i) >= uint32(len(doc.Tree.ExtraList)) || !s.isSideEffectFree(doc, doc.Tree.ExtraList[node.Extra+uint32(i)]) {

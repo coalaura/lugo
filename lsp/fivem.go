@@ -126,7 +126,9 @@ func (s *Server) parseFiveMManifest(doc *Document) *FiveMResource {
 			if node.Kind == ast.KindCallExpr {
 				if int(node.Left) < len(doc.Tree.Nodes) && doc.Tree.Nodes[node.Left].Kind == ast.KindIdent {
 					funcNode := doc.Tree.Nodes[node.Left]
-					funcName = string(doc.Source[funcNode.Start:funcNode.End])
+					if funcNode.Start <= funcNode.End && funcNode.End <= uint32(len(doc.Source)) {
+						funcName = string(doc.Source[funcNode.Start:funcNode.End])
+					}
 				}
 			}
 
@@ -171,9 +173,10 @@ func (s *Server) parseFiveMManifest(doc *Document) *FiveMResource {
 					argNode := doc.Tree.Nodes[argID]
 
 					if argNode.Kind == ast.KindString {
-						strVal := unquoteLuaString(string(doc.Source[argNode.Start:argNode.End]))
-
-						*targetExports = append(*targetExports, strVal)
+						if argNode.Start <= argNode.End && argNode.End <= uint32(len(doc.Source)) {
+							strVal := unquoteLuaString(string(doc.Source[argNode.Start:argNode.End]))
+							*targetExports = append(*targetExports, strVal)
+						}
 					} else if argNode.Kind == ast.KindTableExpr {
 						for k := uint16(0); k < argNode.Count; k++ {
 							if argNode.Extra+uint32(k) >= uint32(len(doc.Tree.ExtraList)) {
@@ -187,9 +190,10 @@ func (s *Server) parseFiveMManifest(doc *Document) *FiveMResource {
 
 							fieldNode := doc.Tree.Nodes[fieldID]
 							if fieldNode.Kind == ast.KindString {
-								strVal := unquoteLuaString(string(doc.Source[fieldNode.Start:fieldNode.End]))
-
-								*targetExports = append(*targetExports, strVal)
+								if fieldNode.Start <= fieldNode.End && fieldNode.End <= uint32(len(doc.Source)) {
+									strVal := unquoteLuaString(string(doc.Source[fieldNode.Start:fieldNode.End]))
+									*targetExports = append(*targetExports, strVal)
+								}
 							}
 						}
 					}
@@ -208,11 +212,13 @@ func (s *Server) parseFiveMManifest(doc *Document) *FiveMResource {
 					argNode := doc.Tree.Nodes[argID]
 
 					if argNode.Kind == ast.KindString {
-						strVal := unquoteLuaString(string(doc.Source[argNode.Start:argNode.End]))
-						if strings.HasPrefix(strVal, "@") {
-							*targetCross = append(*targetCross, strVal)
-						} else {
-							*targetGlobs = append(*targetGlobs, strVal)
+						if argNode.Start <= argNode.End && argNode.End <= uint32(len(doc.Source)) {
+							strVal := unquoteLuaString(string(doc.Source[argNode.Start:argNode.End]))
+							if strings.HasPrefix(strVal, "@") {
+								*targetCross = append(*targetCross, strVal)
+							} else {
+								*targetGlobs = append(*targetGlobs, strVal)
+							}
 						}
 					} else if argNode.Kind == ast.KindTableExpr {
 						for k := uint16(0); k < argNode.Count; k++ {
@@ -227,11 +233,13 @@ func (s *Server) parseFiveMManifest(doc *Document) *FiveMResource {
 
 							fieldNode := doc.Tree.Nodes[fieldID]
 							if fieldNode.Kind == ast.KindString {
-								strVal := unquoteLuaString(string(doc.Source[fieldNode.Start:fieldNode.End]))
-								if strings.HasPrefix(strVal, "@") {
-									*targetCross = append(*targetCross, strVal)
-								} else {
-									*targetGlobs = append(*targetGlobs, strVal)
+								if fieldNode.Start <= fieldNode.End && fieldNode.End <= uint32(len(doc.Source)) {
+									strVal := unquoteLuaString(string(doc.Source[fieldNode.Start:fieldNode.End]))
+									if strings.HasPrefix(strVal, "@") {
+										*targetCross = append(*targetCross, strVal)
+									} else {
+										*targetGlobs = append(*targetGlobs, strVal)
+									}
 								}
 							}
 						}

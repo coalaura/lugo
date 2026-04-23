@@ -304,7 +304,7 @@ func (f *Formatter) Format(doc *Document, formatRange *Range) []TextEdit {
 		} else if prevTok.Kind != 0 {
 			if f.needsSpace(prevTok.Kind, tok.Kind, prevPrev) {
 				gapBuilder.WriteByte(' ')
-			} else if (prevTok.Kind == token.LBrace || tok.Kind == token.RBrace) && bytes.ContainsRune(gap, ' ') {
+			} else if (prevTok.Kind == token.LBrace || tok.Kind == token.RBrace) && bytes.IndexByte(gap, ' ') != -1 {
 				gapBuilder.WriteByte(' ')
 			}
 		}

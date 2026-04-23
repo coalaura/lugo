@@ -377,7 +377,9 @@ func (l *Lexer) readString(start uint32, quote byte) token.Token {
 		c := src[i]
 
 		if c == '\\' {
-			i++ // skip escaped char
+			if i+1 < len(src) {
+				i++ // skip escaped char
+			}
 		} else if c == quote {
 			i++
 

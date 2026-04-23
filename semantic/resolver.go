@@ -257,7 +257,7 @@ func (r *Resolver) resolveReference(identID ast.NodeID, isDef bool) {
 	}
 
 	targetNode := r.Tree.Nodes[identID]
-	if targetNode.Start == targetNode.End {
+	if targetNode.Start >= targetNode.End || targetNode.End > uint32(len(r.Tree.Source)) {
 		return
 	}
 

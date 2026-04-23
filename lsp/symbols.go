@@ -916,14 +916,18 @@ func (s *Server) getFiveMExportResource(doc *Document, nodeID ast.NodeID) string
 	case ast.KindIndexExpr:
 		if int(node.Left) < len(doc.Tree.Nodes) && doc.Tree.Nodes[node.Left].Kind == ast.KindIdent {
 			leftNode := doc.Tree.Nodes[node.Left]
-			leftName := doc.Source[leftNode.Start:leftNode.End]
+			if leftNode.Start <= leftNode.End && leftNode.End <= uint32(len(doc.Source)) {
+				leftName := doc.Source[leftNode.Start:leftNode.End]
 
-			if bytes.Equal(leftName, []byte("exports")) && doc.Resolver.References[node.Left] == ast.InvalidNode {
-				if int(node.Right) < len(doc.Tree.Nodes) {
-					rightNode := doc.Tree.Nodes[node.Right]
+				if bytes.Equal(leftName, []byte("exports")) && doc.Resolver.References[node.Left] == ast.InvalidNode {
+					if int(node.Right) < len(doc.Tree.Nodes) {
+						rightNode := doc.Tree.Nodes[node.Right]
 
-					if rightNode.Kind == ast.KindString {
-						return strings.ToLower(unquoteLuaString(string(doc.Source[rightNode.Start:rightNode.End])))
+						if rightNode.Kind == ast.KindString {
+							if rightNode.Start <= rightNode.End && rightNode.End <= uint32(len(doc.Source)) {
+								return strings.ToLower(unquoteLuaString(string(doc.Source[rightNode.Start:rightNode.End])))
+							}
+						}
 					}
 				}
 			}
@@ -931,14 +935,18 @@ func (s *Server) getFiveMExportResource(doc *Document, nodeID ast.NodeID) string
 	case ast.KindMemberExpr:
 		if int(node.Left) < len(doc.Tree.Nodes) && doc.Tree.Nodes[node.Left].Kind == ast.KindIdent {
 			leftNode := doc.Tree.Nodes[node.Left]
-			leftName := doc.Source[leftNode.Start:leftNode.End]
+			if leftNode.Start <= leftNode.End && leftNode.End <= uint32(len(doc.Source)) {
+				leftName := doc.Source[leftNode.Start:leftNode.End]
 
-			if bytes.Equal(leftName, []byte("exports")) && doc.Resolver.References[node.Left] == ast.InvalidNode {
-				if int(node.Right) < len(doc.Tree.Nodes) {
-					rightNode := doc.Tree.Nodes[node.Right]
+				if bytes.Equal(leftName, []byte("exports")) && doc.Resolver.References[node.Left] == ast.InvalidNode {
+					if int(node.Right) < len(doc.Tree.Nodes) {
+						rightNode := doc.Tree.Nodes[node.Right]
 
-					if rightNode.Kind == ast.KindIdent {
-						return strings.ToLower(string(doc.Source[rightNode.Start:rightNode.End]))
+						if rightNode.Kind == ast.KindIdent {
+							if rightNode.Start <= rightNode.End && rightNode.End <= uint32(len(doc.Source)) {
+								return strings.ToLower(string(doc.Source[rightNode.Start:rightNode.End]))
+							}
+						}
 					}
 				}
 			}
