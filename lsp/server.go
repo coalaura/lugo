@@ -33,6 +33,7 @@ type Server struct {
 	FiveMResources      map[string]*FiveMResource
 	FiveMResourceByName map[string]*FiveMResource
 	uriCache            map[string]string
+	symlinkCache        map[string]string
 
 	// Global Index & Resolution
 	GlobalIndex       map[GlobalKey][]GlobalSymbol

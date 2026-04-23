@@ -134,14 +134,10 @@ func (t *Tree) Position(offset uint32) (line, col uint32) {
 	for low < high {
 		mid := int(uint(low+high) >> 1)
 
-		if uint(mid) < uint(len(lines)) {
-			if lines[mid] <= offset {
-				low = mid + 1
-			} else {
-				high = mid
-			}
+		if lines[mid] <= offset {
+			low = mid + 1
 		} else {
-			break
+			high = mid
 		}
 	}
 
@@ -405,9 +401,13 @@ func computeLineOffsets(source []byte, lines []uint32) []uint32 {
 func HashBytes(b []byte) uint64 {
 	var hash uint64 = 14695981039346656037
 
-	for _, char := range b {
-		hash ^= uint64(char)
-		hash *= 1099511628211
+	if len(b) > 0 {
+		_ = b[len(b)-1] // BCE
+
+		for i := range b {
+			hash ^= uint64(b[i])
+			hash *= 1099511628211
+		}
 	}
 
 	return hash
@@ -418,19 +418,31 @@ func HashBytes(b []byte) uint64 {
 func HashBytesConcat(a, sep, b []byte) uint64 {
 	var hash uint64 = 14695981039346656037
 
-	for _, char := range a {
-		hash ^= uint64(char)
-		hash *= 1099511628211
+	if len(a) > 0 {
+		_ = a[len(a)-1] // BCE
+
+		for i := range a {
+			hash ^= uint64(a[i])
+			hash *= 1099511628211
+		}
 	}
 
-	for _, char := range sep {
-		hash ^= uint64(char)
-		hash *= 1099511628211
+	if len(sep) > 0 {
+		_ = sep[len(sep)-1] // BCE
+
+		for i := range sep {
+			hash ^= uint64(sep[i])
+			hash *= 1099511628211
+		}
 	}
 
-	for _, char := range b {
-		hash ^= uint64(char)
-		hash *= 1099511628211
+	if len(b) > 0 {
+		_ = b[len(b)-1] // BCE
+
+		for i := range b {
+			hash ^= uint64(b[i])
+			hash *= 1099511628211
+		}
 	}
 
 	return hash

@@ -375,7 +375,7 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 
 			if isDir {
 				walk(fullPath, isSym)
-			} else if strings.HasSuffix(name, ".lua") {
+			} else if len(name) > 4 && name[len(name)-4:] == ".lua" {
 				uri := s.normalizeURI(s.pathToURI(fullPath))
 
 				if s.OpenFiles[uri] {
@@ -1288,18 +1288,24 @@ func (s *Server) normalizeURI(uri string) string {
 	}
 
 	path := s.uriToPath(uri)
+	dir := filepath.Dir(path)
 
-	realPath, err := filepath.EvalSymlinks(path)
-	if err == nil {
-		path = realPath
-	} else {
-		dir := filepath.Dir(path)
-
-		realDir, err := filepath.EvalSymlinks(dir)
-		if err == nil {
-			path = filepath.Join(realDir, filepath.Base(path))
-		}
+	if s.symlinkCache == nil {
+		s.symlinkCache = make(map[string]string, 256)
 	}
+
+	realDir, ok := s.symlinkCache[dir]
+	if !ok {
+		if r, err := filepath.EvalSymlinks(dir); err == nil {
+			realDir = r
+		} else {
+			realDir = dir
+		}
+
+		s.symlinkCache[dir] = realDir
+	}
+
+	path = filepath.Join(realDir, filepath.Base(path))
 
 	res := s.pathToURI(path)
 

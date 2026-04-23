@@ -236,49 +236,45 @@ func (l *Lexer) skipWhitespace() {
 	}
 
 	src := l.source
-	read := int(l.cursor)
+	i := int(l.cursor)
 
-	for read < len(src) {
-		c := src[read]
+	for ; i < len(src); i++ {
+		c := src[i]
 
-		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-			read++
-		} else {
+		if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
 			break
 		}
 	}
 
-	l.cursor = uint32(read)
+	l.cursor = uint32(i)
 
-	if read < len(src) {
-		l.ch = src[read]
-		l.read = uint32(read + 1)
+	if i < len(src) {
+		l.ch = src[i]
+		l.read = uint32(i + 1)
 	} else {
 		l.ch = 0
-		l.read = uint32(read)
+		l.read = uint32(i)
 	}
 }
 
 func (l *Lexer) readIdent(start uint32) token.Token {
 	src := l.source
-	read := int(l.cursor)
+	i := int(l.cursor)
 
-	for read < len(src) {
-		if charProps[src[read]]&propIdent != 0 {
-			read++
-		} else {
+	for ; i < len(src); i++ {
+		if charProps[src[i]]&propIdent == 0 {
 			break
 		}
 	}
 
-	l.cursor = uint32(read)
+	l.cursor = uint32(i)
 
-	if read < len(src) {
-		l.ch = src[read]
-		l.read = uint32(read + 1)
+	if i < len(src) {
+		l.ch = src[i]
+		l.read = uint32(i + 1)
 	} else {
 		l.ch = 0
-		l.read = uint32(read)
+		l.read = uint32(i)
 	}
 
 	// The compiler explicitly optimizes switch string(bytes) to do zero heap allocations.
@@ -287,8 +283,8 @@ func (l *Lexer) readIdent(start uint32) token.Token {
 
 	startInt := int(start)
 
-	if startInt <= read && read <= len(src) {
-		switch string(src[startInt:read]) {
+	if startInt <= i && i <= len(src) {
+		switch string(src[startInt:i]) {
 		case "and":
 			kind = token.And
 		case "break":
@@ -375,36 +371,30 @@ func (l *Lexer) readNumber(start uint32) token.Token {
 
 func (l *Lexer) readString(start uint32, quote byte) token.Token {
 	src := l.source
-	read := int(l.cursor)
+	i := int(l.cursor)
 
-	for read < len(src) {
-		c := src[read]
+	for ; i < len(src); i++ {
+		c := src[i]
 
 		if c == '\\' {
-			read++
-
-			if read < len(src) {
-				read++
-			}
+			i++ // skip escaped char
 		} else if c == quote {
-			read++
+			i++
 
 			break
 		} else if c == '\n' {
 			break
-		} else {
-			read++
 		}
 	}
 
-	l.cursor = uint32(read)
+	l.cursor = uint32(i)
 
-	if read < len(src) {
-		l.ch = src[read]
-		l.read = uint32(read + 1)
+	if i < len(src) {
+		l.ch = src[i]
+		l.read = uint32(i + 1)
 	} else {
 		l.ch = 0
-		l.read = uint32(read)
+		l.read = uint32(i)
 	}
 
 	return token.Token{Kind: token.String, Start: start, End: l.cursor}

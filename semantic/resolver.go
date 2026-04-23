@@ -422,16 +422,11 @@ func (r *Resolver) getTableReceiver(id ast.NodeID) (ast.NodeID, []byte) {
 }
 
 func (r *Resolver) source(id ast.NodeID) []byte {
-	nodes := r.Tree.Nodes
-	idx := int(id)
+	if uint(id) < uint(len(r.Tree.Nodes)) {
+		node := r.Tree.Nodes[id]
 
-	if idx >= 0 && idx < len(nodes) {
-		node := nodes[idx]
-		src := r.Tree.Source
-		start, end := int(node.Start), int(node.End)
-
-		if start >= 0 && start <= end && end <= len(src) {
-			return src[start:end]
+		if node.Start <= node.End && uint(node.End) <= uint(len(r.Tree.Source)) {
+			return r.Tree.Source[node.Start:node.End]
 		}
 	}
 

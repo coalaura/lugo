@@ -281,7 +281,7 @@ func (s *Server) publishDiagnostics(uri string) {
 
 		for _, refID := range doc.Resolver.GlobalRefs {
 			node := doc.Tree.Nodes[refID]
-			if node.Start == node.End {
+			if node.Start == node.End || node.End > uint32(len(doc.Source)) {
 				continue
 			}
 
@@ -348,7 +348,7 @@ func (s *Server) publishDiagnostics(uri string) {
 		for _, defID := range doc.Resolver.GlobalDefs {
 			node := doc.Tree.Nodes[defID]
 
-			if node.Start == node.End {
+			if node.Start == node.End || node.End > uint32(len(doc.Source)) {
 				continue
 			}
 
@@ -422,7 +422,7 @@ func (s *Server) publishDiagnostics(uri string) {
 
 		for _, defID := range doc.Resolver.LocalDefs {
 			node := doc.Tree.Nodes[defID]
-			if node.Start == node.End {
+			if node.Start == node.End || node.End > uint32(len(doc.Source)) {
 				continue
 			}
 
