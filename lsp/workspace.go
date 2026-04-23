@@ -390,7 +390,7 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 
 				stat, statErr := os.Stat(fullPath)
 				if statErr == nil {
-					if existing, ok := s.Documents[uri]; ok && existing.ModTime == stat.ModTime() {
+					if existing, ok := s.Documents[uri]; ok && existing.ModTime.Equal(stat.ModTime()) {
 						if s.activeURIs != nil {
 							s.activeURIs[uri] = true
 						}
@@ -494,6 +494,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 		doc.ExportedGlobalDefs = doc.ExportedGlobalDefs[:0]
 
 		tree = existing.Tree
+
 		tree.Reset(source)
 	} else {
 		tree = ast.NewTree(source)
@@ -524,18 +525,6 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 	p.Reset(source, tree)
 
 	rootID := p.Parse()
-
-	if doc.TypeCache == nil {
-		doc.TypeCache = make(map[ast.NodeID]TypeSet)
-	} else {
-		clear(doc.TypeCache)
-	}
-
-	if doc.Inferring == nil {
-		doc.Inferring = make(map[ast.NodeID]bool)
-	} else {
-		clear(doc.Inferring)
-	}
 
 	doc.IsMeta = false
 	doc.FiveMResolved = false
@@ -1012,6 +1001,46 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 					currRec = nextRec
 					actualKey = GlobalKey{ReceiverHash: currRec, PropHash: pf.PropHash}
 				}
+			}
+		}
+	}
+
+	if cap(doc.TypeCache) >= len(tree.Nodes) {
+		doc.TypeCache = doc.TypeCache[:len(tree.Nodes)]
+
+		clear(doc.TypeCache)
+	} else {
+		doc.TypeCache = make([]TypeSet, len(tree.Nodes))
+	}
+
+	if cap(doc.Inferring) >= len(tree.Nodes) {
+		doc.Inferring = doc.Inferring[:len(tree.Nodes)]
+
+		clear(doc.Inferring)
+	} else {
+		doc.Inferring = make([]bool, len(tree.Nodes))
+	}
+
+	if cap(doc.LuaDocCache) >= len(tree.Nodes) {
+		doc.LuaDocCache = doc.LuaDocCache[:len(tree.Nodes)]
+
+		clear(doc.LuaDocCache)
+	} else {
+		doc.LuaDocCache = make([]*LuaDoc, len(tree.Nodes))
+	}
+
+	if cap(doc.ActualReads) >= len(tree.Nodes) {
+		doc.ActualReads = doc.ActualReads[:len(tree.Nodes)]
+
+		clear(doc.ActualReads)
+	} else {
+		doc.ActualReads = make([]uint16, len(tree.Nodes))
+	}
+
+	for refID, defID := range doc.Resolver.References {
+		if defID != ast.InvalidNode && ast.NodeID(refID) != defID {
+			if s.isActualRead(doc, ast.NodeID(refID), defID) {
+				doc.ActualReads[defID]++
 			}
 		}
 	}

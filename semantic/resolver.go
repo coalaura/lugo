@@ -189,18 +189,24 @@ func (r *Resolver) declare(identID ast.NodeID) {
 			scopeStart = r.scopeStarts[len(r.scopeStarts)-1]
 		}
 
+		nameLen := uint32(len(name))
 		for i := len(r.scopeStack) - 1; i >= 0; i-- {
-			if bytes.Equal(r.source(r.scopeStack[i]), name) {
-				if i >= scopeStart {
-					r.DuplicateLocals = append(r.DuplicateLocals, identID)
-				} else {
-					r.ShadowedOuter = append(r.ShadowedOuter, ShadowPair{
-						Shadowing: identID,
-						Shadowed:  r.scopeStack[i],
-					})
-				}
+			defID := r.scopeStack[i]
+			defNode := r.Tree.Nodes[defID]
 
-				break
+			if defNode.End-defNode.Start == nameLen {
+				if bytes.Equal(r.Tree.Source[defNode.Start:defNode.End], name) {
+					if i >= scopeStart {
+						r.DuplicateLocals = append(r.DuplicateLocals, identID)
+					} else {
+						r.ShadowedOuter = append(r.ShadowedOuter, ShadowPair{
+							Shadowing: identID,
+							Shadowed:  defID,
+						})
+					}
+
+					break
+				}
 			}
 		}
 	}
@@ -256,15 +262,18 @@ func (r *Resolver) resolveReference(identID ast.NodeID, isDef bool) {
 	}
 
 	targetSrc := r.Tree.Source[targetNode.Start:targetNode.End]
+	targetLen := targetNode.End - targetNode.Start
 
 	for i := len(r.scopeStack) - 1; i >= 0; i-- {
 		defID := r.scopeStack[i]
 		defNode := r.Tree.Nodes[defID]
 
-		if bytes.Equal(targetSrc, r.Tree.Source[defNode.Start:defNode.End]) {
-			r.References[identID] = defID
+		if defNode.End-defNode.Start == targetLen {
+			if bytes.Equal(targetSrc, r.Tree.Source[defNode.Start:defNode.End]) {
+				r.References[identID] = defID
 
-			return
+				return
+			}
 		}
 	}
 

@@ -162,14 +162,32 @@ func (typeSet TypeSet) Format() string {
 
 // InferType infers the type of a given AST node lazily and caches it.
 func (doc *Document) InferType(id ast.NodeID) TypeSet {
-	if id == ast.InvalidNode {
+	if id == ast.InvalidNode || int(id) >= len(doc.Tree.Nodes) {
 		return TypeSet{}
 	}
 
-	if t, ok := doc.TypeCache[id]; ok {
-		if t.Basics != TypeUnknown || t.CustomName != "" || t.DeclNode != ast.InvalidNode {
-			return t
+	if int(id) >= len(doc.TypeCache) {
+		if int(id) < cap(doc.TypeCache) {
+			doc.TypeCache = doc.TypeCache[:len(doc.Tree.Nodes)]
+			doc.Inferring = doc.Inferring[:len(doc.Tree.Nodes)]
+		} else {
+			newTypeCache := make([]TypeSet, len(doc.Tree.Nodes))
+
+			copy(newTypeCache, doc.TypeCache)
+
+			doc.TypeCache = newTypeCache
+
+			newInferring := make([]bool, len(doc.Tree.Nodes))
+
+			copy(newInferring, doc.Inferring)
+
+			doc.Inferring = newInferring
 		}
+	}
+
+	t := doc.TypeCache[id]
+	if t.Basics != TypeUnknown || t.CustomName != "" || t.DeclNode != ast.InvalidNode {
+		return t
 	}
 
 	if doc.Inferring[id] {
@@ -319,14 +337,13 @@ func (doc *Document) inferIdent(id ast.NodeID) TypeSet {
 		return TypeSet{}
 	}
 
-	enableAlerts := doc.Server != nil && doc.Server.FeatureFormatAlerts
-	luadoc := parseLuaDoc(targetDoc.getCommentsAbove(targetDef), enableAlerts)
+	luadoc := targetDoc.GetLuaDoc(targetDef)
 
 	var t TypeSet
 
-	if luadoc.Type != nil {
+	if luadoc != nil && luadoc.Type != nil {
 		t = ParseTypeString(luadoc.Type.Type)
-	} else if luadoc.Class != nil {
+	} else if luadoc != nil && luadoc.Class != nil {
 		t = TypeSet{CustomName: luadoc.Class.Name}
 	} else {
 		valID := targetDoc.getAssignedValue(targetDef)
@@ -419,8 +436,11 @@ func (doc *Document) inferFunctionParameter(defID, funcExprID ast.NodeID) TypeSe
 		return TypeSet{}
 	}
 
-	enableAlerts := doc.Server != nil && doc.Server.FeatureFormatAlerts
-	funcDoc := parseLuaDoc(doc.getCommentsAbove(funcDefID), enableAlerts)
+	funcDoc := doc.GetLuaDoc(funcDefID)
+	if funcDoc == nil {
+		return TypeSet{}
+	}
+
 	paramName := string(doc.Source[doc.Tree.Nodes[defID].Start:doc.Tree.Nodes[defID].End])
 
 	for _, p := range funcDoc.Params {
@@ -731,16 +751,16 @@ func (doc *Document) inferCallExpr(node ast.Node) TypeSet {
 
 		ctx := doc.Server.resolveSymbolNode(doc.URI, doc, funcIdentID)
 		if ctx != nil && ctx.TargetDefID != ast.InvalidNode && ctx.TargetDoc != nil {
-			enableAlerts := doc.Server != nil && doc.Server.FeatureFormatAlerts
+			luadoc := ctx.TargetDoc.GetLuaDoc(ctx.TargetDefID)
 
-			luadoc := parseLuaDoc(ctx.TargetDoc.getCommentsAbove(ctx.TargetDefID), enableAlerts)
+			if luadoc != nil {
+				if len(luadoc.Returns) > 0 {
+					return ParseTypeString(luadoc.Returns[0].Type)
+				}
 
-			if len(luadoc.Returns) > 0 {
-				return ParseTypeString(luadoc.Returns[0].Type)
-			}
-
-			if luadoc.Class != nil {
-				return TypeSet{CustomName: luadoc.Class.Name}
+				if luadoc.Class != nil {
+					return TypeSet{CustomName: luadoc.Class.Name}
+				}
 			}
 
 			valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)

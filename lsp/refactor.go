@@ -215,7 +215,7 @@ func (s *Server) handleCodeAction(req Request) {
 		}
 	}
 
-	allFixes := s.getSafeFixesForDocument(doc, nil)
+	allFixes := s.getSafeFixesForDocument(doc)
 
 	var allEdits []TextEdit
 
@@ -1255,7 +1255,7 @@ func (s *Server) handleExecuteCommand(req Request) {
 
 		if targetURI != "" {
 			if doc, ok := s.Documents[targetURI]; ok {
-				fixes := s.getSafeFixesForDocument(doc, nil)
+				fixes := s.getSafeFixesForDocument(doc)
 
 				for _, fix := range fixes {
 					changes[targetURI] = append(changes[targetURI], fix.Edits...)
@@ -1267,7 +1267,7 @@ func (s *Server) handleExecuteCommand(req Request) {
 					continue
 				}
 
-				fixes := s.getSafeFixesForDocument(doc, nil)
+				fixes := s.getSafeFixesForDocument(doc)
 
 				for _, fix := range fixes {
 					changes[uri] = append(changes[uri], fix.Edits...)
@@ -1480,32 +1480,14 @@ func (s *Server) handleLinkedEditingRange(req Request) {
 	})
 }
 
-func (s *Server) getSafeFixesForDocument(doc *Document, actualReads []int) []SafeFix {
+func (s *Server) getSafeFixesForDocument(doc *Document) []SafeFix {
 	var fixes []SafeFix
 
 	if doc.IsMeta {
 		return fixes
 	}
 
-	if actualReads == nil {
-		if cap(s.actualReadsBuf) < len(doc.Tree.Nodes) {
-			s.actualReadsBuf = make([]int, len(doc.Tree.Nodes))
-		} else {
-			s.actualReadsBuf = s.actualReadsBuf[:len(doc.Tree.Nodes)]
-
-			clear(s.actualReadsBuf)
-		}
-
-		actualReads = s.actualReadsBuf
-
-		for refID, defID := range doc.Resolver.References {
-			if defID != ast.InvalidNode && ast.NodeID(refID) != defID {
-				if s.isActualRead(doc, ast.NodeID(refID), defID) {
-					actualReads[defID]++
-				}
-			}
-		}
-	}
+	actualReads := doc.ActualReads
 
 	if cap(s.unusedDefsBuf) < len(doc.Tree.Nodes) {
 		s.unusedDefsBuf = make([]bool, len(doc.Tree.Nodes))

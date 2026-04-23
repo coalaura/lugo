@@ -52,8 +52,7 @@ func (s *Server) handleHover(req Request) {
 		}
 
 		if ctx.TargetDoc != nil && ctx.TargetDefID != ast.InvalidNode {
-			rawComments := ctx.TargetDoc.getCommentsAbove(ctx.TargetDefID)
-			luadoc := parseLuaDoc(rawComments, s.FeatureFormatAlerts)
+			luadoc := *ctx.TargetDoc.GetLuaDoc(ctx.TargetDefID)
 
 			valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
 			isFunc := valID != ast.InvalidNode && ctx.TargetDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr
@@ -91,7 +90,7 @@ func (s *Server) handleHover(req Request) {
 			)
 
 			if isFunc {
-				paramsStr := ctx.TargetDoc.getFunctionParams(valID, luadoc)
+				paramsStr := ctx.TargetDoc.getFunctionParams(valID, &luadoc)
 
 				genericStr := ""
 				if len(luadoc.Generics) > 0 {
@@ -473,10 +472,9 @@ func (s *Server) handleCompletion(req Request) {
 		}
 
 		if node.Count == 0 {
-			rawComments := dDoc.getCommentsAbove(valID)
-			luadoc := parseLuaDoc(rawComments, false)
+			luadoc := dDoc.GetLuaDoc(valID)
 
-			if len(luadoc.Params) > 0 {
+			if luadoc != nil && len(luadoc.Params) > 0 {
 				var params []string
 
 				snippetIdx := 1
@@ -1337,7 +1335,7 @@ func (s *Server) handleSignatureHelp(req Request) {
 			continue
 		}
 
-		luadoc := parseLuaDoc(tDoc.getCommentsAbove(def.NodeID), s.FeatureFormatAlerts)
+		luadoc := *tDoc.GetLuaDoc(def.NodeID)
 		funcNode := tDoc.Tree.Nodes[valID]
 
 		var (

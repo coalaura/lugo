@@ -527,9 +527,12 @@ func isTerminal(doc *Document, id ast.NodeID) bool {
 
 		return false
 	case ast.KindIf:
-		var isStaticTrue, isStaticFalse bool
+		var (
+			isStaticTrue  bool
+			isStaticFalse bool
+		)
 
-		if doc.Server != nil && doc.Server.isStaticallyConstant(doc, node.Left) {
+		if doc.Server != nil {
 			if res, ok := doc.evalNode(node.Left, 0); ok {
 				if res.kind != ast.KindFalse && res.kind != ast.KindNil {
 					isStaticTrue = true
@@ -566,8 +569,12 @@ func isTerminal(doc *Document, id ast.NodeID) bool {
 
 			switch childNode.Kind {
 			case ast.KindElseIf:
-				var childStaticTrue, childStaticFalse bool
-				if doc.Server != nil && doc.Server.isStaticallyConstant(doc, childNode.Left) {
+				var (
+					childStaticTrue  bool
+					childStaticFalse bool
+				)
+
+				if doc.Server != nil {
 					if res, ok := doc.evalNode(childNode.Left, 0); ok {
 						if res.kind != ast.KindFalse && res.kind != ast.KindNil {
 							childStaticTrue = true

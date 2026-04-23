@@ -402,23 +402,7 @@ func (s *Server) publishDiagnostics(uri string) {
 
 	// 4. Shadowing & Unused Variables
 	if s.DiagShadowing || s.DiagShadowingLoopVar || s.DiagUnusedLocal || s.DiagUnusedFunction || s.DiagUnusedParameter || s.DiagUnusedLoopVar {
-		if cap(s.actualReadsBuf) < len(doc.Tree.Nodes) {
-			s.actualReadsBuf = make([]int, len(doc.Tree.Nodes))
-		} else {
-			s.actualReadsBuf = s.actualReadsBuf[:len(doc.Tree.Nodes)]
-
-			clear(s.actualReadsBuf)
-		}
-
-		actualReads := s.actualReadsBuf
-
-		for refID, defID := range doc.Resolver.References {
-			if defID != ast.InvalidNode && ast.NodeID(refID) != defID {
-				if s.isActualRead(doc, ast.NodeID(refID), defID) {
-					actualReads[defID]++
-				}
-			}
-		}
+		actualReads := doc.ActualReads
 
 		for _, defID := range doc.Resolver.LocalDefs {
 			node := doc.Tree.Nodes[defID]
@@ -527,7 +511,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			}
 
 			if shouldReportShadow {
-				s.checkGlobalShadowing(doc, uri, nameBytes, isLoopVar, r, canSee)
+				s.checkGlobalShadowing(uri, nameBytes, isLoopVar, r, canSee)
 			}
 		}
 	}
@@ -1010,40 +994,37 @@ func (s *Server) publishDiagnostics(uri string) {
 		case ast.KindIf:
 			var foundTruthy bool
 
-			if s.isStaticallyConstant(doc, node.Left) {
-				res, ok := doc.evalNode(node.Left, 0)
-				if ok {
-					isTruthy := res.kind != ast.KindFalse && res.kind != ast.KindNil
-					if isTruthy {
-						foundTruthy = true
+			if res, ok := doc.evalNode(node.Left, 0); ok {
+				isTruthy := res.kind != ast.KindFalse && res.kind != ast.KindNil
+				if isTruthy {
+					foundTruthy = true
 
-						if s.DiagConstantCondition {
-							s.diagBuf = append(s.diagBuf, Diagnostic{
-								Range:    getNodeRange(doc.Tree, node.Left),
-								Severity: SeverityWarning,
-								Code:     "constant-condition",
-								Message:  "This condition is always true.",
-							})
-						}
-					} else {
-						if s.DiagConstantCondition {
-							s.diagBuf = append(s.diagBuf, Diagnostic{
-								Range:    getNodeRange(doc.Tree, node.Left),
-								Severity: SeverityWarning,
-								Code:     "constant-condition",
-								Message:  "This condition is always false.",
-							})
-						}
+					if s.DiagConstantCondition {
+						s.diagBuf = append(s.diagBuf, Diagnostic{
+							Range:    getNodeRange(doc.Tree, node.Left),
+							Severity: SeverityWarning,
+							Code:     "constant-condition",
+							Message:  "This condition is always true.",
+						})
+					}
+				} else {
+					if s.DiagConstantCondition {
+						s.diagBuf = append(s.diagBuf, Diagnostic{
+							Range:    getNodeRange(doc.Tree, node.Left),
+							Severity: SeverityWarning,
+							Code:     "constant-condition",
+							Message:  "This condition is always false.",
+						})
+					}
 
-						if s.DiagUnreachableElse {
-							s.diagBuf = append(s.diagBuf, Diagnostic{
-								Range:    getNodeRange(doc.Tree, node.Right),
-								Severity: SeverityWarning,
-								Code:     "unreachable-branch",
-								Tags:     []DiagnosticTag{Unnecessary},
-								Message:  "This branch is unreachable because the condition is always falsy.",
-							})
-						}
+					if s.DiagUnreachableElse {
+						s.diagBuf = append(s.diagBuf, Diagnostic{
+							Range:    getNodeRange(doc.Tree, node.Right),
+							Severity: SeverityWarning,
+							Code:     "unreachable-branch",
+							Tags:     []DiagnosticTag{Unnecessary},
+							Message:  "This branch is unreachable because the condition is always falsy.",
+						})
 					}
 				}
 			}
@@ -1076,40 +1057,37 @@ func (s *Server) publishDiagnostics(uri string) {
 					}
 
 					if childNode.Kind == ast.KindElseIf {
-						if s.isStaticallyConstant(doc, childNode.Left) {
-							res, ok := doc.evalNode(childNode.Left, 0)
-							if ok {
-								isTruthy := res.kind != ast.KindFalse && res.kind != ast.KindNil
-								if isTruthy {
-									foundTruthy = true
+						if res, ok := doc.evalNode(childNode.Left, 0); ok {
+							isTruthy := res.kind != ast.KindFalse && res.kind != ast.KindNil
+							if isTruthy {
+								foundTruthy = true
 
-									if s.DiagConstantCondition {
-										s.diagBuf = append(s.diagBuf, Diagnostic{
-											Range:    getNodeRange(doc.Tree, childNode.Left),
-											Severity: SeverityWarning,
-											Code:     "constant-condition",
-											Message:  "This condition is always true.",
-										})
-									}
-								} else {
-									if s.DiagConstantCondition {
-										s.diagBuf = append(s.diagBuf, Diagnostic{
-											Range:    getNodeRange(doc.Tree, childNode.Left),
-											Severity: SeverityWarning,
-											Code:     "constant-condition",
-											Message:  "This condition is always false.",
-										})
-									}
+								if s.DiagConstantCondition {
+									s.diagBuf = append(s.diagBuf, Diagnostic{
+										Range:    getNodeRange(doc.Tree, childNode.Left),
+										Severity: SeverityWarning,
+										Code:     "constant-condition",
+										Message:  "This condition is always true.",
+									})
+								}
+							} else {
+								if s.DiagConstantCondition {
+									s.diagBuf = append(s.diagBuf, Diagnostic{
+										Range:    getNodeRange(doc.Tree, childNode.Left),
+										Severity: SeverityWarning,
+										Code:     "constant-condition",
+										Message:  "This condition is always false.",
+									})
+								}
 
-									if s.DiagUnreachableElse {
-										s.diagBuf = append(s.diagBuf, Diagnostic{
-											Range:    getNodeRange(doc.Tree, childNode.Right),
-											Severity: SeverityWarning,
-											Code:     "unreachable-branch",
-											Tags:     []DiagnosticTag{Unnecessary},
-											Message:  "This branch is unreachable because the condition is always falsy.",
-										})
-									}
+								if s.DiagUnreachableElse {
+									s.diagBuf = append(s.diagBuf, Diagnostic{
+										Range:    getNodeRange(doc.Tree, childNode.Right),
+										Severity: SeverityWarning,
+										Code:     "unreachable-branch",
+										Tags:     []DiagnosticTag{Unnecessary},
+										Message:  "This branch is unreachable because the condition is always falsy.",
+									})
 								}
 							}
 						}
@@ -1204,8 +1182,8 @@ func (s *Server) publishDiagnostics(uri string) {
 
 									expectedArgs = max(int(funcNode.Count)-paramOffset, 0)
 								} else {
-									luadoc := parseLuaDoc(tDoc.getCommentsAbove(def.NodeID), false)
-									if len(luadoc.Params) > 0 {
+									luadoc := tDoc.GetLuaDoc(def.NodeID)
+									if luadoc != nil && len(luadoc.Params) > 0 {
 										for _, p := range luadoc.Params {
 											if p.Name == "..." {
 												hasVararg = true
@@ -1848,7 +1826,7 @@ func (s *Server) isGuardedByPreviousStatements(doc *Document, blockNode ast.Node
 	return false
 }
 
-func (s *Server) checkGlobalShadowing(doc *Document, uri string, nameBytes []byte, isLoopVar bool, r Range, canSee func(*Document) bool) {
+func (s *Server) checkGlobalShadowing(uri string, nameBytes []byte, isLoopVar bool, r Range, canSee func(*Document) bool) {
 	varType := "Local"
 
 	if isLoopVar {
@@ -1908,27 +1886,6 @@ func (s *Server) checkGlobalShadowing(doc *Document, uri string, nameBytes []byt
 				RelatedInformation: related,
 			})
 		}
-	}
-}
-
-func (s *Server) isStaticallyConstant(doc *Document, id ast.NodeID) bool {
-	if id == ast.InvalidNode || int(id) >= len(doc.Tree.Nodes) {
-		return false
-	}
-
-	node := doc.Tree.Nodes[id]
-
-	switch node.Kind {
-	case ast.KindNumber, ast.KindString, ast.KindTrue, ast.KindFalse, ast.KindNil:
-		return true
-	case ast.KindUnaryExpr:
-		return s.isStaticallyConstant(doc, node.Right)
-	case ast.KindBinaryExpr:
-		return s.isStaticallyConstant(doc, node.Left) && s.isStaticallyConstant(doc, node.Right)
-	case ast.KindParenExpr:
-		return s.isStaticallyConstant(doc, node.Left)
-	default:
-		return false
 	}
 }
 

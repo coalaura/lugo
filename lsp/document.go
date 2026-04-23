@@ -21,8 +21,10 @@ type Document struct {
 	Server             *Server
 	Tree               *ast.Tree
 	Resolver           *semantic.Resolver
-	TypeCache          map[ast.NodeID]TypeSet
-	Inferring          map[ast.NodeID]bool
+	TypeCache          []TypeSet
+	Inferring          []bool
+	LuaDocCache        []*LuaDoc
+	ActualReads        []uint16
 	ExportedGlobalDefs []ExportedSymbol
 	Source             []byte
 	Errors             []parser.ParseError
@@ -206,13 +208,13 @@ func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {
 	}
 }
 
-func (doc *Document) getFunctionParams(funcExprID ast.NodeID, luadoc LuaDoc) string {
+func (doc *Document) getFunctionParams(funcExprID ast.NodeID, luadoc *LuaDoc) string {
 	node := doc.Tree.Nodes[funcExprID]
 	if node.Kind != ast.KindFunctionExpr {
 		return ""
 	}
 
-	if node.Count == 0 && len(luadoc.Params) > 0 {
+	if luadoc != nil && node.Count == 0 && len(luadoc.Params) > 0 {
 		var params []string
 
 		for _, p := range luadoc.Params {
@@ -228,8 +230,10 @@ func (doc *Document) getFunctionParams(funcExprID ast.NodeID, luadoc LuaDoc) str
 
 	paramTypes := make(map[string]string)
 
-	for _, p := range luadoc.Params {
-		paramTypes[p.Name] = p.Type
+	if luadoc != nil {
+		for _, p := range luadoc.Params {
+			paramTypes[p.Name] = p.Type
+		}
 	}
 
 	var params []string
@@ -329,7 +333,7 @@ func (doc *Document) getCommentsAbove(id ast.NodeID) []byte {
 		return nil
 	}
 
-	doc.Server.sharedCommentBuf = doc.Server.sharedCommentBuf[:0] // Pooling is great
+	doc.Server.sharedCommentBuf = doc.Server.sharedCommentBuf[:0]
 
 	b := doc.Server.sharedCommentBuf
 
@@ -347,6 +351,43 @@ func (doc *Document) getCommentsAbove(id ast.NodeID) []byte {
 	doc.Server.sharedCommentBuf = b
 
 	return bytes.TrimSpace(b)
+}
+
+// GetLuaDoc parses and caches the LuaDoc for a given node.
+func (doc *Document) GetLuaDoc(id ast.NodeID) *LuaDoc {
+	if id == ast.InvalidNode || int(id) >= len(doc.Tree.Nodes) {
+		return nil
+	}
+
+	if int(id) >= len(doc.LuaDocCache) {
+		if int(id) < cap(doc.LuaDocCache) {
+			doc.LuaDocCache = doc.LuaDocCache[:len(doc.Tree.Nodes)]
+		} else {
+			newCache := make([]*LuaDoc, len(doc.Tree.Nodes))
+
+			copy(newCache, doc.LuaDocCache)
+
+			doc.LuaDocCache = newCache
+		}
+	}
+
+	if ld := doc.LuaDocCache[id]; ld != nil {
+		return ld
+	}
+
+	enableAlerts := doc.Server != nil && doc.Server.FeatureFormatAlerts
+
+	comments := doc.getCommentsAbove(id)
+
+	var ld LuaDoc
+
+	if len(comments) > 0 {
+		ld = parseLuaDoc(comments, enableAlerts)
+	}
+
+	doc.LuaDocCache[id] = &ld
+
+	return &ld
 }
 
 // LocalsAt walks up the AST from the given offset and yields every local variable in scope.

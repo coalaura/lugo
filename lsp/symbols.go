@@ -1014,16 +1014,20 @@ func (s *Server) getBestDefsForContext(ctx *SymbolContext, doc *Document, identN
 						hasVararg = true
 					}
 				} else {
-					luadoc := parseLuaDoc(tDoc.getCommentsAbove(def.NodeID), false)
+					luadoc := tDoc.GetLuaDoc(def.NodeID)
 
-					expectedArgs = len(luadoc.Params) - paramOffset
+					if luadoc != nil {
+						expectedArgs = len(luadoc.Params) - paramOffset
 
-					for _, p := range luadoc.Params {
-						if p.Name == "..." {
-							hasVararg = true
+						for _, p := range luadoc.Params {
+							if p.Name == "..." {
+								hasVararg = true
 
-							break
+								break
+							}
 						}
+					} else {
+						expectedArgs = -paramOffset
 					}
 				}
 
