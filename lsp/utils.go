@@ -134,7 +134,13 @@ func hasPrefixFold(text []byte, prefix string) bool {
 			charText += 32 // fast to-lower
 		}
 
-		if charText != prefix[i] {
+		charPrefix := prefix[i]
+
+		if charPrefix >= 'A' && charPrefix <= 'Z' {
+			charPrefix += 32 // fast to-lower
+		}
+
+		if charText != charPrefix {
 			return false
 		}
 	}

@@ -67,6 +67,7 @@ type Server struct {
 	lowerWorkspaceFolders []string
 
 	MaxParseErrors int
+	MaxFileSize    int64
 
 	// Diagnostics & Features
 	IsIndexing               bool
@@ -147,6 +148,7 @@ func NewServer(version string) *Server {
 
 		// Configuration Defaults
 		MaxParseErrors: 50,
+		MaxFileSize:    2 * 1024 * 1024,
 	}
 }
 
@@ -207,6 +209,14 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 	}
 
 	setCfg(&s.MaxParseErrors, opts.ParserMaxErrors, &needsRepublish)
+
+	maxSize := int64(opts.MaxFileSizeMB) * 1024 * 1024
+
+	if maxSize <= 0 {
+		maxSize = 2 * 1024 * 1024
+	}
+
+	setCfg(&s.MaxFileSize, maxSize, &needsReindex)
 
 	setCfg(&s.DiagUndefinedGlobals, opts.DiagUndefinedGlobals, &needsRepublish)
 	setCfg(&s.DiagImplicitGlobals, opts.DiagImplicitGlobals, &needsRepublish)

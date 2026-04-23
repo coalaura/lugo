@@ -434,7 +434,36 @@ func (s *Server) handleCodeAction(req Request) {
 					}
 
 					if canSplit {
-						targetMultiAssign = curr
+						if node.Right != ast.InvalidNode {
+							rhsList := doc.Tree.Nodes[node.Right]
+
+							for i := uint16(0); i < lhsList.Count && canSplit; i++ {
+								lhsID := doc.Tree.ExtraList[lhsList.Extra+uint32(i)]
+								defID := doc.Resolver.References[lhsID]
+
+								if defID != ast.InvalidNode {
+									for j := uint16(0); j < rhsList.Count && canSplit; j++ {
+										rhsExpr := doc.Tree.ExtraList[rhsList.Extra+uint32(j)]
+										rhsNode := doc.Tree.Nodes[rhsExpr]
+
+										for refNodeID, refDefID := range doc.Resolver.References {
+											if refDefID == defID && ast.NodeID(refNodeID) != ast.InvalidNode {
+												refNode := doc.Tree.Nodes[refNodeID]
+												if refNode.Start >= rhsNode.Start && refNode.End <= rhsNode.End {
+													canSplit = false
+
+													break
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+
+						if canSplit {
+							targetMultiAssign = curr
+						}
 					}
 				}
 			}
@@ -470,7 +499,9 @@ func (s *Server) handleCodeAction(req Request) {
 
 		// 6. Remove Redundant Parentheses
 		if node.Kind == ast.KindParenExpr && targetParen == ast.InvalidNode {
-			targetParen = curr
+			if s.isParenRedundant(doc, curr) {
+				targetParen = curr
+			}
 		}
 
 		// 7. Convert for i=1, #t to ipairs
@@ -1118,6 +1149,28 @@ func (s *Server) resolveSwapIfElse(doc *Document, nodeID ast.NodeID, uri string)
 			}},
 		},
 	}
+}
+
+func (s *Server) isParenRedundant(doc *Document, id ast.NodeID) bool {
+	node := doc.Tree.Nodes[id]
+
+	innerID := node.Left
+	if innerID == ast.InvalidNode {
+		return true
+	}
+
+	innerNode := doc.Tree.Nodes[innerID]
+	pNode := doc.Tree.Nodes[node.Parent]
+
+	if innerNode.Kind == ast.KindIdent || innerNode.Kind == ast.KindNumber || innerNode.Kind == ast.KindString || innerNode.Kind == ast.KindTrue || innerNode.Kind == ast.KindFalse || innerNode.Kind == ast.KindNil || innerNode.Kind == ast.KindTableExpr || innerNode.Kind == ast.KindFunctionExpr {
+		return true
+	}
+
+	if pNode.Kind == ast.KindParenExpr || pNode.Kind == ast.KindIf || pNode.Kind == ast.KindElseIf || pNode.Kind == ast.KindWhile || pNode.Kind == ast.KindRepeat {
+		return true
+	}
+
+	return false
 }
 
 func (s *Server) resolveRemoveParen(doc *Document, nodeID ast.NodeID, uri string) *WorkspaceEdit {

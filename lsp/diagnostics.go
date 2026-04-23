@@ -793,9 +793,24 @@ func (s *Server) publishDiagnostics(uri string) {
 
 			if s.DiagEmptyBlock && node.Kind == ast.KindBlock && node.Count == 0 {
 				if node.Parent != ast.InvalidNode && doc.Tree.Nodes[node.Parent].Kind != ast.KindFile {
+					parentNode := doc.Tree.Nodes[node.Parent]
+
+					var hasComment bool
+
+					for _, c := range doc.Tree.Comments {
+						if c.Start >= parentNode.Start && c.End <= parentNode.End {
+							hasComment = true
+
+							break
+						}
+					}
+
+					if hasComment {
+						continue
+					}
+
 					var data any
 
-					parentNode := doc.Tree.Nodes[node.Parent]
 					if parentNode.Kind == ast.KindDo {
 						data = float64(node.Parent)
 					}

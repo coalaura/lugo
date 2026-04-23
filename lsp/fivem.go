@@ -82,7 +82,11 @@ func unquoteLuaString(s string) string {
 	s = strings.TrimSpace(s)
 
 	if len(s) >= 2 && (s[0] == '"' || s[0] == '\'') {
-		return s[1 : len(s)-1]
+		if s[len(s)-1] == s[0] {
+			return s[1 : len(s)-1]
+		}
+
+		return s[1:]
 	}
 
 	if strings.HasPrefix(s, "[") {

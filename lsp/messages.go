@@ -104,6 +104,7 @@ type InitializationOptions struct {
 	IgnoreGlobs   []string          `json:"ignoreGlobs,omitempty"`
 	KnownGlobals  []string          `json:"knownGlobals,omitempty"`
 	BannedSymbols map[string]string `json:"bannedSymbols,omitempty"`
+	MaxFileSizeMB int               `json:"maxFileSizeMB"`
 
 	ParserMaxErrors int `json:"parserMaxErrors"`
 

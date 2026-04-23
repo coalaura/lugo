@@ -144,6 +144,9 @@ func (s *Server) handleDidChangeWatchedFiles(req Request) {
 				path := s.uriToPath(uri)
 
 				stat, statErr := os.Stat(path)
+				if statErr == nil && stat.Size() > s.MaxFileSize {
+					continue
+				}
 
 				if b, err := os.ReadFile(path); err == nil {
 					needsRepublish := s.updateDocument(uri, b)
@@ -390,6 +393,12 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 
 				stat, statErr := os.Stat(fullPath)
 				if statErr == nil {
+					if stat.Size() > s.MaxFileSize {
+						s.Log.Warnf("Skipping huge file %s (%d bytes)\n", fullPath, stat.Size())
+
+						continue
+					}
+
 					if existing, ok := s.Documents[uri]; ok && existing.ModTime.Equal(stat.ModTime()) {
 						if s.activeURIs != nil {
 							s.activeURIs[uri] = true

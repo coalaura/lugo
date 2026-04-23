@@ -91,6 +91,14 @@
                         "scope": "resource",
                         "markdownDescription": "List of global variables to ignore when reporting undefined globals. Supports globs like `love.*`.",
                         "order": 3
+                    },
+                    "lugo.workspace.maxFileSizeMB": {
+                        "type": "integer",
+                        "default": 2,
+                        "minimum": 1,
+                        "scope": "resource",
+                        "markdownDescription": "Maximum file size in megabytes to index. Files larger than this are ignored to prevent out-of-memory crashes.",
+                        "order": 4
                     }
                 }
             },
