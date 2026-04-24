@@ -27,6 +27,7 @@ lspconfig.lugo.setup({
 			"vim"
 		},
 		bannedSymbols = {},
+		maxFileSizeMB = 2,
 
 		-- Parser
 		parserMaxErrors = 50,

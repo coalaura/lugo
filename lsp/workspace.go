@@ -131,6 +131,11 @@ func (s *Server) handleDidChangeWatchedFiles(req Request) {
 		return
 	}
 
+	var (
+		needsWorkspaceRepublish bool
+		singleRepublish         []string
+	)
+
 	for _, change := range params.Changes {
 		uri := s.normalizeURI(change.URI)
 
@@ -157,15 +162,23 @@ func (s *Server) handleDidChangeWatchedFiles(req Request) {
 
 					if s.isWorkspaceURI(uri) {
 						if needsRepublish {
-							s.publishWorkspaceDiagnostics()
+							needsWorkspaceRepublish = true
 						} else {
-							s.publishDiagnostics(uri)
+							singleRepublish = append(singleRepublish, uri)
 						}
 					}
 				}
 			}
 		case 3: // Deleted
 			s.clearDocument(uri)
+		}
+	}
+
+	if needsWorkspaceRepublish {
+		s.publishWorkspaceDiagnostics()
+	} else {
+		for _, uri := range singleRepublish {
+			s.publishDiagnostics(uri)
 		}
 	}
 }
