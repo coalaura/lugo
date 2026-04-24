@@ -117,7 +117,7 @@ You can configure Lugo via your VS Code `settings.json` (also available via the 
 * `lugo.workspace.libraryPaths`: An array of absolute paths to external Lua libraries to index.
 * `lugo.workspace.ignoreGlobs`: Additional glob patterns to ignore during indexing. Inherits VS Code's `files.exclude` automatically.
 * `lugo.environment.knownGlobals`: Global variables to ignore when reporting undefined globals. Supports wildcards (e.g., `N_0x*`).
-* `lugo.workspace.maxFileSizeMB`: Maximum file size in megabytes to index (default: `2`). Files larger than this are ignored to prevent out-of-memory crashes.
+* `lugo.workspace.maxFileSizeMB`: Maximum file size in megabytes to index (default: `4`). Files larger than this are ignored to prevent out-of-memory crashes.
 
 **Parser & Diagnostics**
 * `lugo.diagnostics.bannedSymbols`: Map of banned global functions/symbols to a custom warning message (e.g., `{"print": "Use customLogger instead"}`).

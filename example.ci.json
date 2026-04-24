@@ -15,7 +15,7 @@
 			"love"
 		],
 		"bannedSymbols": {},
-		"maxFileSizeMB": 2,
+		"maxFileSizeMB": 4,
 		"parserMaxErrors": 50,
 		"diagUndefinedGlobals": true,
 		"diagImplicitGlobals": true,

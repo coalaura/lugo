@@ -21,7 +21,6 @@
         "Linters"
     ],
     "activationEvents": [
-        "onLanguage:lua",
         "workspaceContains:**/*.lua"
     ],
     "main": "./extension.js",
@@ -94,7 +93,7 @@
                     },
                     "lugo.workspace.maxFileSizeMB": {
                         "type": "integer",
-                        "default": 2,
+                        "default": 4,
                         "minimum": 1,
                         "scope": "resource",
                         "markdownDescription": "Maximum file size in megabytes to index. Files larger than this are ignored to prevent out-of-memory crashes.",

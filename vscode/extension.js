@@ -49,7 +49,7 @@ function buildInitializationOptions() {
 		ignoreGlobs: ignoreGlobs,
 		knownGlobals: lugoConfig.get("environment.knownGlobals") || [],
 		bannedSymbols: lugoConfig.get("diagnostics.bannedSymbols") || {},
-		maxFileSizeMB: lugoConfig.get("workspace.maxFileSizeMB") ?? 2,
+		maxFileSizeMB: lugoConfig.get("workspace.maxFileSizeMB") ?? 4,
 
 		parserMaxErrors: lugoConfig.get("parser.maxErrors") ?? 50,
 

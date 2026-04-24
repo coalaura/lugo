@@ -1482,18 +1482,6 @@ func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID)
 				return false
 			}
 
-			if parentNode.Right == curr {
-				if int(parentNode.Left) < len(doc.Tree.Nodes) {
-					lhsList := doc.Tree.Nodes[parentNode.Left]
-					if lhsList.Count == 1 && lhsList.Extra < uint32(len(doc.Tree.ExtraList)) {
-						lhsExprID := doc.Tree.ExtraList[lhsList.Extra]
-						if s.getRootDef(doc, lhsExprID) == defID {
-							return false
-						}
-					}
-				}
-			}
-
 			return true
 		case ast.KindExprList, ast.KindNameList:
 			if parentNode.Kind == ast.KindExprList {

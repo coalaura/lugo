@@ -18,7 +18,11 @@ import (
 	"github.com/coalaura/plain"
 )
 
-const MaxWorkspaceResults = 100
+const (
+	MaxWorkspaceResults    = 100
+	DefaultMaxFileSize     = 4 * 1024 * 1024
+	DefaultMaxParserErrors = 50
+)
 
 type Server struct {
 	Reader *bufio.Reader
@@ -147,8 +151,8 @@ func NewServer(version string) *Server {
 		sharedDepBuf:     make([]byte, 0, 128),
 
 		// Configuration Defaults
-		MaxParseErrors: 50,
-		MaxFileSize:    2 * 1024 * 1024,
+		MaxParseErrors: DefaultMaxParserErrors,
+		MaxFileSize:    DefaultMaxFileSize,
 	}
 }
 
@@ -213,7 +217,7 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 	maxSize := int64(opts.MaxFileSizeMB) * 1024 * 1024
 
 	if maxSize <= 0 {
-		maxSize = 2 * 1024 * 1024
+		maxSize = DefaultMaxFileSize
 	}
 
 	setCfg(&s.MaxFileSize, maxSize, &needsReindex)
