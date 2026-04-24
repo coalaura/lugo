@@ -299,24 +299,22 @@ func (doc *Document) IterateCommentsAbove(id ast.NodeID) iter.Seq[token.Token] {
 		}
 
 		stmtStart := doc.Tree.Nodes[stmtID].Start
-		stmtLine, _ := doc.Tree.Position(stmtStart)
-		targetLine := stmtLine - 1
-
 		idx := doc.findCommentIndex(stmtStart)
+
+		lastValidOffset := stmtStart
 
 		for i := idx; i >= 0; i-- {
 			c := doc.Tree.Comments[i]
 
-			cStartLine, _ := doc.Tree.Position(c.Start)
-			cEndLine, _ := doc.Tree.Position(c.End)
+			gap := doc.Source[c.End:lastValidOffset]
 
-			if cEndLine == targetLine || cEndLine == stmtLine {
+			if bytes.Count(gap, []byte{'\n'}) <= 1 {
 				if !yield(c) {
 					return
 				}
 
-				targetLine = cStartLine - 1
-			} else if cEndLine < targetLine {
+				lastValidOffset = c.Start
+			} else {
 				break
 			}
 		}

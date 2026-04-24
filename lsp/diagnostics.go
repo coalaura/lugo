@@ -724,10 +724,9 @@ func (s *Server) publishDiagnostics(uri string) {
 					firstExprID := doc.Tree.ExtraList[exprList.Extra]
 					firstExprNode := doc.Tree.Nodes[firstExprID]
 
-					retLine, _ := doc.Tree.Position(node.Start)
-					exprLine, _ := doc.Tree.Position(firstExprNode.Start)
+					gap := doc.Source[node.Start:firstExprNode.Start]
 
-					if exprLine > retLine {
+					if bytes.IndexByte(gap, '\n') != -1 {
 						lastExprID := doc.Tree.ExtraList[exprList.Extra+uint32(exprList.Count-1)]
 
 						s.diagBuf = append(s.diagBuf, Diagnostic{
@@ -1455,7 +1454,7 @@ func (s *Server) isDiagnosticDisabled(doc *Document, line uint32, code string) b
 	return false
 }
 
-func (s *Server) isActualRead(doc *Document, refID ast.NodeID, defID ast.NodeID) bool {
+func (s *Server) isActualRead(doc *Document, refID ast.NodeID) bool {
 	curr := refID
 
 	for curr != ast.InvalidNode && int(curr) < len(doc.Tree.Nodes) {

@@ -377,11 +377,16 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 				continue
 			}
 
+			var (
+				fileStat fs.FileInfo
+				statErr  error
+			)
+
 			isSym := e.Type()&fs.ModeSymlink != 0
 			if isSym {
-				stat, err := os.Stat(fullPath)
-				if err == nil {
-					isDir = stat.IsDir()
+				fileStat, statErr = os.Stat(fullPath)
+				if statErr == nil {
+					isDir = fileStat.IsDir()
 				} else {
 					*failed++
 
@@ -392,7 +397,9 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 			if isDir {
 				walk(fullPath, isSym)
 			} else if len(name) > 4 && name[len(name)-4:] == ".lua" {
-				uri := s.normalizeURI(s.pathToURI(fullPath))
+				uri := s.pathToURI(fullPath)
+
+				s.uriCache[uri] = uri
 
 				if s.OpenFiles[uri] {
 					if s.activeURIs != nil {
@@ -404,15 +411,18 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 					continue
 				}
 
-				stat, statErr := os.Stat(fullPath)
+				if !isSym {
+					fileStat, statErr = e.Info()
+				}
+
 				if statErr == nil {
-					if stat.Size() > s.MaxFileSize {
-						s.Log.Warnf("Skipping huge file %s (%d bytes)\n", fullPath, stat.Size())
+					if fileStat.Size() > s.MaxFileSize {
+						s.Log.Warnf("Skipping huge file %s (%d bytes)\n", fullPath, fileStat.Size())
 
 						continue
 					}
 
-					if existing, ok := s.Documents[uri]; ok && existing.ModTime.Equal(stat.ModTime()) {
+					if existing, ok := s.Documents[uri]; ok && existing.ModTime.Equal(fileStat.ModTime()) {
 						if s.activeURIs != nil {
 							s.activeURIs[uri] = true
 						}
@@ -427,7 +437,7 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 				if fsErr == nil {
 					if existing, ok := s.Documents[uri]; ok && bytes.Equal(existing.Source, b) {
 						if statErr == nil {
-							existing.ModTime = stat.ModTime()
+							existing.ModTime = fileStat.ModTime()
 						}
 
 						if s.activeURIs != nil {
@@ -444,7 +454,7 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 					s.updateDocument(uri, b)
 
 					if statErr == nil && s.Documents[uri] != nil {
-						s.Documents[uri].ModTime = stat.ModTime()
+						s.Documents[uri].ModTime = fileStat.ModTime()
 					}
 
 					if s.activeURIs != nil {
@@ -646,31 +656,28 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 		startComment := tree.Comments[i]
 		lastComment := startComment
 
+		var nextIdx int
+
 		for j := i + 1; j < len(tree.Comments); j++ {
 			nextC := tree.Comments[j]
 
-			l1, _ := tree.Position(lastComment.End)
-			l2, _ := tree.Position(nextC.Start)
-
-			if l2 <= l1+1 {
+			gap := tree.Source[lastComment.End:nextC.Start]
+			if bytes.Count(gap, []byte{'\n'}) <= 1 {
 				lastComment = nextC
 			} else {
+				nextIdx = j
 				break
 			}
+		}
+
+		if nextIdx == 0 {
+			nextIdx = len(tree.Comments)
 		}
 
 		fullBlock := tree.Source[startComment.Start:lastComment.End]
 
 		if !bytes.Contains(fullBlock, []byte("@class")) && !bytes.Contains(fullBlock, []byte("@alias")) && !bytes.Contains(fullBlock, []byte("@export")) {
-			for j := i + 1; j < len(tree.Comments); j++ {
-				if tree.Comments[j].Start <= lastComment.End {
-					i = j
-				} else {
-					break
-				}
-			}
-
-			i++
+			i = nextIdx
 
 			continue
 		}
@@ -774,15 +781,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 			}
 		}
 
-		for j := i + 1; j < len(tree.Comments); j++ {
-			if tree.Comments[j].Start <= lastComment.End {
-				i = j
-			} else {
-				break
-			}
-		}
-
-		i++
+		i = nextIdx
 	}
 
 	for _, defID := range res.GlobalDefs {
@@ -1069,7 +1068,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 
 	for refID, defID := range doc.Resolver.References {
 		if defID != ast.InvalidNode && ast.NodeID(refID) != defID {
-			if s.isActualRead(doc, ast.NodeID(refID), defID) {
+			if s.isActualRead(doc, ast.NodeID(refID)) {
 				doc.ActualReads[defID]++
 			}
 		}
