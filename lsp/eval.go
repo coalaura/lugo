@@ -275,6 +275,10 @@ func (doc *Document) evalNode(id ast.NodeID, depth int) (evalResult, bool) {
 	case ast.KindIdent:
 		defID := doc.Resolver.References[id]
 		if defID != ast.InvalidNode {
+			if int(defID) < len(doc.MutatedLocals) && doc.MutatedLocals[defID] {
+				return evalResult{}, false
+			}
+
 			valID := doc.getAssignedValue(defID)
 			if valID != ast.InvalidNode && valID != id {
 				return doc.evalNode(valID, depth+1)

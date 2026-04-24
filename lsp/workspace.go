@@ -1046,11 +1046,25 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 		doc.ActualReads = make([]uint16, len(tree.Nodes))
 	}
 
+	if cap(doc.MutatedLocals) >= len(tree.Nodes) {
+		doc.MutatedLocals = doc.MutatedLocals[:len(tree.Nodes)]
+
+		clear(doc.MutatedLocals)
+	} else {
+		doc.MutatedLocals = make([]bool, len(tree.Nodes))
+	}
+
 	for refID, defID := range doc.Resolver.References {
 		if defID != ast.InvalidNode && ast.NodeID(refID) != defID {
 			if s.isActualRead(doc, ast.NodeID(refID), defID) {
 				doc.ActualReads[defID]++
 			}
+		}
+	}
+
+	for _, reassignment := range doc.Resolver.Reassignments {
+		if reassignment.DefID != ast.InvalidNode && int(reassignment.DefID) < len(doc.MutatedLocals) {
+			doc.MutatedLocals[reassignment.DefID] = true
 		}
 	}
 

@@ -510,24 +510,27 @@ func (r *Resolver) visit(id ast.NodeID) {
 
 				defID := r.References[exprID]
 				rhsList := node.Right
+
+				var valID ast.NodeID = ast.InvalidNode
+
 				if rhsList != ast.InvalidNode {
 					rhsNode := r.Tree.Nodes[rhsList]
 					if i < uint16(rhsNode.Count) {
-						valID := r.Tree.ExtraList[rhsNode.Extra+uint32(i)]
-
-						var nameHash uint64
-
-						if defID == ast.InvalidNode {
-							nameHash = ast.HashBytes(r.source(exprID))
-						}
-
-						r.Reassignments = append(r.Reassignments, Reassignment{
-							DefID:    defID,
-							NameHash: nameHash,
-							ValID:    valID,
-						})
+						valID = r.Tree.ExtraList[rhsNode.Extra+uint32(i)]
 					}
 				}
+
+				var nameHash uint64
+
+				if defID == ast.InvalidNode {
+					nameHash = ast.HashBytes(r.source(exprID))
+				}
+
+				r.Reassignments = append(r.Reassignments, Reassignment{
+					DefID:    defID,
+					NameHash: nameHash,
+					ValID:    valID,
+				})
 			case ast.KindMemberExpr, ast.KindIndexExpr:
 				r.visit(exprNode.Left)
 

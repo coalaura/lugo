@@ -25,6 +25,7 @@ type Document struct {
 	Inferring          []bool
 	LuaDocCache        []*LuaDoc
 	ActualReads        []uint16
+	MutatedLocals      []bool
 	ExportedGlobalDefs []ExportedSymbol
 	Source             []byte
 	Errors             []parser.ParseError
