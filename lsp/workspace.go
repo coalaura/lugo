@@ -666,6 +666,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 				lastComment = nextC
 			} else {
 				nextIdx = j
+
 				break
 			}
 		}

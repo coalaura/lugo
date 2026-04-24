@@ -1878,10 +1878,9 @@ func (s *Server) getSafeFixesForDocument(doc *Document) []SafeFix {
 					firstExprID := doc.Tree.ExtraList[exprList.Extra]
 					firstExprNode := doc.Tree.Nodes[firstExprID]
 
-					retLine, _ := doc.Tree.Position(node.Start)
-					exprLine, _ := doc.Tree.Position(firstExprNode.Start)
+					gap := doc.Source[node.Start:firstExprNode.Start]
 
-					if exprLine > retLine {
+					if bytes.IndexByte(gap, '\n') != -1 {
 						fixes = append(fixes, SafeFix{
 							Coverage: []ast.NodeID{nodeID},
 							Edits: []TextEdit{{
