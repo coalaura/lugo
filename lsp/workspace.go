@@ -17,6 +17,26 @@ import (
 	"github.com/coalaura/lugo/semantic"
 )
 
+type IndexJob struct {
+	Uri            string
+	Path           string
+	IsStd          bool
+	ModTime        time.Time
+	ExistingTree   *ast.Tree
+	ExistingSource []byte
+	Doc            *Document
+}
+
+type IndexResult struct {
+	Job       *IndexJob
+	Uri       string
+	Source    []byte
+	Tree      *ast.Tree
+	Errors    []parser.ParseError
+	Err       error
+	Unchanged bool
+}
+
 type IgnorePattern struct {
 	MatchFallback string
 	HasSuffix     string
@@ -245,7 +265,7 @@ func (s *Server) refreshWorkspace() {
 		failed    int
 	)
 
-	var pendingJobs []*indexJob
+	var pendingJobs []*IndexJob
 
 	s.indexEmbeddedStdlib(&pendingJobs, &unchanged)
 
@@ -261,8 +281,8 @@ func (s *Server) refreshWorkspace() {
 		s.indexWorkspace(wf, &pendingJobs, &unchanged, &failed)
 	}
 
-	jobs := make(chan *indexJob, 2048)
-	results := make(chan *indexResult, 2048)
+	jobs := make(chan *IndexJob, 2048)
+	results := make(chan *IndexResult, 2048)
 
 	var wg sync.WaitGroup
 
@@ -276,25 +296,25 @@ func (s *Server) refreshWorkspace() {
 					err error
 				)
 
-				if job.isStd {
-					b, err = stdlibFS.ReadFile("stdlib/" + job.path)
+				if job.IsStd {
+					b, err = stdlibFS.ReadFile("stdlib/" + job.Path)
 				} else {
-					b, err = os.ReadFile(job.path)
+					b, err = os.ReadFile(job.Path)
 				}
 
 				if err != nil {
-					results <- &indexResult{job: job, uri: job.uri, err: err}
+					results <- &IndexResult{Job: job, Uri: job.Uri, Err: err}
 
 					continue
 				}
 
-				if job.existingSource != nil && bytes.Equal(job.existingSource, b) {
-					results <- &indexResult{job: job, uri: job.uri, unchanged: true, source: b}
+				if job.ExistingSource != nil && bytes.Equal(job.ExistingSource, b) {
+					results <- &IndexResult{Job: job, Uri: job.Uri, Unchanged: true, Source: b}
 
 					continue
 				}
 
-				tree := job.existingTree
+				tree := job.ExistingTree
 				if tree == nil {
 					tree = ast.NewTree(b)
 				} else {
@@ -311,12 +331,12 @@ func (s *Server) refreshWorkspace() {
 
 				copy(errs, p.Errors)
 
-				results <- &indexResult{
-					job:    job,
-					uri:    job.uri,
-					source: b,
-					tree:   tree,
-					errors: errs,
+				results <- &IndexResult{
+					Job:    job,
+					Uri:    job.Uri,
+					Source: b,
+					Tree:   tree,
+					Errors: errs,
 				}
 			}
 		})
@@ -337,35 +357,35 @@ func (s *Server) refreshWorkspace() {
 	}()
 
 	for res := range results {
-		uri := res.uri
+		uri := res.Uri
 
 		if s.activeURIs != nil {
 			s.activeURIs[uri] = true
 		}
 
-		if res.err != nil {
+		if res.Err != nil {
 			failed++
 
 			continue
 		}
 
-		if res.unchanged {
+		if res.Unchanged {
 			unchanged++
 
-			if !res.job.modTime.IsZero() && s.Documents[uri] != nil {
-				s.Documents[uri].ModTime = res.job.modTime
+			if !res.Job.ModTime.IsZero() && s.Documents[uri] != nil {
+				s.Documents[uri].ModTime = res.Job.ModTime
 			}
 
 			continue
 		}
 
-		total += len(res.source)
+		total += len(res.Source)
 		indexed++
 
-		s.finalizeDocumentUpdate(uri, res.source, res.tree, res.errors, res.job.doc)
+		s.finalizeDocumentUpdate(uri, res.Source, res.Tree, res.Errors, res.Job.Doc)
 
-		if !res.job.modTime.IsZero() && s.Documents[uri] != nil {
-			s.Documents[uri].ModTime = res.job.modTime
+		if !res.Job.ModTime.IsZero() && s.Documents[uri] != nil {
+			s.Documents[uri].ModTime = res.Job.ModTime
 		}
 	}
 
@@ -408,7 +428,7 @@ func (s *Server) refreshWorkspace() {
 	s.Log.Printf("Total time taken for %d bytes: %s\n", total, took)
 }
 
-func (s *Server) indexWorkspace(rootPathOrURI string, pendingJobs *[]*indexJob, unchanged, failed *int) {
+func (s *Server) indexWorkspace(rootPathOrURI string, pendingJobs *[]*IndexJob, unchanged, failed *int) {
 	var path string
 
 	if strings.HasPrefix(rootPathOrURI, "file://") {
@@ -536,14 +556,14 @@ func (s *Server) indexWorkspace(rootPathOrURI string, pendingJobs *[]*indexJob, 
 					modTime = fileStat.ModTime()
 				}
 
-				*pendingJobs = append(*pendingJobs, &indexJob{
-					uri:            uri,
-					path:           fullPath,
-					isStd:          false,
-					modTime:        modTime,
-					existingTree:   existingTree,
-					existingSource: existingSource,
-					doc:            doc,
+				*pendingJobs = append(*pendingJobs, &IndexJob{
+					Uri:            uri,
+					Path:           fullPath,
+					IsStd:          false,
+					ModTime:        modTime,
+					ExistingTree:   existingTree,
+					ExistingSource: existingSource,
+					Doc:            doc,
 				})
 			}
 		}
@@ -552,7 +572,7 @@ func (s *Server) indexWorkspace(rootPathOrURI string, pendingJobs *[]*indexJob, 
 	walk(path, true)
 }
 
-func (s *Server) indexEmbeddedStdlib(pendingJobs *[]*indexJob, unchanged *int) {
+func (s *Server) indexEmbeddedStdlib(pendingJobs *[]*IndexJob, unchanged *int) {
 	entries, err := stdlibFS.ReadDir("stdlib")
 	if err != nil {
 		return
@@ -572,10 +592,10 @@ func (s *Server) indexEmbeddedStdlib(pendingJobs *[]*indexJob, unchanged *int) {
 				continue
 			}
 
-			*pendingJobs = append(*pendingJobs, &indexJob{
-				uri:   uri,
-				path:  e.Name(),
-				isStd: true,
+			*pendingJobs = append(*pendingJobs, &IndexJob{
+				Uri:   uri,
+				Path:  e.Name(),
+				IsStd: true,
 			})
 		}
 	}

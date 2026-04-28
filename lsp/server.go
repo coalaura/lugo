@@ -12,7 +12,6 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/coalaura/lugo/ast"
 	"github.com/coalaura/lugo/parser"
@@ -24,26 +23,6 @@ const (
 	DefaultMaxFileSize     = 4 * 1024 * 1024
 	DefaultMaxParserErrors = 50
 )
-
-type indexJob struct {
-	uri            string
-	path           string
-	isStd          bool
-	modTime        time.Time
-	existingTree   *ast.Tree
-	existingSource []byte
-	doc            *Document
-}
-
-type indexResult struct {
-	job       *indexJob
-	uri       string
-	source    []byte
-	tree      *ast.Tree
-	errors    []parser.ParseError
-	err       error
-	unchanged bool
-}
 
 type Server struct {
 	Reader *bufio.Reader
