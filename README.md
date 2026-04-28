@@ -20,9 +20,9 @@ Most Lua language servers struggle when dropped into massive codebases (like gam
   Indexing workspace folder: file:///workspace/server/resources
   Indexing workspace folder: file:///workspace/server/framework-assets
   Indexing workspace folder: file:///workspace/server/legacy-assets
-  Re-indexed workspace in 1.0250712s (indexed=3040, unchanged=0, failed=0)
-  Published diagnostics for 3016 files in 772.2739ms
-  Total time taken for 29659797 bytes: 1.7973451s
+  Re-indexed workspace in 746.5286ms (indexed=3042, unchanged=0, failed=0)
+  Published diagnostics for 3018 files in 720.1679ms
+  Total time taken for 29668087 bytes: 1.4666965s
   ```
 * **Incremental Warm Starts:** Lugo hashes your workspace files. If you trigger a re-index, it skips parsing unchanged files and reuses map memory pools (`clear()`), dropping warm re-indexes to a fraction of a second.
 * **Zero-Allocation Architecture:** The parser, lexer and symbol resolver are designed to never allocate heap strings during normal typing. Tight loops execute inside CPU registers, leveraging SIMD-accelerated byte scanning to maximize cache locality.

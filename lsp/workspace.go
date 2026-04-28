@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coalaura/lugo/ast"
@@ -222,18 +223,6 @@ func (s *Server) handleReadStd(req Request) {
 }
 
 func (s *Server) refreshWorkspace() {
-	/*
-		cpuFile, err := os.Create("C:\\Users\\Laura\\lugo\\lugo_cpu.prof")
-		if err == nil {
-			pprof.StartCPUProfile(cpuFile)
-		}
-
-		traceFile, err := os.Create("C:\\Users\\Laura\\lugo\\lugo_trace.out")
-		if err == nil {
-			trace.Start(traceFile)
-		}
-	*/
-
 	s.Log.Println("Starting workspace re-index...")
 
 	s.IsIndexing = true
@@ -256,18 +245,128 @@ func (s *Server) refreshWorkspace() {
 		failed    int
 	)
 
-	s.indexEmbeddedStdlib(&total, &indexed, &unchanged)
+	var pendingJobs []*indexJob
+
+	s.indexEmbeddedStdlib(&pendingJobs, &unchanged)
 
 	for _, libPath := range s.LibraryPaths {
 		s.Log.Printf("Indexing external library: %s\n", libPath)
 
-		s.indexWorkspace(libPath, &total, &indexed, &unchanged, &failed)
+		s.indexWorkspace(libPath, &pendingJobs, &unchanged, &failed)
 	}
 
 	for _, wf := range s.WorkspaceFolders {
 		s.Log.Printf("Indexing workspace folder: %s\n", wf)
 
-		s.indexWorkspace(wf, &total, &indexed, &unchanged, &failed)
+		s.indexWorkspace(wf, &pendingJobs, &unchanged, &failed)
+	}
+
+	jobs := make(chan *indexJob, 2048)
+	results := make(chan *indexResult, 2048)
+
+	var wg sync.WaitGroup
+
+	for range runtime.GOMAXPROCS(0) {
+		wg.Go(func() {
+			p := parser.New(nil, ast.NewTree(nil), s.MaxParseErrors)
+
+			for job := range jobs {
+				var (
+					b   []byte
+					err error
+				)
+
+				if job.isStd {
+					b, err = stdlibFS.ReadFile("stdlib/" + job.path)
+				} else {
+					b, err = os.ReadFile(job.path)
+				}
+
+				if err != nil {
+					results <- &indexResult{job: job, uri: job.uri, err: err}
+
+					continue
+				}
+
+				if job.existingSource != nil && bytes.Equal(job.existingSource, b) {
+					results <- &indexResult{job: job, uri: job.uri, unchanged: true, source: b}
+
+					continue
+				}
+
+				tree := job.existingTree
+				if tree == nil {
+					tree = ast.NewTree(b)
+				} else {
+					tree.Reset(b)
+				}
+
+				p.MaxErrors = s.MaxParseErrors
+
+				p.Reset(b, tree)
+
+				p.Parse()
+
+				errs := make([]parser.ParseError, len(p.Errors))
+
+				copy(errs, p.Errors)
+
+				results <- &indexResult{
+					job:    job,
+					uri:    job.uri,
+					source: b,
+					tree:   tree,
+					errors: errs,
+				}
+			}
+		})
+	}
+
+	go func() {
+		for _, job := range pendingJobs {
+			jobs <- job
+		}
+
+		close(jobs)
+	}()
+
+	go func() {
+		wg.Wait()
+
+		close(results)
+	}()
+
+	for res := range results {
+		uri := res.uri
+
+		if s.activeURIs != nil {
+			s.activeURIs[uri] = true
+		}
+
+		if res.err != nil {
+			failed++
+
+			continue
+		}
+
+		if res.unchanged {
+			unchanged++
+
+			if !res.job.modTime.IsZero() && s.Documents[uri] != nil {
+				s.Documents[uri].ModTime = res.job.modTime
+			}
+
+			continue
+		}
+
+		total += len(res.source)
+		indexed++
+
+		s.finalizeDocumentUpdate(uri, res.source, res.tree, res.errors, res.job.doc)
+
+		if !res.job.modTime.IsZero() && s.Documents[uri] != nil {
+			s.Documents[uri].ModTime = res.job.modTime
+		}
 	}
 
 	for uri := range s.Documents {
@@ -307,23 +406,9 @@ func (s *Server) refreshWorkspace() {
 	took = time.Since(start)
 
 	s.Log.Printf("Total time taken for %d bytes: %s\n", total, took)
-
-	/*
-		if traceFile != nil {
-			trace.Stop()
-
-			traceFile.Close()
-		}
-
-		if cpuFile != nil {
-			pprof.StopCPUProfile()
-
-			cpuFile.Close()
-		}
-	*/
 }
 
-func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged, failed *int) {
+func (s *Server) indexWorkspace(rootPathOrURI string, pendingJobs *[]*indexJob, unchanged, failed *int) {
 	var path string
 
 	if strings.HasPrefix(rootPathOrURI, "file://") {
@@ -433,38 +518,33 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 					}
 				}
 
-				b, fsErr := os.ReadFile(fullPath)
-				if fsErr == nil {
-					if existing, ok := s.Documents[uri]; ok && bytes.Equal(existing.Source, b) {
-						if statErr == nil {
-							existing.ModTime = fileStat.ModTime()
-						}
+				var (
+					existingTree   *ast.Tree
+					existingSource []byte
+					doc            *Document
+				)
 
-						if s.activeURIs != nil {
-							s.activeURIs[uri] = true
-						}
-
-						*unchanged++
-
-						continue
-					}
-
-					*total += len(b)
-
-					s.updateDocument(uri, b)
-
-					if statErr == nil && s.Documents[uri] != nil {
-						s.Documents[uri].ModTime = fileStat.ModTime()
-					}
-
-					if s.activeURIs != nil {
-						s.activeURIs[uri] = true
-					}
-
-					*indexed++
-				} else {
-					*failed++
+				if existing, ok := s.Documents[uri]; ok {
+					existingTree = existing.Tree
+					existingSource = existing.Source
+					doc = existing
 				}
+
+				var modTime time.Time
+
+				if statErr == nil {
+					modTime = fileStat.ModTime()
+				}
+
+				*pendingJobs = append(*pendingJobs, &indexJob{
+					uri:            uri,
+					path:           fullPath,
+					isStd:          false,
+					modTime:        modTime,
+					existingTree:   existingTree,
+					existingSource: existingSource,
+					doc:            doc,
+				})
 			}
 		}
 	}
@@ -472,7 +552,7 @@ func (s *Server) indexWorkspace(rootPathOrURI string, total, indexed, unchanged,
 	walk(path, true)
 }
 
-func (s *Server) indexEmbeddedStdlib(total, indexed, unchanged *int) {
+func (s *Server) indexEmbeddedStdlib(pendingJobs *[]*indexJob, unchanged *int) {
 	entries, err := stdlibFS.ReadDir("stdlib")
 	if err != nil {
 		return
@@ -480,37 +560,31 @@ func (s *Server) indexEmbeddedStdlib(total, indexed, unchanged *int) {
 
 	for _, e := range entries {
 		if strings.HasSuffix(e.Name(), ".lua") {
-			b, err := stdlibFS.ReadFile("stdlib/" + e.Name())
-			if err == nil {
-				uri := "std:///" + e.Name()
+			uri := "std:///" + e.Name()
 
-				if existing, ok := s.Documents[uri]; ok && bytes.Equal(existing.Source, b) {
-					s.activeURIs[uri] = true
-
-					*unchanged++
-
-					continue
-				}
-
-				*total += len(b)
-
-				s.updateDocument(uri, b)
-
+			if _, ok := s.Documents[uri]; ok {
 				if s.activeURIs != nil {
 					s.activeURIs[uri] = true
 				}
 
-				*indexed++
+				*unchanged++
+
+				continue
 			}
+
+			*pendingJobs = append(*pendingJobs, &indexJob{
+				uri:   uri,
+				path:  e.Name(),
+				isStd: true,
+			})
 		}
 	}
 }
 
 func (s *Server) updateDocument(uri string, source []byte) bool {
 	var (
-		needsWorkspaceRepublish bool
-		tree                    *ast.Tree
-		doc                     *Document
+		tree *ast.Tree
+		doc  *Document
 	)
 
 	if existing, exists := s.Documents[uri]; exists {
@@ -519,18 +593,40 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 		}
 
 		doc = existing
+		tree = existing.Tree
+
+		tree.Reset(source)
+	} else {
+		tree = ast.NewTree(source)
+	}
+
+	p := s.sharedParser
+
+	p.MaxErrors = s.MaxParseErrors
+
+	p.Reset(source, tree)
+
+	p.Parse()
+
+	errs := make([]parser.ParseError, len(p.Errors))
+
+	copy(errs, p.Errors)
+
+	return s.finalizeDocumentUpdate(uri, source, tree, errs, doc)
+}
+
+func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tree, parseErrors []parser.ParseError, doc *Document) bool {
+	var needsWorkspaceRepublish bool
+
+	if doc != nil {
 		doc.Source = source
 
 		s.removeDocumentGlobals(uri, doc)
 
 		doc.ExportedGlobalDefs = doc.ExportedGlobalDefs[:0]
 
-		tree = existing.Tree
-
-		tree.Reset(source)
+		doc.Tree = tree
 	} else {
-		tree = ast.NewTree(source)
-
 		doc = &Document{
 			Server:   s,
 			URI:      uri,
@@ -550,13 +646,7 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 		s.Documents[uri] = doc
 	}
 
-	p := s.sharedParser
-
-	p.MaxErrors = s.MaxParseErrors
-
-	p.Reset(source, tree)
-
-	rootID := p.Parse()
+	rootID := tree.Root
 
 	doc.IsMeta = false
 	doc.FiveMResolved = false
@@ -570,14 +660,14 @@ func (s *Server) updateDocument(uri string, source []byte) bool {
 		}
 	}
 
-	if len(p.Errors) > 0 {
-		if cap(doc.Errors) >= len(p.Errors) {
-			doc.Errors = doc.Errors[:len(p.Errors)]
+	if len(parseErrors) > 0 {
+		if cap(doc.Errors) >= len(parseErrors) {
+			doc.Errors = doc.Errors[:len(parseErrors)]
 		} else {
-			doc.Errors = make([]parser.ParseError, len(p.Errors))
+			doc.Errors = make([]parser.ParseError, len(parseErrors))
 		}
 
-		copy(doc.Errors, p.Errors)
+		copy(doc.Errors, parseErrors)
 	} else {
 		doc.Errors = doc.Errors[:0]
 	}
