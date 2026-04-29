@@ -50,7 +50,7 @@ Lugo implements a comprehensive suite of modern Language Server Protocol feature
 * **Code Actions (Quick Fixes & Refactoring):** Fast automated fixes for common diagnostics (prefixing unused variables, adding `local`, fixing typos). Includes powerful **AST-aware refactorings**: invert conditions, recursively convert `if` chains to early returns, optimize `table.insert` to `t[#t+1]`, convert between dot/colon method signatures, merge nested `if` statements, split multiple assignments, swap `if`/`else` branches, remove redundant parentheses, convert `for i=1, #t` to `ipairs` and toggle between dot/bracket table indexing. Includes **bulk Safe Fixes** (via command palette) to automatically clean up unused variables, parameters and assignments across the current file or your entire workspace securely without breaking side-effects.
 * **Diagnostic Suppression:** Disable specific diagnostics per-line or per-file using standard `---@diagnostic disable-line code` comments (with built-in Code Actions to instantly generate them).
 * **Full Lua 5.4 Support:** Native parsing, type-inference and semantic highlighting for `<const>` and `<close>` attributes, `goto` statements and `::labels::`.
-* **FiveM Resource Isolation:** Native support for parsing `fxmanifest.lua` and `__resource.lua`. Lugo automatically isolates `client`, `server` and `shared` environments, preventing cross-contamination of globals and providing warnings if a file isn't referenced in the manifest.
+* **FiveM Profiles, Manifests & Runtime Metadata:** Native support for `fxmanifest.lua` and `__resource.lua`, profile-scoped runtime globals, export/resource validation, callable bridge signatures and manifest-aware diagnostics.
 * **File Watching:** Automatically synchronizes with workspace file creations, deletions and external changes in real-time.
 * **Built-in Formatter:** A blazingly fast, AST-aware Lua formatter. Elegantly fixes whitespace, enforces indentation rules, strips trailing semicolons, expands minified code and optionally applies opinionated stylistic tweaks (like separating unrelated statements with blank lines).
 * **Folding Ranges:** Accurately fold functions, tables, control flow blocks and multi-line strings/comments.
@@ -76,13 +76,14 @@ Lugo performs workspace-wide analysis to catch bugs before runtime:
 
 ## FiveM Support (Optional)
 
-Lugo includes first-class, built-in support for FiveM resource development. When enabled via the `lugo.fivem.enabled` setting, Lugo will automatically parse `fxmanifest.lua` and `__resource.lua` files to accurately map your project structure, enabling resource-aware completions and diagnostics.
+When FiveM support is enabled (`lugo.fivem.enabled` in VS Code, `featureFiveM` in `initializationOptions` / CI), Lugo activates FiveM metadata only for files that belong to a detected `fxmanifest.lua` or `__resource.lua` resource.
 
-* **Environment Isolation:** Automatically detects whether a file is `client`, `server` or `shared`. Client files cannot see server-only globals and vice versa.
-* **Resource Scoping:** Globals defined in one resource will not leak into another resource.
-* **Cross-Resource Includes:** Understands `@resource_name/file.lua` syntax in manifests for cross-resource dependencies.
-* **Unaccounted File Warnings:** Warns you if a `.lua` file exists in your workspace but is missing from the resource manifest, preventing "script not running" headaches.
-* **Export Validation:** Validates `exports.resource_name:methodName()` cross-resource calls, warning you if the resource or the specific export is unknown.
+* **Manifest authoring:** `fxmanifest.lua` and `__resource.lua` get directive completion, hover and definition support from the embedded manifest reference. Manifest files do not expose runtime globals such as `Citizen`, `Wait`, `exports` or `source`.
+* **Runtime profiles:** Files matched by the manifest are classified as `client`, `server` or `shared`. Client files see client + shared runtime metadata, server files see server + shared metadata, and shared or dual-listed files keep the shared intersection only. Plain Lua files outside a matched resource stay plain Lua.
+* **Resource accounting:** Lugo warns when a Lua file sits inside a detected resource root but is not referenced by the active manifest. Unaccounted files stay isolated from the resource runtime surface until the manifest includes them.
+* **Export/resource validation:** Lugo validates `exports.resourceName:methodName()` and `exports.resourceName.methodName` lookups against the addressed resource, warning for unknown resources and unknown exports.
+* **Callable proxies & bridge metadata:** Imported exports and bridge callback values stay table-shaped, but Lugo still provides hover and signature help for their callable proxy surface.
+* **Native helpers:** Client and server native helper docs are selected automatically from manifest metadata such as `fx_version`, `game`, `resource_manifest_version` and `use_experimental_fxv2_oal`. There is no separate FiveM setting for native bundle selection.
 
 ## Installation
 
@@ -162,10 +163,15 @@ You can configure Lugo via your VS Code `settings.json` (also available via the 
 * `lugo.features.formatOpinionated`: Apply opinionated formatting tweaks (e.g., forcing blank lines between unrelated statements).
 
 **FiveM Support**
-* `lugo.fivem.enabled`: Enable FiveM support. Scopes globals and diagnostics to their respective resources (using `fxmanifest.lua` / `__resource.lua`).
-* `lugo.fivem.diagnostics.unaccountedFile`: Toggle warnings for files missing from the resource manifest.
-* `lugo.fivem.diagnostics.unknownExport`: Toggle warnings for calling missing exports on a FiveM resource.
-* `lugo.fivem.diagnostics.unknownResource`: Toggle warnings for referencing unknown FiveM resources via the `exports` global.
+
+VS Code uses the `lugo.fivem.*` names below. Standalone clients and CI use the matching `initializationOptions` keys shown in parentheses.
+
+* `lugo.fivem.enabled` (`featureFiveM`): Enable FiveM manifest authoring, profile-scoped runtime globals, export bridge metadata and automatic native helper selection for files matched by `fxmanifest.lua` / `__resource.lua`.
+* `lugo.fivem.diagnostics.unaccountedFile` (`diagFiveMUnaccountedFile`): Toggle warnings for Lua files inside a detected resource root that are not matched by the active manifest. Unaccounted files remain plain Lua.
+* `lugo.fivem.diagnostics.unknownExport` (`diagFiveMUnknownExport`): Toggle warnings for missing exports on known FiveM resources addressed through the `exports` bridge.
+* `lugo.fivem.diagnostics.unknownResource` (`diagFiveMUnknownResource`): Toggle warnings for unknown resource names addressed through the `exports` bridge.
+
+There are no additional FiveM configuration keys for manifest/runtime/native selection. Lugo derives those surfaces from the active resource manifest.
 
 ## Commands
 

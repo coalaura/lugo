@@ -391,28 +391,28 @@
                         "type": "boolean",
                         "default": false,
                         "scope": "resource",
-                        "markdownDescription": "Enable FiveM support. Scopes globals and diagnostics to their respective resources (using `fxmanifest.lua` / `__resource.lua`).",
+                        "markdownDescription": "Enable FiveM manifest authoring, profile-scoped runtime globals, export bridge metadata, and automatic native helper selection for files matched by `fxmanifest.lua` / `__resource.lua`.",
                         "order": 1
                     },
                     "lugo.fivem.diagnostics.unaccountedFile": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
-                        "markdownDescription": "Enable diagnostics for files that are not referenced in the resource manifest (`fxmanifest.lua`).",
+                        "markdownDescription": "Enable diagnostics for Lua files inside a detected resource root that are not referenced by the active manifest. Unaccounted files remain plain Lua.",
                         "order": 2
                     },
                     "lugo.fivem.diagnostics.unknownExport": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
-                        "markdownDescription": "Enable diagnostics for calling missing or unknown exports on a FiveM resource.",
+                        "markdownDescription": "Enable diagnostics for missing exports on known FiveM resources addressed through the `exports` bridge.",
                         "order": 3
                     },
                     "lugo.fivem.diagnostics.unknownResource": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
-                        "markdownDescription": "Enable diagnostics for referencing unknown FiveM resources via the `exports` global.",
+                        "markdownDescription": "Enable diagnostics for unknown resource names addressed through the FiveM `exports` bridge.",
                         "order": 4
                     }
                 }

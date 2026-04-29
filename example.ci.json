@@ -3,16 +3,14 @@
 		"."
 	],
 	"settings": {
-		"libraryPaths": [
-			"./path/to/my/library"
-		],
+		"libraryPaths": [],
 		"ignoreGlobs": [
 			"**/node_modules/**",
 			"**/.git/**",
 			"**/dist/**"
 		],
 		"knownGlobals": [
-			"love"
+			
 		],
 		"bannedSymbols": {},
 		"maxFileSizeMB": 4,
@@ -43,6 +41,9 @@
 		"diagConstantCondition": true,
 		"diagUnreachableElse": true,
 		"diagUsedIgnoredVar": true,
-		"featureFiveM": false
+		"featureFiveM": true,
+		"diagFiveMUnaccountedFile": true,
+		"diagFiveMUnknownExport": true,
+		"diagFiveMUnknownResource": true
 	}
 }

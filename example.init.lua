@@ -9,7 +9,7 @@ if not configs.lugo then
 				"/path/to/your/lugo-linux-amd64" -- Update this path
 			},
 			filetypes = { "lua" },
-			root_dir = lspconfig.util.root_pattern(".git", ".luarc.json"),
+			root_dir = lspconfig.util.root_pattern("fxmanifest.lua", "__resource.lua", ".git", ".luarc.json"),
 			settings = {}
 		}
 	}
@@ -75,7 +75,7 @@ lspconfig.lugo.setup({
 		featureFormatAlerts = true,
 
 		-- FiveM Support
-		featureFiveM = false, -- Set to true if working on FiveM resources
+		featureFiveM = true,
 		diagFiveMUnaccountedFile = true,
 		diagFiveMUnknownExport = true,
 		diagFiveMUnknownResource = true
