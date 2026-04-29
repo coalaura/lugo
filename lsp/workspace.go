@@ -257,6 +257,9 @@ func (s *Server) refreshWorkspace() {
 
 	clear(s.FiveMResources)
 	clear(s.FiveMResourceByName)
+	if s.FiveMResourceGraph != nil {
+		s.FiveMResourceGraph.Clear()
+	}
 
 	var (
 		total     int
@@ -407,9 +410,7 @@ func (s *Server) refreshWorkspace() {
 		for _, doc := range s.Documents {
 			if doc.IsFiveMManifest {
 				res := s.parseFiveMManifest(doc)
-
-				s.FiveMResources[res.RootURI] = res
-				s.FiveMResourceByName[res.Name] = res
+				s.registerFiveMManifestResource(res)
 			}
 		}
 	}
@@ -573,31 +574,42 @@ func (s *Server) indexWorkspace(rootPathOrURI string, pendingJobs *[]*IndexJob, 
 }
 
 func (s *Server) indexEmbeddedStdlib(pendingJobs *[]*IndexJob, unchanged *int) {
-	entries, err := stdlibFS.ReadDir("stdlib")
-	if err != nil {
-		return
-	}
+	err := fs.WalkDir(stdlibFS, "stdlib", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
 
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".lua") {
-			uri := "std:///" + e.Name()
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".lua") {
+			return nil
+		}
 
-			if _, ok := s.Documents[uri]; ok {
-				if s.activeURIs != nil {
-					s.activeURIs[uri] = true
-				}
+		relPath := strings.TrimPrefix(path, "stdlib/")
+		if isFiveMNativeBundlePath(relPath) {
+			return nil
+		}
 
-				*unchanged++
+		uri := "std:///" + relPath
 
-				continue
+		if _, ok := s.Documents[uri]; ok {
+			if s.activeURIs != nil {
+				s.activeURIs[uri] = true
 			}
 
-			*pendingJobs = append(*pendingJobs, &IndexJob{
-				Uri:   uri,
-				Path:  e.Name(),
-				IsStd: true,
-			})
+			*unchanged++
+
+			return nil
 		}
+
+		*pendingJobs = append(*pendingJobs, &IndexJob{
+			Uri:   uri,
+			Path:  relPath,
+			IsStd: true,
+		})
+
+		return nil
+	})
+	if err != nil {
+		return
 	}
 }
 
@@ -669,8 +681,8 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 	rootID := tree.Root
 
 	doc.IsMeta = false
-	doc.FiveMResolved = false
-	doc.EnvResolved = false
+	doc.FiveMProfile = FiveMExecutionProfile{}
+	doc.FiveMProfileCached = false
 
 	for _, c := range tree.Comments {
 		if bytes.Contains(tree.Source[c.Start:c.End], []byte("@meta")) {
@@ -1193,17 +1205,14 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 
 	if s.FeatureFiveM && doc.IsFiveMManifest {
 		res := s.parseFiveMManifest(doc)
-
 		oldRes := s.FiveMResources[res.RootURI]
+		activeRes := s.registerFiveMManifestResource(res)
 
-		if !res.Equal(oldRes) {
-			s.FiveMResources[res.RootURI] = res
-			s.FiveMResourceByName[res.Name] = res
-
+		if !activeRes.Equal(oldRes) {
 			for dUri, d := range s.Documents {
 				if strings.HasPrefix(dUri, res.RootURI) {
-					d.EnvResolved = false
-					d.FiveMResolved = false
+					d.FiveMProfile = FiveMExecutionProfile{}
+					d.FiveMProfileCached = false
 				}
 			}
 

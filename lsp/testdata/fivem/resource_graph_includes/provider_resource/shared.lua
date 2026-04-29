@@ -1,0 +1,1 @@
+--[[@graph_include_alias_definition]]INVENTORY_SHARED = true

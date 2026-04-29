@@ -1,0 +1,1 @@
+--[[@provide_inventory_definition]]INVENTORY_READY = true
