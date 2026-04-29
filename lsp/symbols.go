@@ -681,9 +681,7 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 					}
 				}
 
-				if s.FeatureFiveM {
-					exportRes = s.getFiveMExportResource(doc, recID)
-				}
+				exportRes = s.getFiveMExportResource(doc, recID)
 			}
 		} else if isRecordKey {
 			isProp = true
@@ -762,7 +760,7 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 				}
 			}
 		}
-	} else if isProp {
+	} else if isProp && exportRes == "" {
 		pID := doc.Tree.Nodes[nodeID].Parent
 		if pID != ast.InvalidNode && int(pID) < len(doc.Tree.Nodes) {
 			pNode := doc.Tree.Nodes[pID]
@@ -771,6 +769,10 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 
 			switch pNode.Kind {
 			case ast.KindMemberExpr:
+				if int(pID) < len(doc.Inferring) && doc.Inferring[pID] {
+					break
+				}
+
 				propType = doc.InferType(pID)
 			case ast.KindMethodCall, ast.KindMethodName:
 				propType = doc.inferMemberExpr(pNode)
@@ -793,46 +795,15 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 	}
 
 	if ctx.TargetDefID == ast.InvalidNode && gKey.PropHash != 0 {
+		if !ctx.IsProp && gKey.ReceiverHash == 0 && ctx.FiveMExportRes == "" {
+			s.ensureFiveMNativeSymbol(doc, identName)
+		}
+
 		var resolved bool
 
 		if ctx.FiveMExportRes != "" {
-			if resObj, ok := s.FiveMResourceByName[ctx.FiveMExportRes]; ok {
-				var isExported bool
-
-				if slices.Contains(resObj.ClientExports, identName) || slices.Contains(resObj.ServerExports, identName) {
-					isExported = true
-				}
-
-				var resDefs []GlobalSymbol
-
-				for _, d := range s.Documents {
-					if s.getDocResourceRoot(d) == resObj.RootURI {
-						for _, exp := range d.FiveMLuaExports {
-							if exp.Name == identName {
-								resDefs = append(resDefs, GlobalSymbol{
-									URI:    d.URI,
-									NodeID: exp.NodeID,
-								})
-
-								isExported = true
-							}
-						}
-					}
-				}
-
-				if isExported {
-					if len(resDefs) == 0 {
-						if gSyms, ok := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: gKey.PropHash}]; ok {
-							for _, sym := range gSyms {
-								if symDoc, ok := s.Documents[sym.URI]; ok {
-									if s.getDocResourceRoot(symDoc) == resObj.RootURI {
-										resDefs = append(resDefs, sym)
-									}
-								}
-							}
-						}
-					}
-
+			if resObj := s.resolveFiveMResource(ctx.FiveMExportRes); resObj != nil {
+				if resDefs, isExported := s.getFiveMResourceExportDefinitions(resObj, identName); isExported {
 					if len(resDefs) > 0 {
 						bestDefs := s.getBestDefsForContext(ctx, doc, nodeID, resDefs)
 						ctx.GlobalDefs = bestDefs
@@ -844,19 +815,6 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 								ctx.TargetURI = bestDefs[0].URI
 
 								resolved = true
-							}
-						}
-					}
-				} else {
-					for _, d := range s.Documents {
-						for _, exp := range d.FiveMLuaExports {
-							if exp.Name == identName {
-								resDefs = append(resDefs, GlobalSymbol{
-									URI:    d.URI,
-									NodeID: exp.NodeID,
-								})
-
-								isExported = true
 							}
 						}
 					}
@@ -885,7 +843,11 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 }
 
 func (s *Server) getFiveMExportResource(doc *Document, nodeID ast.NodeID) string {
-	if !s.FeatureFiveM || nodeID == ast.InvalidNode || int(nodeID) >= len(doc.Tree.Nodes) {
+	if doc == nil || nodeID == ast.InvalidNode || int(nodeID) >= len(doc.Tree.Nodes) {
+		return ""
+	}
+
+	if !s.hasFiveMExportBridge(doc) {
 		return ""
 	}
 
@@ -954,6 +916,132 @@ func (s *Server) getFiveMExportResource(doc *Document, nodeID ast.NodeID) string
 	}
 
 	return ""
+}
+
+func (s *Server) resolveFiveMExportResource(doc *Document, nodeID ast.NodeID) (*FiveMResource, string) {
+	exportRes := s.getFiveMExportResource(doc, nodeID)
+	if exportRes == "" {
+		return nil, ""
+	}
+
+	return s.resolveFiveMResource(exportRes), exportRes
+}
+
+func (s *Server) suggestFiveMResourceName(name string) string {
+	if s == nil || name == "" {
+		return ""
+	}
+
+	lowerName := strings.ToLower(name)
+	if s.resolveFiveMResource(lowerName) != nil {
+		return ""
+	}
+
+	var bestMatch string
+
+	minDist := 3
+
+	for _, candidate := range s.getFiveMResourceNames() {
+		dist := levenshteinFast(lowerName, candidate, minDist-1)
+		if dist < minDist {
+			minDist = dist
+			bestMatch = candidate
+		}
+	}
+
+	return bestMatch
+}
+
+func (s *Server) getFiveMResourceExportDefinitions(res *FiveMResource, exportName string) ([]GlobalSymbol, bool) {
+	if s == nil || res == nil || exportName == "" {
+		return nil, false
+	}
+
+	isExported := slices.Contains(res.ClientExports, exportName) || slices.Contains(res.ServerExports, exportName)
+
+	var defs []GlobalSymbol
+	seen := make(map[TargetKey]bool)
+
+	for _, d := range s.Documents {
+		if s.getDocResourceRoot(d) != res.RootURI {
+			continue
+		}
+
+		for _, exp := range d.FiveMLuaExports {
+			if exp.Name != exportName {
+				continue
+			}
+
+			key := TargetKey{URI: d.URI, Def: exp.NodeID}
+			if seen[key] {
+				continue
+			}
+
+			seen[key] = true
+			defs = append(defs, GlobalSymbol{URI: d.URI, NodeID: exp.NodeID})
+			isExported = true
+		}
+	}
+
+	if len(defs) == 0 && isExported {
+		key := GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes([]byte(exportName))}
+		if gSyms, ok := s.GlobalIndex[key]; ok {
+			for _, sym := range gSyms {
+				symDoc, ok := s.Documents[sym.URI]
+				if !ok || s.getDocResourceRoot(symDoc) != res.RootURI {
+					continue
+				}
+
+				target := TargetKey{URI: sym.URI, Def: sym.NodeID}
+				if seen[target] {
+					continue
+				}
+
+				seen[target] = true
+				defs = append(defs, sym)
+			}
+		}
+	}
+
+	return defs, isExported
+}
+
+func (s *Server) getFiveMResourceExportNames(res *FiveMResource) []string {
+	if s == nil || res == nil {
+		return nil
+	}
+
+	var exports []string
+	seen := make(map[string]bool)
+
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+
+		seen[name] = true
+		exports = append(exports, name)
+	}
+
+	for _, name := range res.ClientExports {
+		add(name)
+	}
+
+	for _, name := range res.ServerExports {
+		add(name)
+	}
+
+	for _, d := range s.Documents {
+		if s.getDocResourceRoot(d) != res.RootURI {
+			continue
+		}
+
+		for _, exp := range d.FiveMLuaExports {
+			add(exp.Name)
+		}
+	}
+
+	return exports
 }
 
 func (s *Server) getBestDefsForContext(ctx *SymbolContext, doc *Document, identNodeID ast.NodeID, defs []GlobalSymbol) []GlobalSymbol {
@@ -1118,6 +1206,40 @@ func (s *Server) getReferences(ctx *SymbolContext, includeDeclaration bool) []Lo
 		}
 	}
 
+	if ctx.FiveMExportRes != "" {
+		for dUri, dDoc := range s.Documents {
+			if !s.hasFiveMExportBridge(dDoc) {
+				continue
+			}
+
+			for i := 1; i < len(dDoc.Tree.Nodes); i++ {
+				nodeID := ast.NodeID(i)
+				node := dDoc.Tree.Nodes[nodeID]
+
+				if node.Kind != ast.KindMethodCall && node.Kind != ast.KindMemberExpr {
+					continue
+				}
+
+				if node.Right == ast.InvalidNode || int(node.Right) >= len(dDoc.Tree.Nodes) {
+					continue
+				}
+
+				rightNode := dDoc.Tree.Nodes[node.Right]
+				if rightNode.Start > rightNode.End || rightNode.End > uint32(len(dDoc.Source)) {
+					continue
+				}
+
+				if ast.String(dDoc.Source[rightNode.Start:rightNode.End]) != ctx.IdentName {
+					continue
+				}
+
+				if s.getFiveMExportResource(dDoc, node.Left) == ctx.FiveMExportRes {
+					addRef(dDoc, dUri, node.Right)
+				}
+			}
+		}
+	}
+
 	for ref := range s.iterateGlobalReferences(ctx) {
 		addRef(ref.Doc, ref.URI, ref.NodeID)
 	}
@@ -1133,6 +1255,50 @@ func (s *Server) iterateGlobalReferences(ctx *SymbolContext) iter.Seq[GlobalRefe
 	return func(yield func(GlobalReference) bool) {
 		if !ctx.IsGlobal {
 			return
+		}
+
+		if ctx.FiveMExportRes != "" {
+			if resObj := s.resolveFiveMResource(ctx.FiveMExportRes); resObj != nil {
+				for dURI, dDoc := range s.Documents {
+					if !s.hasFiveMExportBridge(dDoc) {
+						continue
+					}
+
+					for i := 1; i < len(dDoc.Tree.Nodes); i++ {
+						node := dDoc.Tree.Nodes[i]
+						if node.Kind != ast.KindMethodCall && node.Kind != ast.KindMemberExpr {
+							continue
+						}
+
+						exportRes := s.getFiveMExportResource(dDoc, node.Left)
+						if exportRes == "" {
+							continue
+						}
+
+						targetRes := s.resolveFiveMResource(exportRes)
+						if targetRes == nil || targetRes.RootURI != resObj.RootURI {
+							continue
+						}
+
+						if node.Right == ast.InvalidNode || int(node.Right) >= len(dDoc.Tree.Nodes) {
+							continue
+						}
+
+						right := dDoc.Tree.Nodes[node.Right]
+						if right.Start > right.End || right.End > uint32(len(dDoc.Source)) {
+							continue
+						}
+
+						if ast.String(dDoc.Source[right.Start:right.End]) != ctx.IdentName {
+							continue
+						}
+
+						if !yield(GlobalReference{Doc: dDoc, URI: dURI, NodeID: node.Right}) {
+							return
+						}
+					}
+				}
+			}
 		}
 
 		for dUri, dDoc := range s.Documents {
@@ -1225,6 +1391,71 @@ func (s *Server) getGlobalSymbols(srcDoc *Document, recHash, propHash uint64) ([
 	return nil, false
 }
 
+func (s *Server) canSeeLibrarySymbol(srcDoc, tgtDoc *Document) bool {
+	if tgtDoc == nil {
+		return false
+	}
+
+	uri := tgtDoc.URI
+	profile := s.getDocumentFiveMProfile(srcDoc)
+
+	if strings.HasPrefix(uri, "std:///fivem/") {
+		if srcDoc == nil {
+			return false
+		}
+
+		switch strings.TrimPrefix(uri, "std:///fivem/") {
+		case "manifest.lua":
+			return profile.Kind == FiveMProfileManifest
+		case "shared.lua":
+			return profile.AllowsRuntimeLibrary()
+		case "client.lua":
+			return profile.Kind == FiveMProfileClient
+		case "server.lua":
+			return profile.Kind == FiveMProfileServer
+		case "export_bridge.lua":
+			return s.hasFiveMExportBridge(srcDoc)
+		default:
+			name := strings.TrimPrefix(uri, "std:///fivem/")
+			if !isFiveMNativeBundleName(name) {
+				return false
+			}
+
+			selection := s.getFiveMNativeSelection(srcDoc)
+			return selection.Active() && selection.Build == name
+		}
+	}
+
+	if !strings.HasPrefix(uri, "std:///") || srcDoc == nil {
+		return true
+	}
+
+	if !profile.IsFiveMActive() {
+		return true
+	}
+
+	switch uri {
+	case "std:///file.lua", "std:///require.lua":
+		return false
+	case "std:///io.lua", "std:///os.lua":
+		return profile.Kind == FiveMProfileServer
+	default:
+		return true
+	}
+}
+
+func (s *Server) globalSymbolPriority(uri string) int {
+	if strings.HasPrefix(uri, "std:///fivem/") {
+		return 1
+	}
+
+	if doc, ok := s.Documents[uri]; ok && !doc.IsLibrary {
+		return 0
+	}
+
+	return 2
+}
+
 func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, name, parent string, isRoot bool, isDep bool, depMsg string) {
 	if doc, ok := s.Documents[uri]; ok {
 		doc.ExportedGlobalDefs = append(doc.ExportedGlobalDefs, ExportedSymbol{
@@ -1236,7 +1467,7 @@ func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, n
 		})
 	}
 
-	s.GlobalIndex[key] = append(s.GlobalIndex[key], GlobalSymbol{
+	sym := GlobalSymbol{
 		URI:           uri,
 		NodeID:        nodeID,
 		Name:          name,
@@ -1244,7 +1475,25 @@ func (s *Server) setGlobalSymbol(key GlobalKey, uri string, nodeID ast.NodeID, n
 		IsRoot:        isRoot,
 		IsDeprecated:  isDep,
 		DeprecatedMsg: depMsg,
-	})
+	}
+
+	syms := s.GlobalIndex[key]
+	insertAt := len(syms)
+	priority := s.globalSymbolPriority(uri)
+
+	for i, existing := range syms {
+		if s.globalSymbolPriority(existing.URI) > priority {
+			insertAt = i
+
+			break
+		}
+	}
+
+	syms = append(syms, GlobalSymbol{})
+	copy(syms[insertAt+1:], syms[insertAt:])
+	syms[insertAt] = sym
+
+	s.GlobalIndex[key] = syms
 }
 
 func (s *Server) removeDocumentGlobals(uri string, doc *Document) {
@@ -1401,37 +1650,16 @@ func (s *Server) suggestGlobal(srcDoc *Document, name string) string {
 }
 
 func (s *Server) getDocResourceRoot(doc *Document) string {
-	if !s.FeatureFiveM {
+	if doc == nil {
 		return ""
 	}
 
-	if doc.IsLibrary {
-		return "std"
-	}
-
-	if doc.FiveMResolved {
-		return doc.FiveMRoot
-	}
-
-	var bestRoot string
-
-	for root := range s.FiveMResources {
-		if strings.HasPrefix(doc.URI, root+"/") || doc.URI == root {
-			if len(root) > len(bestRoot) {
-				bestRoot = root
-			}
-		}
-	}
-
-	doc.FiveMRoot = bestRoot
-	doc.FiveMResolved = true
-
-	return bestRoot
+	return s.getDocumentFiveMProfile(doc).ResourceRoot
 }
 
 func (s *Server) canSeeSymbol(srcDoc, tgtDoc *Document) bool {
-	if !s.FeatureFiveM {
-		return true
+	if tgtDoc == nil {
+		return false
 	}
 
 	if srcDoc == tgtDoc {
@@ -1439,111 +1667,56 @@ func (s *Server) canSeeSymbol(srcDoc, tgtDoc *Document) bool {
 	}
 
 	if tgtDoc.IsLibrary {
-		return true
+		return s.canSeeLibrarySymbol(srcDoc, tgtDoc)
 	}
 
-	srcRoot := s.getDocResourceRoot(srcDoc)
-	tgtRoot := s.getDocResourceRoot(tgtDoc)
+	srcProfile := s.getDocumentFiveMProfile(srcDoc)
+	tgtProfile := s.getDocumentFiveMProfile(tgtDoc)
+
+	srcRoot := srcProfile.ResourceRoot
+	tgtRoot := tgtProfile.ResourceRoot
 
 	if srcRoot == "" && tgtRoot == "" {
 		return true
 	}
 
 	if srcRoot == tgtRoot {
-		srcRes := s.FiveMResources[srcRoot]
-		if srcRes != nil {
-			srcEnv := s.getDocFileEnv(srcRes, srcDoc)
-			tgtEnv := s.getDocFileEnv(srcRes, tgtDoc)
-
-			srcIsManifest := srcDoc.IsFiveMManifest
-			tgtIsManifest := tgtDoc.IsFiveMManifest
-
-			if (!srcIsManifest && srcEnv == EnvUnknown) || (!tgtIsManifest && tgtEnv == EnvUnknown) {
-				return false
-			}
-
-			if srcEnv == EnvClient && tgtEnv == EnvServer {
-				return false
-			}
-
-			if srcEnv == EnvServer && tgtEnv == EnvClient {
-				return false
-			}
+		if srcRoot == "" {
+			return false
 		}
 
-		return true
-	}
+		if srcProfile.Kind == FiveMProfilePlainLua || tgtProfile.Kind == FiveMProfilePlainLua {
+			return false
+		}
 
-	srcRes := s.FiveMResources[srcRoot]
-	if srcRes == nil {
+		if srcProfile.Kind == FiveMProfileManifest || tgtProfile.Kind == FiveMProfileManifest {
+			return false
+		}
+
+		srcEnv := srcProfile.Env()
+		tgtEnv := tgtProfile.Env()
+
+		switch srcEnv {
+		case EnvClient:
+			return tgtEnv == EnvClient || tgtEnv == EnvShared
+		case EnvServer:
+			return tgtEnv == EnvServer || tgtEnv == EnvShared
+		case EnvShared:
+			return tgtEnv == EnvShared
+		}
+
 		return false
 	}
 
-	tgtRes := s.FiveMResources[tgtRoot]
-
-	var (
-		tgtName string
-		relPath string
-	)
-
-	if tgtRes != nil {
-		tgtName = tgtRes.Name
-		if len(tgtDoc.URI) > len(tgtRes.RootURI) {
-			relPath = tgtDoc.URI[len(tgtRes.RootURI)+1:]
-		}
-	} else if tgtRoot != "" {
-		idx := strings.LastIndexByte(tgtRoot, '/')
-		if idx != -1 {
-			tgtName = tgtRoot[idx+1:]
-		} else {
-			tgtName = tgtRoot
-		}
-
-		if len(tgtDoc.URI) > len(tgtRoot) {
-			relPath = tgtDoc.URI[len(tgtRoot)+1:]
-		}
+	srcRes := s.resolveFiveMResourceByRoot(srcRoot)
+	if srcRes == nil || srcProfile.Kind == FiveMProfilePlainLua || srcProfile.Kind == FiveMProfileManifest {
+		return false
 	}
 
-	if tgtName != "" && relPath != "" {
-		expectedInclude := "@" + tgtName + "/" + relPath
-
-		srcEnv := s.getDocFileEnv(srcRes, srcDoc)
-
-		var allowedIncludes []string
-
-		allowedIncludes = append(allowedIncludes, srcRes.SharedCrossIncludes...)
-
-		if srcEnv == EnvClient || srcEnv == EnvUnknown {
-			allowedIncludes = append(allowedIncludes, srcRes.ClientCrossIncludes...)
-		}
-
-		if srcEnv == EnvServer || srcEnv == EnvUnknown {
-			allowedIncludes = append(allowedIncludes, srcRes.ServerCrossIncludes...)
-		}
-
-		for _, inc := range allowedIncludes {
-			if strings.EqualFold(inc, expectedInclude) {
-				return true
-			}
-
-			if strings.Contains(inc, "*") {
-				prefix := "@" + tgtName + "/"
-
-				if len(inc) >= len(prefix) && strings.EqualFold(inc[:len(prefix)], prefix) {
-					globPattern := inc[len(prefix):]
-
-					if matchGlob(globPattern, relPath) {
-						return true
-					}
-				}
-			}
-		}
-	}
-
-	return false
+	return s.canSeeFiveMCrossResourceInclude(srcProfile, tgtDoc)
 }
 
-func (s *Server) isKnownGlobal(name []byte) bool {
+func (s *Server) isKnownGlobal(doc *Document, name []byte) bool {
 	strName := ast.String(name)
 
 	if s.KnownGlobals[strName] {
@@ -1556,10 +1729,8 @@ func (s *Server) isKnownGlobal(name []byte) bool {
 		}
 	}
 
-	if s.FeatureFiveM {
-		if strName == "source" || strName == "exports" {
-			return true
-		}
+	if s.isFiveMGlobalAvailable(doc, strName) {
+		return true
 	}
 
 	return false

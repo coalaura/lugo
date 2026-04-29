@@ -31,6 +31,11 @@ type TypeSet struct {
 	DeclNode   ast.NodeID
 	MetaURI    string
 	MetaNode   ast.NodeID
+	CallURI    string
+	CallNode   ast.NodeID
+	CallSig    string
+	CallParams []LuaDocParam
+	CallRet    []LuaDocReturn
 	Basics     BasicType
 }
 
@@ -95,6 +100,24 @@ func ParseTypeString(tStr string) TypeSet {
 		default:
 			if strings.HasPrefix(part, "fun(") {
 				typeSet.Basics |= TypeFunction
+
+				if typeSet.CallSig == "" {
+					if callable, ok := parseCallableType(part); ok {
+						typeSet.CallSig = callable.Signature
+						typeSet.CallParams = callable.Params
+						typeSet.CallRet = callable.Returns
+					}
+				}
+			} else if strings.HasPrefix(part, "funcref(") {
+				typeSet.Basics |= TypeTable
+
+				if typeSet.CallSig == "" {
+					if callable, ok := parseCallableType(part); ok {
+						typeSet.CallSig = callable.Signature
+						typeSet.CallParams = callable.Params
+						typeSet.CallRet = callable.Returns
+					}
+				}
 			} else if strings.HasPrefix(part, "{") {
 				typeSet.Basics |= TypeTable
 			} else if part != "" {
@@ -324,13 +347,16 @@ func (doc *Document) inferIdent(id ast.NodeID) TypeSet {
 	}
 
 	if targetDef == ast.InvalidNode {
-		if doc.Server != nil && doc.Server.FeatureFiveM {
-			if bytes.Equal(identName, []byte("source")) {
-				return TypeSet{Basics: TypeNumber}
-			}
-
-			if bytes.Equal(identName, []byte("exports")) {
-				return TypeSet{Basics: TypeTable}
+		if doc.Server != nil {
+			switch ast.String(identName) {
+			case "source":
+				if doc.Server.isFiveMGlobalAvailable(doc, "source") {
+					return TypeSet{Basics: TypeNumber}
+				}
+			case "exports":
+				if doc.Server.isFiveMGlobalAvailable(doc, "exports") {
+					return TypeSet{Basics: TypeTable}
+				}
 			}
 		}
 
@@ -418,7 +444,7 @@ func (doc *Document) inferIdent(id ast.NodeID) TypeSet {
 func (doc *Document) inferFunctionParameter(defID, funcExprID ast.NodeID) TypeSet {
 	grandParentID := doc.Tree.Nodes[funcExprID].Parent
 	if grandParentID == ast.InvalidNode {
-		return TypeSet{}
+		return doc.inferBridgeCallbackParameter(defID, funcExprID)
 	}
 
 	grandParentNode := doc.Tree.Nodes[grandParentID]
@@ -433,12 +459,12 @@ func (doc *Document) inferFunctionParameter(defID, funcExprID ast.NodeID) TypeSe
 	}
 
 	if funcDefID == ast.InvalidNode {
-		return TypeSet{}
+		return doc.inferBridgeCallbackParameter(defID, funcExprID)
 	}
 
 	funcDoc := doc.GetLuaDoc(funcDefID)
 	if funcDoc == nil {
-		return TypeSet{}
+		return doc.inferBridgeCallbackParameter(defID, funcExprID)
 	}
 
 	paramName := string(doc.Source[doc.Tree.Nodes[defID].Start:doc.Tree.Nodes[defID].End])
@@ -449,7 +475,85 @@ func (doc *Document) inferFunctionParameter(defID, funcExprID ast.NodeID) TypeSe
 		}
 	}
 
-	return TypeSet{}
+	return doc.inferBridgeCallbackParameter(defID, funcExprID)
+}
+
+func (doc *Document) inferBridgeCallbackParameter(defID, funcExprID ast.NodeID) TypeSet {
+	if doc.Server == nil || funcExprID == ast.InvalidNode || defID == ast.InvalidNode {
+		return TypeSet{}
+	}
+
+	paramIndex := doc.Tree.IndexOfExtra(funcExprID, defID)
+	if paramIndex == -1 {
+		return TypeSet{}
+	}
+
+	parentID := doc.Tree.Nodes[funcExprID].Parent
+	if parentID == ast.InvalidNode || int(parentID) >= len(doc.Tree.Nodes) {
+		return TypeSet{}
+	}
+
+	callID := parentID
+	callNode := doc.Tree.Nodes[callID]
+	argIndex := -1
+
+	if callNode.Kind == ast.KindExprList {
+		callID = callNode.Parent
+		if callID == ast.InvalidNode || int(callID) >= len(doc.Tree.Nodes) {
+			return TypeSet{}
+		}
+
+		callNode = doc.Tree.Nodes[callID]
+		argIndex = doc.Tree.IndexOfExtra(parentID, funcExprID)
+	} else {
+		argIndex = doc.Tree.IndexOfExtra(callID, funcExprID)
+	}
+
+	if callNode.Kind != ast.KindCallExpr && callNode.Kind != ast.KindMethodCall {
+		return TypeSet{}
+	}
+
+	if argIndex == -1 {
+		return TypeSet{}
+	}
+
+	funcIdentID := callNode.Left
+	if callNode.Kind == ast.KindMethodCall {
+		funcIdentID = callNode.Right
+	} else if funcIdentID != ast.InvalidNode && int(funcIdentID) < len(doc.Tree.Nodes) && doc.Tree.Nodes[funcIdentID].Kind == ast.KindMemberExpr {
+		funcIdentID = doc.Tree.Nodes[funcIdentID].Right
+	}
+
+	if funcIdentID == ast.InvalidNode || int(funcIdentID) >= len(doc.Tree.Nodes) {
+		return TypeSet{}
+	}
+
+	ctx := doc.Server.resolveSymbolNode(doc.URI, doc, funcIdentID)
+	if ctx == nil || ctx.TargetDoc == nil || ctx.TargetDefID == ast.InvalidNode {
+		return TypeSet{}
+	}
+
+	funcDoc := ctx.TargetDoc.GetLuaDoc(ctx.TargetDefID)
+	if funcDoc == nil {
+		return TypeSet{}
+	}
+
+	callbackParamIndex := argIndex + getImplicitSelfOffset(ctx, callNode, ctx.TargetDoc, ctx.TargetDefID)
+	if callbackParamIndex < 0 {
+		return TypeSet{}
+	}
+
+	callbackParamType := ctx.TargetDoc.getLuaDocParamType(ctx.TargetDefID, callbackParamIndex, funcDoc)
+	if callbackParamType == "" {
+		return TypeSet{}
+	}
+
+	callable, ok := parseCallableType(callbackParamType)
+	if !ok || paramIndex >= len(callable.Params) {
+		return TypeSet{}
+	}
+
+	return ParseTypeString(callable.Params[paramIndex].Type)
 }
 
 func (doc *Document) inferLoopVariable(defID, nameListID ast.NodeID) TypeSet {
@@ -519,6 +623,37 @@ func (doc *Document) inferLoopVariable(defID, nameListID ast.NodeID) TypeSet {
 	return TypeSet{}
 }
 
+func (doc *Document) getLuaDocParamType(defID ast.NodeID, paramIndex int, funcDoc *LuaDoc) string {
+	if funcDoc == nil || paramIndex < 0 {
+		return ""
+	}
+
+	valID := doc.getAssignedValue(defID)
+	if valID != ast.InvalidNode && int(valID) < len(doc.Tree.Nodes) && doc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
+		funcNode := doc.Tree.Nodes[valID]
+		if paramIndex < int(funcNode.Count) {
+			paramID := doc.Tree.ExtraList[funcNode.Extra+uint32(paramIndex)]
+			if paramID != ast.InvalidNode && int(paramID) < len(doc.Tree.Nodes) {
+				paramNode := doc.Tree.Nodes[paramID]
+				if paramNode.Start <= paramNode.End && paramNode.End <= uint32(len(doc.Source)) {
+					paramName := ast.String(doc.Source[paramNode.Start:paramNode.End])
+					for _, param := range funcDoc.Params {
+						if param.Name == paramName {
+							return param.Type
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if paramIndex < len(funcDoc.Params) {
+		return funcDoc.Params[paramIndex].Type
+	}
+
+	return ""
+}
+
 func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 	leftType := doc.InferType(node.Left)
 
@@ -549,6 +684,23 @@ func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 			if t.MetaNode == ast.InvalidNode && rt.MetaNode != ast.InvalidNode {
 				t.MetaNode = rt.MetaNode
 				t.MetaURI = rt.MetaURI
+			}
+
+			if t.CallSig == "" && rt.CallSig != "" {
+				t.CallSig = rt.CallSig
+				t.CallParams = rt.CallParams
+				t.CallRet = rt.CallRet
+				t.CallURI = rt.CallURI
+				t.CallNode = rt.CallNode
+			}
+		}
+	}
+
+	if doc.Server != nil {
+		ctx := doc.Server.resolveSymbolNode(doc.URI, doc, node.Right)
+		if ctx != nil && ctx.FiveMExportRes != "" && ctx.TargetDoc != nil && ctx.TargetDefID != ast.InvalidNode {
+			if callProxy := ctx.TargetDoc.makeCallableProxyType(ctx.TargetDefID); callProxy.CallSig != "" || callProxy.CallNode != ast.InvalidNode {
+				return callProxy
 			}
 		}
 	}
@@ -751,6 +903,10 @@ func (doc *Document) inferCallExpr(node ast.Node) TypeSet {
 
 		ctx := doc.Server.resolveSymbolNode(doc.URI, doc, funcIdentID)
 		if ctx != nil && ctx.TargetDefID != ast.InvalidNode && ctx.TargetDoc != nil {
+			if inferredCallable := ctx.TargetDoc.InferType(ctx.TargetDefID); inferredCallable.CallSig != "" && len(inferredCallable.CallRet) > 0 {
+				return ParseTypeString(inferredCallable.CallRet[0].Type)
+			}
+
 			luadoc := ctx.TargetDoc.GetLuaDoc(ctx.TargetDefID)
 
 			if luadoc != nil {
@@ -771,6 +927,56 @@ func (doc *Document) inferCallExpr(node ast.Node) TypeSet {
 	}
 
 	return TypeSet{}
+}
+
+func (doc *Document) makeCallableProxyType(defID ast.NodeID) TypeSet {
+	if defID == ast.InvalidNode || int(defID) >= len(doc.Tree.Nodes) {
+		return TypeSet{}
+	}
+
+	proxy := TypeSet{
+		Basics:   TypeTable,
+		CallURI:  doc.URI,
+		CallNode: defID,
+	}
+
+	if luadoc := doc.GetLuaDoc(defID); luadoc != nil {
+		proxy.CallParams = append(proxy.CallParams, luadoc.Params...)
+		proxy.CallRet = append(proxy.CallRet, luadoc.Returns...)
+		proxy.CallSig = buildCallableSignature(luadoc.Params, luadoc.Returns)
+	}
+
+	if proxy.CallSig != "" {
+		return proxy
+	}
+
+	valID := doc.getAssignedValue(defID)
+	if valID == ast.InvalidNode || int(valID) >= len(doc.Tree.Nodes) || doc.Tree.Nodes[valID].Kind != ast.KindFunctionExpr {
+		return proxy
+	}
+
+	funcNode := doc.Tree.Nodes[valID]
+	for i := uint16(0); i < funcNode.Count; i++ {
+		if funcNode.Extra+uint32(i) >= uint32(len(doc.Tree.ExtraList)) {
+			continue
+		}
+
+		paramID := doc.Tree.ExtraList[funcNode.Extra+uint32(i)]
+		if paramID == ast.InvalidNode || int(paramID) >= len(doc.Tree.Nodes) {
+			continue
+		}
+
+		paramNode := doc.Tree.Nodes[paramID]
+		if paramNode.Start > paramNode.End || paramNode.End > uint32(len(doc.Source)) {
+			continue
+		}
+
+		proxy.CallParams = append(proxy.CallParams, LuaDocParam{Name: ast.String(doc.Source[paramNode.Start:paramNode.End])})
+	}
+
+	proxy.CallSig = buildCallableSignature(proxy.CallParams, proxy.CallRet)
+
+	return proxy
 }
 
 func (doc *Document) findFieldInTable(tableID ast.NodeID, fieldName string) ast.NodeID {

@@ -19,6 +19,37 @@ type SemanticToken struct {
 	Modifiers uint32
 }
 
+func ctxDisplayNameForSignature(doc *Document, nodeID ast.NodeID) string {
+	if doc == nil || nodeID == ast.InvalidNode || int(nodeID) >= len(doc.Tree.Nodes) {
+		return ""
+	}
+
+	node := doc.Tree.Nodes[nodeID]
+	if node.Start <= node.End && node.End <= uint32(len(doc.Source)) {
+		return ast.String(doc.Source[node.Start:node.End])
+	}
+
+	return ""
+}
+
+func (s *Server) lookupFiveMExportDefs(doc *Document, exportRes, funcName string) []GlobalSymbol {
+	if s == nil || doc == nil || exportRes == "" || funcName == "" {
+		return nil
+	}
+
+	resObj := s.resolveFiveMResource(exportRes)
+	if resObj == nil {
+		return nil
+	}
+
+	defs, isExported := s.getFiveMResourceExportDefinitions(resObj, funcName)
+	if !isExported {
+		return nil
+	}
+
+	return defs
+}
+
 func (s *Server) handleHover(req Request) {
 	var params TextDocumentPositionParams
 
@@ -41,6 +72,7 @@ func (s *Server) handleHover(req Request) {
 	var (
 		hoverText string
 		fromFile  string
+		callable  string
 		r         *Range
 	)
 
@@ -177,6 +209,9 @@ func (s *Server) handleHover(req Request) {
 
 					if ctx.IsProp {
 						inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
+						if inferred.IsCallable() {
+							callable = buildCallableHoverText(ctx.DisplayName, inferred)
+						}
 
 						typeStr := inferred.Format()
 						if typeStr != "any" {
@@ -194,6 +229,9 @@ func (s *Server) handleHover(req Request) {
 						}
 
 						inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
+						if inferred.IsCallable() {
+							callable = buildCallableHoverText(ctx.DisplayName, inferred)
+						}
 
 						typeStr := inferred.Format()
 						if typeStr != "any" {
@@ -203,6 +241,9 @@ func (s *Server) handleHover(req Request) {
 						}
 					} else {
 						inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
+						if inferred.IsCallable() {
+							callable = buildCallableHoverText(ctx.DisplayName, inferred)
+						}
 
 						typeStr := inferred.Format()
 						if typeStr != "any" {
@@ -342,6 +383,10 @@ func (s *Server) handleHover(req Request) {
 				hoverText += "\n\n---\n\n" + docString
 			}
 
+			if callable != "" {
+				hoverText += "\n\n---\n\n" + callable
+			}
+
 			if fromFile != "" {
 				if after, ok := strings.CutPrefix(ctx.TargetURI, "std:///"); ok {
 					hoverText += "\n\n---\n\n*Standard Library (`" + after + "`)*"
@@ -367,6 +412,9 @@ func (s *Server) handleHover(req Request) {
 			}
 
 			inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
+			if inferred.IsCallable() {
+				callable = buildCallableHoverText(ctx.DisplayName, inferred)
+			}
 			typeStr := inferred.Format()
 
 			if ctx.IsProp {
@@ -381,6 +429,10 @@ func (s *Server) handleHover(req Request) {
 				} else {
 					hoverText = "```lua\nglobal " + ctx.DisplayName + "\n```"
 				}
+			}
+
+			if callable != "" {
+				hoverText += "\n\n---\n\n" + callable
 			}
 		}
 	}
@@ -535,7 +587,7 @@ func (s *Server) handleCompletion(req Request) {
 	}
 
 	currID := doc.Tree.NodeAt(offset)
-	if s.FeatureFiveM && currID != ast.InvalidNode {
+	if s.hasFiveMExportBridge(doc) && currID != ast.InvalidNode {
 		currNode := doc.Tree.Nodes[currID]
 		if currNode.Kind == ast.KindString {
 			pID := currNode.Parent
@@ -545,8 +597,8 @@ func (s *Server) handleCompletion(req Request) {
 					if doc.Tree.Nodes[pNode.Left].Kind == ast.KindIdent {
 						identName := doc.Source[doc.Tree.Nodes[pNode.Left].Start:doc.Tree.Nodes[pNode.Left].End]
 						if bytes.Equal(identName, []byte("exports")) && doc.Resolver.References[pNode.Left] == ast.InvalidNode {
-							for _, res := range s.FiveMResources {
-								addCompletion(res.Name, FieldCompletion, "resource", false, "1", res.Name, PlainTextTextFormat)
+							for _, name := range s.getFiveMResourceNames() {
+								addCompletion(name, FieldCompletion, "resource", false, "1", name, PlainTextTextFormat)
 							}
 
 							WriteMessage(s.Writer, Response{
@@ -668,6 +720,37 @@ func (s *Server) handleCompletion(req Request) {
 			rootName []byte
 		)
 
+		addFiveMResourceExportCompletions := func(resObj *FiveMResource) {
+			if resObj == nil {
+				return
+			}
+
+			for _, exp := range s.getFiveMResourceExportNames(resObj) {
+				defs, _ := s.getFiveMResourceExportDefinitions(resObj, exp)
+
+				detail := "lua export"
+				switch {
+				case slices.Contains(resObj.ClientExports, exp):
+					detail = "client export"
+				case slices.Contains(resObj.ServerExports, exp):
+					detail = "server export"
+				}
+
+				insertText := exp
+				insertFormat := PlainTextTextFormat
+
+				if len(defs) > 0 {
+					if targetDoc, ok := s.Documents[defs[0].URI]; ok {
+						if funcValID := targetDoc.getAssignedValue(defs[0].NodeID); funcValID != ast.InvalidNode {
+							insertText, insertFormat = buildFuncSnippet(exp, targetDoc, funcValID, isColon)
+						}
+					}
+				}
+
+				addCompletion(exp, FunctionCompletion, detail, false, "1", insertText, insertFormat)
+			}
+		}
+
 		if len(recName) > 0 {
 			recHash = ast.HashBytes(recName)
 
@@ -707,51 +790,13 @@ func (s *Server) handleCompletion(req Request) {
 			}
 		}
 
-		if s.FeatureFiveM && recNodeID != ast.InvalidNode {
-			exportRes := s.getFiveMExportResource(doc, recNodeID)
-			if exportRes != "" {
-				if resObj, ok := s.FiveMResourceByName[exportRes]; ok {
-					addExportCompletions := func(exports []string, detail string) {
-						for _, exp := range exports {
-							if syms, ok := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes([]byte(exp))}]; ok {
-								var (
-									funcValID ast.NodeID = ast.InvalidNode
-									targetDoc *Document
-								)
-
-								for _, sym := range syms {
-									if symDoc, ok := s.Documents[sym.URI]; ok && s.getDocResourceRoot(symDoc) == resObj.RootURI {
-										valID := symDoc.getAssignedValue(sym.NodeID)
-										if valID != ast.InvalidNode && symDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
-											funcValID = valID
-											targetDoc = symDoc
-
-											break
-										}
-									}
-								}
-
-								insertText := exp
-								insertFormat := PlainTextTextFormat
-
-								if funcValID != ast.InvalidNode {
-									insertText, insertFormat = buildFuncSnippet(exp, targetDoc, funcValID, isColon)
-								}
-
-								addCompletion(exp, FunctionCompletion, detail, false, "1", insertText, insertFormat)
-							} else {
-								addCompletion(exp, FunctionCompletion, detail, false, "1", exp, PlainTextTextFormat)
-							}
-						}
-					}
-
-					addExportCompletions(resObj.ClientExports, "client export")
-					addExportCompletions(resObj.ServerExports, "server export")
-				}
-			} else if len(rootName) > 0 && bytes.Equal(rootName, []byte("exports")) && recDef == ast.InvalidNode {
-				for _, res := range s.FiveMResources {
-					if s.isValidIdentifier(res.Name) {
-						addCompletion(res.Name, FieldCompletion, "resource", false, "1", res.Name, PlainTextTextFormat)
+		if recNodeID != ast.InvalidNode {
+			if resObj, _ := s.resolveFiveMExportResource(doc, recNodeID); resObj != nil {
+				addFiveMResourceExportCompletions(resObj)
+			} else if s.hasFiveMExportBridge(doc) && len(rootName) > 0 && bytes.Equal(rootName, []byte("exports")) && recDef == ast.InvalidNode {
+				for _, name := range s.getFiveMResourceNames() {
+					if s.isValidIdentifier(name) {
+						addCompletion(name, FieldCompletion, "resource", false, "1", name, PlainTextTextFormat)
 					}
 				}
 			}
@@ -771,7 +816,7 @@ func (s *Server) handleCompletion(req Request) {
 			}
 		}
 
-		if s.FeatureFiveM && len(rootName) > 0 && bytes.Equal(rootName, []byte("exports")) && recDef == ast.InvalidNode {
+		if s.hasFiveMExportBridge(doc) && len(rootName) > 0 && bytes.Equal(rootName, []byte("exports")) && recDef == ast.InvalidNode {
 			var exportRes string
 
 			if bytes.HasPrefix(recName, []byte("exports[")) && bytes.HasSuffix(recName, []byte("]")) {
@@ -783,94 +828,13 @@ func (s *Server) handleCompletion(req Request) {
 			}
 
 			if exportRes != "" {
-				if resObj, ok := s.FiveMResourceByName[exportRes]; ok {
-					addExportCompletions := func(exports []string, detail string) {
-						for _, exp := range exports {
-							var (
-								funcValID ast.NodeID = ast.InvalidNode
-								targetDoc *Document
-							)
-
-							for _, d := range s.Documents {
-								if s.getDocResourceRoot(d) == resObj.RootURI {
-									for _, luaExp := range d.FiveMLuaExports {
-										if luaExp.Name == exp {
-											funcValID = luaExp.NodeID
-											targetDoc = d
-
-											break
-										}
-									}
-								}
-
-								if targetDoc != nil {
-									break
-								}
-							}
-
-							if targetDoc == nil {
-								for _, d := range s.Documents {
-									for _, luaExp := range d.FiveMLuaExports {
-										if luaExp.Name == exp {
-											funcValID = luaExp.NodeID
-											targetDoc = d
-
-											break
-										}
-									}
-
-									if targetDoc != nil {
-										break
-									}
-								}
-
-								if syms, ok := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes([]byte(exp))}]; ok {
-									for _, sym := range syms {
-										if symDoc, ok := s.Documents[sym.URI]; ok && s.getDocResourceRoot(symDoc) == resObj.RootURI {
-											valID := symDoc.getAssignedValue(sym.NodeID)
-											if valID != ast.InvalidNode && symDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr {
-												funcValID = valID
-												targetDoc = symDoc
-
-												break
-											}
-										}
-									}
-								}
-							}
-
-							insertText := exp
-							insertFormat := PlainTextTextFormat
-
-							if funcValID != ast.InvalidNode && targetDoc != nil && targetDoc.Tree.Nodes[funcValID].Kind == ast.KindFunctionExpr {
-								insertText, insertFormat = buildFuncSnippet(exp, targetDoc, funcValID, isColon)
-							}
-
-							addCompletion(exp, FunctionCompletion, detail, false, "1", insertText, insertFormat)
-						}
-					}
-
-					addExportCompletions(resObj.ClientExports, "client export")
-					addExportCompletions(resObj.ServerExports, "server export")
-
-					var dynamicExports []string
-
-					for _, d := range s.Documents {
-						for _, exp := range d.FiveMLuaExports {
-							if !slices.Contains(resObj.ClientExports, exp.Name) && !slices.Contains(resObj.ServerExports, exp.Name) && !slices.Contains(dynamicExports, exp.Name) {
-								dynamicExports = append(dynamicExports, exp.Name)
-							}
-						}
-					}
-
-					if len(dynamicExports) > 0 {
-						addExportCompletions(dynamicExports, "lua export")
-					}
+				if resObj := s.resolveFiveMResource(exportRes); resObj != nil {
+					addFiveMResourceExportCompletions(resObj)
 				}
 			} else if bytes.Equal(recName, []byte("exports")) {
-				for _, res := range s.FiveMResources {
-					if s.isValidIdentifier(res.Name) {
-						addCompletion(res.Name, FieldCompletion, "resource", false, "1", res.Name, PlainTextTextFormat)
+				for _, name := range s.getFiveMResourceNames() {
+					if s.isValidIdentifier(name) {
+						addCompletion(name, FieldCompletion, "resource", false, "1", name, PlainTextTextFormat)
 					}
 				}
 			}
@@ -1153,7 +1117,7 @@ func (s *Server) handleCompletion(req Request) {
 		}
 
 		currID := doc.Tree.NodeAt(offset)
-		if s.FeatureFiveM && currID != ast.InvalidNode {
+		if s.hasFiveMExportBridge(doc) && currID != ast.InvalidNode {
 			currNode := doc.Tree.Nodes[currID]
 			if currNode.Kind == ast.KindString {
 				pID := currNode.Parent
@@ -1163,8 +1127,8 @@ func (s *Server) handleCompletion(req Request) {
 						if int(pNode.Left) < len(doc.Tree.Nodes) && doc.Tree.Nodes[pNode.Left].Kind == ast.KindIdent {
 							identName := doc.Source[doc.Tree.Nodes[pNode.Left].Start:doc.Tree.Nodes[pNode.Left].End]
 							if bytes.Equal(identName, []byte("exports")) && doc.Resolver.References[pNode.Left] == ast.InvalidNode {
-								for _, res := range s.FiveMResources {
-									addCompletion(res.Name, FieldCompletion, "resource", false, "1", res.Name, PlainTextTextFormat)
+								for _, name := range s.getFiveMResourceNames() {
+									addCompletion(name, FieldCompletion, "resource", false, "1", name, PlainTextTextFormat)
 								}
 							}
 						}
@@ -1274,11 +1238,25 @@ func (s *Server) handleSignatureHelp(req Request) {
 		return
 	}
 
+	funcName := ctxDisplayNameForSignature(doc, funcIdentID)
+	exportRes := ""
+	if callNode.Kind == ast.KindMethodCall {
+		exportRes = s.getFiveMExportResource(doc, callNode.Left)
+	}
+
 	ctx := s.resolveSymbolAt(uri, doc.Tree.Nodes[funcIdentID].Start)
-	if ctx == nil {
+	if ctx == nil && exportRes == "" {
 		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
 
 		return
+	}
+
+	if ctx == nil {
+		ctx = &SymbolContext{DisplayName: funcName}
+	}
+
+	if ctx.DisplayName == "" {
+		ctx.DisplayName = funcName
 	}
 
 	var defs []GlobalSymbol
@@ -1289,10 +1267,8 @@ func (s *Server) handleSignatureHelp(req Request) {
 		defs = []GlobalSymbol{{URI: ctx.TargetURI, NodeID: ctx.TargetDefID}}
 	}
 
-	if len(defs) == 0 {
-		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
-
-		return
+	if len(defs) == 0 && exportRes != "" {
+		defs = s.lookupFiveMExportDefs(doc, exportRes, funcName)
 	}
 
 	var activeParam int
@@ -1452,6 +1428,15 @@ func (s *Server) handleSignatureHelp(req Request) {
 	}
 
 	if len(signatures) == 0 {
+		inferred := inferCallableTypeForSignature(doc, callNode, funcIdentID, ctx)
+
+		if inferred.IsCallable() {
+			signatures = append(signatures, buildSignatureInformationFromType(ctx.DisplayName, inferred))
+			bestSigIndex = 0
+		}
+	}
+
+	if len(signatures) == 0 {
 		WriteMessage(s.Writer, Response{RPC: "2.0", ID: req.ID, Result: nil})
 
 		return
@@ -1466,6 +1451,112 @@ func (s *Server) handleSignatureHelp(req Request) {
 			ActiveParameter: activeParam,
 		},
 	})
+}
+
+func buildCallableHoverText(name string, inferred TypeSet) string {
+	var b strings.Builder
+
+	if inferred.IsCallableProxy() {
+		b.WriteString("**FiveM callable proxy**\n\n")
+	} else {
+		b.WriteString("**Callable**\n\n")
+	}
+
+	b.WriteString("```lua\n")
+	b.WriteString(buildCallableLabel(name, inferred))
+	b.WriteString("\n```")
+
+	return b.String()
+}
+
+func buildCallableLabel(name string, inferred TypeSet) string {
+	if len(inferred.CallParams) == 0 {
+		if inferred.CallSig != "" {
+			if after, ok := strings.CutPrefix(inferred.CallSig, "fun"); ok {
+				return name + after
+			}
+			return inferred.CallSig
+		}
+
+		return name + "()"
+	}
+
+	params := make([]string, 0, len(inferred.CallParams))
+	for _, param := range inferred.CallParams {
+		label := param.Name
+		if param.Type != "" {
+			if label != "" {
+				label += ": "
+			}
+			label += param.Type
+		}
+		params = append(params, label)
+	}
+
+	label := name + "(" + strings.Join(params, ", ") + ")"
+	if len(inferred.CallRet) == 1 && inferred.CallRet[0].Type != "" {
+		label += ": " + inferred.CallRet[0].Type
+	}
+
+	return label
+}
+
+func buildSignatureInformationFromType(name string, inferred TypeSet) SignatureInformation {
+	paramsInfo := make([]ParameterInformation, 0, len(inferred.CallParams))
+	for _, param := range inferred.CallParams {
+		label := param.Name
+		if param.Type != "" {
+			if label != "" {
+				label += ": "
+			}
+			label += param.Type
+		}
+
+		var docContent *MarkupContent
+		if param.Desc != "" {
+			docContent = &MarkupContent{Kind: "markdown", Value: param.Desc}
+		}
+
+		paramsInfo = append(paramsInfo, ParameterInformation{Label: label, Documentation: docContent})
+	}
+
+	return SignatureInformation{
+		Label:      buildCallableLabel(name, inferred),
+		Parameters: paramsInfo,
+	}
+}
+
+func inferCallableTypeForSignature(doc *Document, callNode ast.Node, funcIdentID ast.NodeID, ctx *SymbolContext) TypeSet {
+	if ctx != nil && ctx.TargetDefID != ast.InvalidNode && ctx.TargetDoc != nil {
+		if inferred := ctx.TargetDoc.InferType(ctx.TargetDefID); inferred.IsCallable() {
+			return inferred
+		}
+	}
+
+	if inferred := doc.InferType(funcIdentID); inferred.IsCallable() {
+		return inferred
+	}
+
+	if ctx != nil && ctx.TargetDoc != nil && ctx.TargetDefID != ast.InvalidNode {
+		if valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID); valID != ast.InvalidNode && int(valID) < len(ctx.TargetDoc.Tree.Nodes) {
+			if ctx.TargetDoc.Tree.Nodes[valID].Kind == ast.KindMemberExpr {
+				member := ctx.TargetDoc.Tree.Nodes[valID]
+				if proxyCtx := doc.Server.resolveSymbolNode(ctx.TargetDoc.URI, ctx.TargetDoc, member.Right); proxyCtx != nil && proxyCtx.TargetDoc != nil && proxyCtx.TargetDefID != ast.InvalidNode && proxyCtx.FiveMExportRes != "" {
+					return proxyCtx.TargetDoc.makeCallableProxyType(proxyCtx.TargetDefID)
+				}
+			}
+		}
+	}
+
+	if doc.Server != nil && callNode.Kind == ast.KindMethodCall {
+		if exportRes := doc.Server.getFiveMExportResource(doc, callNode.Left); exportRes != "" {
+			if proxyCtx := doc.Server.resolveSymbolNode(doc.URI, doc, callNode.Right); proxyCtx != nil && proxyCtx.TargetDoc != nil && proxyCtx.TargetDefID != ast.InvalidNode {
+				return proxyCtx.TargetDoc.makeCallableProxyType(proxyCtx.TargetDefID)
+			}
+		}
+	}
+
+	return TypeSet{}
 }
 
 func (s *Server) handleInlayHint(req Request) {
@@ -1786,7 +1877,7 @@ func (s *Server) handleSemanticTokensFull(req Request) {
 
 			if defID == ast.InvalidNode {
 
-				if s.isKnownGlobal(identBytes) {
+				if s.isKnownGlobal(doc, identBytes) {
 					modifiers |= 1 << 3 // defaultLibrary
 				}
 			} else {
@@ -1830,6 +1921,7 @@ func (s *Server) handleSemanticTokensFull(req Request) {
 				if defID == ast.InvalidNode {
 					hash := ast.HashBytes(identBytes)
 					recHash := uint64(0)
+					identName := ast.String(identBytes)
 
 					if tokenType == 1 && parentID != ast.InvalidNode {
 						pNode := doc.Tree.Nodes[parentID]
@@ -1843,6 +1935,16 @@ func (s *Server) handleSemanticTokensFull(req Request) {
 						if gDoc, ok := s.Documents[sym.URI]; ok {
 							targetDoc = gDoc
 							targetDef = sym.NodeID
+						}
+					} else if tokenType == 1 && parentID != ast.InvalidNode {
+						if resObj, _ := s.resolveFiveMExportResource(doc, doc.Tree.Nodes[parentID].Left); resObj != nil {
+							defs, isExported := s.getFiveMResourceExportDefinitions(resObj, identName)
+							if isExported && len(defs) > 0 {
+								if gDoc, ok := s.Documents[defs[0].URI]; ok {
+									targetDoc = gDoc
+									targetDef = defs[0].NodeID
+								}
+							}
 						}
 					}
 				}
