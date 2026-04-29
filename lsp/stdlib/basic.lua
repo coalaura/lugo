@@ -23,11 +23,6 @@ function assert(v, message) end
 ---@return any
 function collectgarbage(opt, arg) end
 
----Opens the named file and executes its contents as a Lua chunk.
----@param filename? string
----@return any
-function dofile(filename) end
-
 ---Terminates the last protected function called and returns message as the error object.
 ---@param message any
 ---@param level? integer
@@ -50,13 +45,6 @@ function ipairs(t) end
 ---@param env? table
 ---@return function|nil, string?
 function load(chunk, chunkname, mode, env) end
-
----Similar to load, but gets the chunk from file filename.
----@param filename? string
----@param mode? "b"|"t"|"bt"
----@param env? table
----@return function|nil, string?
-function loadfile(filename, mode, env) end
 
 ---Custom global logger mapped in your dump.
 ---@param ... any
@@ -106,11 +94,6 @@ function rawlen(v) end
 ---@param value any
 ---@return table
 function rawset(table, index, value) end
-
----Loads the given module.
----@param modname string
----@return any
-function require(modname) end
 
 ---If index is a number, returns all arguments after argument number index; a negative number indexes from the end. If index is "#", returns the total number of extra arguments.
 ---@param index integer|"#"
