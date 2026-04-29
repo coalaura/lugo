@@ -19,6 +19,14 @@ func setCfg[T comparable](dst *T, value T, flag *bool) {
 	}
 }
 
+func (typeSet TypeSet) IsCallable() bool {
+	return typeSet.CallSig != "" || typeSet.CallNode != ast.InvalidNode || typeSet.Basics&TypeFunction != 0
+}
+
+func (typeSet TypeSet) IsCallableProxy() bool {
+	return typeSet.IsCallable() && typeSet.Basics&TypeTable != 0 && typeSet.Basics&TypeFunction == 0
+}
+
 // Fast, zero-allocation Levenshtein distance for strings up to 63 bytes.
 func levenshteinFast(str1, str2 string, maxDist int) int {
 	if len(str1) > len(str2) {

@@ -2898,7 +2898,7 @@ func (s *Server) isNameSafe(doc *Document, defID ast.NodeID, newNameBytes []byte
 		return false
 	}
 
-	if s.isKnownGlobal(newNameBytes) {
+	if s.isKnownGlobal(doc, newNameBytes) {
 		return false
 	}
 

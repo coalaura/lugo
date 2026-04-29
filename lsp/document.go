@@ -34,16 +34,14 @@ type Document struct {
 	LowerPath          string
 	Dir                string
 	ModuleName         string
-	FiveMRoot          string
 	ExportedNode       ast.NodeID
-	FiveMEnv           FileEnv
+	FiveMProfile       FiveMExecutionProfile
 	IsMeta             bool
 	IsLibrary          bool
 	IsWorkspace        bool
 	IsFiveMManifest    bool
 	FiveMLuaExports    []FiveMLuaExport
-	FiveMResolved      bool
-	EnvResolved        bool
+	FiveMProfileCached bool
 	ModTime            time.Time
 	DiagPragmas        DiagPragmas
 }

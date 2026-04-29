@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -49,22 +48,45 @@ func (s *Server) publishDiagnostics(uri string) {
 		return
 	}
 
-	if s.FeatureFiveM && doc.IsFiveMManifest {
-		if !s.IsCI {
+	emitDiagnostics := func(diags []Diagnostic) {
+		if s.IsCI {
+			s.printCIDiagnostics(uri, diags)
+		} else {
 			WriteMessage(s.Writer, OutgoingNotification{
 				RPC:    "2.0",
 				Method: "textDocument/publishDiagnostics",
 				Params: PublishDiagnosticsParams{
 					URI:         uri,
-					Diagnostics: []Diagnostic{},
+					Diagnostics: diags,
 				},
 			})
 		}
-
-		return
 	}
 
 	s.diagBuf = s.diagBuf[:0]
+
+	for _, err := range doc.Errors {
+		r := getRange(doc.Tree, err.Start, err.End)
+
+		if r.Start == r.End {
+			r.End.Character++
+		}
+
+		s.diagBuf = append(s.diagBuf, Diagnostic{
+			Range:    r,
+			Severity: SeverityError,
+			Code:     "parse-error",
+			Message:  err.Message,
+		})
+	}
+
+	profile := s.getDocumentFiveMProfile(doc)
+	if profile.Kind == FiveMProfileManifest {
+		s.diagBuf = append(s.diagBuf, s.buildFiveMManifestDiagnostics(doc)...)
+		emitDiagnostics(s.diagBuf)
+
+		return
+	}
 
 	if s.visibilityCache == nil {
 		s.visibilityCache = make(map[*Document]bool, 128)
@@ -84,20 +106,18 @@ func (s *Server) publishDiagnostics(uri string) {
 		return res
 	}
 
-	if s.FeatureFiveM {
-		root := s.getDocResourceRoot(doc)
-		if root != "" {
-			if res := s.FiveMResources[root]; res != nil {
-				env := s.getDocFileEnv(res, doc)
-				if env == EnvUnknown && !doc.IsFiveMManifest {
-					if s.DiagFiveMUnaccountedFile {
-						s.diagBuf = append(s.diagBuf, Diagnostic{
-							Range:    Range{Start: Position{Line: 0, Character: 0}, End: Position{Line: 0, Character: 0}},
-							Severity: SeverityWarning,
-							Code:     "unaccounted-file",
-							Message:  "This file is not referenced in the resource manifest (fxmanifest.lua). Its globals are isolated and it cannot access other files in the resource.",
-						})
-					}
+	exportBridgeProfile := s.getFiveMExportBridgeProfile(doc)
+	if profile.HasResource() {
+		if res := s.FiveMResources[profile.ResourceRoot]; res != nil {
+			env := s.getDocFileEnv(res, doc)
+			if env == EnvUnknown && profile.Kind == FiveMProfilePlainLua {
+				if s.DiagFiveMUnaccountedFile {
+					s.diagBuf = append(s.diagBuf, Diagnostic{
+						Range:    Range{Start: Position{Line: 0, Character: 0}, End: Position{Line: 0, Character: 0}},
+						Severity: SeverityWarning,
+						Code:     "unaccounted-file",
+						Message:  "This file is not referenced in the resource manifest (fxmanifest.lua). Its globals are isolated and it cannot access other files in the resource.",
+					})
 				}
 			}
 		}
@@ -107,9 +127,8 @@ func (s *Server) publishDiagnostics(uri string) {
 
 			// 1. Check for valid export access
 			if node.Kind == ast.KindMethodCall || node.Kind == ast.KindMemberExpr {
-				exportRes := s.getFiveMExportResource(doc, node.Left)
-				if exportRes != "" {
-					if resObj, ok := s.FiveMResourceByName[exportRes]; ok {
+				if resObj, exportRes := s.resolveFiveMExportResource(doc, node.Left); exportRes != "" {
+					if resObj != nil {
 						var (
 							methodName string
 							errNode    ast.NodeID
@@ -127,47 +146,14 @@ func (s *Server) publishDiagnostics(uri string) {
 						}
 
 						if methodName != "" {
-							isExported := slices.Contains(resObj.ClientExports, methodName) || slices.Contains(resObj.ServerExports, methodName)
-
-							if !isExported {
-								for _, d := range s.Documents {
-									if s.getDocResourceRoot(d) == resObj.RootURI {
-										for _, exp := range d.FiveMLuaExports {
-											if exp.Name == methodName {
-												isExported = true
-
-												break
-											}
-										}
-									}
-
-									if isExported {
-										break
-									}
-								}
-
-								for _, d := range s.Documents {
-									for _, exp := range d.FiveMLuaExports {
-										if exp.Name == methodName {
-											isExported = true
-
-											break
-										}
-									}
-
-									if isExported {
-										break
-									}
-								}
-
-								if !isExported && s.DiagFiveMUnknownExport {
-									s.diagBuf = append(s.diagBuf, Diagnostic{
-										Range:    getNodeRange(doc.Tree, errNode),
-										Severity: SeverityWarning,
-										Code:     "fivem-unknown-export",
-										Message:  fmt.Sprintf("Resource '%s' does not export '%s'.", exportRes, methodName),
-									})
-								}
+							_, isExported := s.getFiveMResourceExportDefinitions(resObj, methodName)
+							if !isExported && s.DiagFiveMUnknownExport {
+								s.diagBuf = append(s.diagBuf, Diagnostic{
+									Range:    getNodeRange(doc.Tree, errNode),
+									Severity: SeverityWarning,
+									Code:     "fivem-unknown-export",
+									Message:  fmt.Sprintf("Resource '%s' does not export '%s'.", exportRes, methodName),
+								})
 							}
 						}
 					}
@@ -175,7 +161,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			}
 
 			// 2. Check for valid resource in exports
-			if node.Kind == ast.KindMemberExpr || node.Kind == ast.KindIndexExpr {
+			if exportBridgeProfile.Kind == FiveMProfileExportBridge && (node.Kind == ast.KindMemberExpr || node.Kind == ast.KindIndexExpr) {
 				if doc.Tree.Nodes[node.Left].Kind == ast.KindIdent {
 					leftNode := doc.Tree.Nodes[node.Left]
 					if bytes.Equal(doc.Source[leftNode.Start:leftNode.End], []byte("exports")) && doc.Resolver.References[node.Left] == ast.InvalidNode {
@@ -198,19 +184,8 @@ func (s *Server) publishDiagnostics(uri string) {
 						}
 
 						if resName != "" && errNode != ast.InvalidNode && s.DiagFiveMUnknownResource {
-							lowerResName := strings.ToLower(resName)
-							if _, ok := s.FiveMResourceByName[lowerResName]; !ok {
-								var bestMatch string
-
-								minDist := 3
-
-								for name := range s.FiveMResourceByName {
-									dist := levenshteinFast(lowerResName, name, minDist-1)
-									if dist < minDist {
-										minDist = dist
-										bestMatch = name
-									}
-								}
+							if s.resolveFiveMResource(strings.ToLower(resName)) == nil {
+								bestMatch := s.suggestFiveMResourceName(resName)
 
 								msg := fmt.Sprintf("Unknown FiveM resource '%s'.", resName)
 
@@ -236,35 +211,8 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 	}
 
-	// 1. Parse Errors
-	for _, err := range doc.Errors {
-		r := getRange(doc.Tree, err.Start, err.End)
-
-		if r.Start == r.End {
-			r.End.Character++
-		}
-
-		s.diagBuf = append(s.diagBuf, Diagnostic{
-			Range:    r,
-			Severity: SeverityError,
-			Code:     "parse-error",
-			Message:  err.Message,
-		})
-	}
-
 	if doc.IsMeta {
-		if s.IsCI {
-			s.printCIDiagnostics(uri, s.diagBuf)
-		} else {
-			WriteMessage(s.Writer, OutgoingNotification{
-				RPC:    "2.0",
-				Method: "textDocument/publishDiagnostics",
-				Params: PublishDiagnosticsParams{
-					URI:         uri,
-					Diagnostics: s.diagBuf,
-				},
-			})
-		}
+		emitDiagnostics(s.diagBuf)
 
 		return
 	}
@@ -291,7 +239,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				continue
 			}
 
-			if s.isKnownGlobal(identBytes) {
+			if s.isKnownGlobal(doc, identBytes) {
 				continue
 			}
 
@@ -300,6 +248,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			}
 
 			hash := ast.HashBytes(identBytes)
+			identStr := ast.String(identBytes)
 			key := GlobalKey{ReceiverHash: 0, PropHash: hash}
 
 			var exists bool
@@ -314,9 +263,11 @@ func (s *Server) publishDiagnostics(uri string) {
 				}
 			}
 
-			if !exists {
-				identStr := ast.String(identBytes)
+			if !exists && s.ensureFiveMNativeSymbol(doc, identStr) {
+				exists = true
+			}
 
+			if !exists {
 				suggestion, ok := suggestCache[identStr]
 				if !ok {
 					suggestion = s.suggestGlobal(doc, identStr)
@@ -358,7 +309,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				continue
 			}
 
-			if s.isKnownGlobal(identBytes) {
+			if s.isKnownGlobal(doc, identBytes) {
 				continue
 			}
 
@@ -1425,19 +1376,7 @@ func (s *Server) publishDiagnostics(uri string) {
 		s.diagBuf = make([]Diagnostic, 0)
 	}
 
-	if s.IsCI {
-		s.printCIDiagnostics(uri, s.diagBuf)
-		return
-	}
-
-	WriteMessage(s.Writer, OutgoingNotification{
-		RPC:    "2.0",
-		Method: "textDocument/publishDiagnostics",
-		Params: PublishDiagnosticsParams{
-			URI:         uri,
-			Diagnostics: s.diagBuf,
-		},
-	})
+	emitDiagnostics(s.diagBuf)
 }
 
 func (s *Server) isDiagnosticDisabled(doc *Document, line uint32, code string) bool {
@@ -1829,12 +1768,13 @@ func (s *Server) isGuardedByPreviousStatements(doc *Document, blockNode ast.Node
 
 func (s *Server) checkGlobalShadowing(uri string, nameBytes []byte, isLoopVar bool, r Range, canSee func(*Document) bool) {
 	varType := "Local"
+	doc := s.Documents[uri]
 
 	if isLoopVar {
 		varType = "Loop"
 	}
 
-	if s.isKnownGlobal(nameBytes) {
+	if s.isKnownGlobal(doc, nameBytes) {
 		s.diagBuf = append(s.diagBuf, Diagnostic{
 			Range:    r,
 			Severity: SeverityWarning,
