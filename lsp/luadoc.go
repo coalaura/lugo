@@ -132,6 +132,165 @@ func extractTypeDesc(data []byte) (typeBytes, descBytes []byte) {
 	return data[:idx], bytes.TrimSpace(data[idx:])
 }
 
+type callableType struct {
+	Signature string
+	Params    []LuaDocParam
+	Returns   []LuaDocReturn
+}
+
+func splitTopLevelList(value string, sep byte) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+
+	var (
+		parts []string
+		depth int
+		start int
+	)
+
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '(', '<', '{', '[':
+			depth++
+		case ')', '>', '}', ']':
+			depth--
+		case sep:
+			if depth == 0 {
+				parts = append(parts, strings.TrimSpace(value[start:i]))
+				start = i + 1
+			}
+		}
+	}
+
+	parts = append(parts, strings.TrimSpace(value[start:]))
+
+	return parts
+}
+
+func indexTopLevelByte(value string, target byte) int {
+	depth := 0
+
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '(', '<', '{', '[':
+			depth++
+		case ')', '>', '}', ']':
+			depth--
+		case target:
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+
+	return -1
+}
+
+func parseCallableType(typeStr string) (callableType, bool) {
+	trimmed := strings.TrimSpace(typeStr)
+	regular := strings.HasPrefix(trimmed, "fun(")
+	proxy := strings.HasPrefix(trimmed, "funcref(")
+	if !regular && !proxy {
+		return callableType{}, false
+	}
+
+	openIdx := strings.IndexByte(trimmed, '(')
+	if openIdx == -1 {
+		return callableType{}, false
+	}
+
+	depth := 0
+	closeIdx := -1
+	for i := openIdx; i < len(trimmed); i++ {
+		switch trimmed[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				closeIdx = i
+				break
+			}
+		}
+	}
+
+	if closeIdx == -1 {
+		return callableType{}, false
+	}
+
+	callable := callableType{}
+	paramsStr := strings.TrimSpace(trimmed[openIdx+1 : closeIdx])
+	for _, rawParam := range splitTopLevelList(paramsStr, ',') {
+		if rawParam == "" {
+			continue
+		}
+
+		param := LuaDocParam{}
+		colonIdx := indexTopLevelByte(rawParam, ':')
+		if colonIdx == -1 {
+			param.Name = strings.TrimSpace(rawParam)
+		} else {
+			param.Name = strings.TrimSpace(rawParam[:colonIdx])
+			param.Type = strings.TrimSpace(rawParam[colonIdx+1:])
+		}
+
+		if strings.HasSuffix(param.Name, "?") {
+			param.Name = strings.TrimSuffix(param.Name, "?")
+			if param.Type != "" && !strings.HasSuffix(param.Type, "?") {
+				param.Type += "?"
+			}
+		}
+
+		callable.Params = append(callable.Params, param)
+	}
+
+	remainder := strings.TrimSpace(trimmed[closeIdx+1:])
+	if after, ok := strings.CutPrefix(remainder, ":"); ok {
+		retType := strings.TrimSpace(after)
+		if retType != "" {
+			callable.Returns = append(callable.Returns, LuaDocReturn{Type: retType})
+		}
+	}
+
+	callable.Signature = buildCallableSignature(callable.Params, callable.Returns)
+	if proxy && callable.Signature == "" {
+		callable.Signature = "fun()"
+	}
+
+	return callable, true
+}
+
+func buildCallableSignature(params []LuaDocParam, returns []LuaDocReturn) string {
+	var b strings.Builder
+
+	b.WriteString("fun(")
+	for i, param := range params {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+
+		if param.Name != "" {
+			b.WriteString(param.Name)
+		}
+
+		if param.Type != "" {
+			if param.Name != "" {
+				b.WriteString(": ")
+			}
+			b.WriteString(param.Type)
+		}
+	}
+	b.WriteByte(')')
+
+	if len(returns) == 1 && returns[0].Type != "" {
+		b.WriteString(": ")
+		b.WriteString(returns[0].Type)
+	}
+
+	return b.String()
+}
+
 func formatAlerts(text string) string {
 	if text == "" {
 		return ""

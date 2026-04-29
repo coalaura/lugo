@@ -1,0 +1,1 @@
+--[[@mixed_server_definition]]MIXED_SERVER_ONLY = true
