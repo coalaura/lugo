@@ -1,0 +1,1 @@
+--[[@restricted_server_definition]]RESTRICTED_SERVER = true

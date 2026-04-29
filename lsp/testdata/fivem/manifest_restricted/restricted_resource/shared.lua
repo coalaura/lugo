@@ -1,0 +1,1 @@
+--[[@restricted_shared_definition]]RESTRICTED_SHARED = true
