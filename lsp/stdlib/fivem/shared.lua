@@ -1,5 +1,45 @@
 ---@meta
 
+---FiveM's JSON helper library available in runtime and manifest environments.
+---This is a host-provided encoder/decoder surface, not stock Lua.
+---@class json
+json = {}
+
+---Encodes a Lua value to a JSON string.
+---@param value any
+---@return string
+function json.encode(value) end
+
+---Decodes a JSON string into Lua values.
+---@param payload string
+---@return any
+function json.decode(payload) end
+
+---JSON null sentinel used by the host-provided JSON implementation.
+---@type userdata|nil
+json.null = nil
+
+---FiveM exposes a custom debug library rather than stock Lua's default implementation.
+---Metatable accessors remain available across the runtime boundary.
+debug = debug
+
+---Returns the metatable for a value using the custom FiveM debug library.
+---@param value any
+---@return table|nil
+function debug.getmetatable(value) end
+
+---Sets the metatable for a value using the custom FiveM debug library.
+---@param value any
+---@param mt table|nil
+---@return any
+function debug.setmetatable(value, mt) end
+
+---Produces a traceback string using the runtime-installed debug formatter.
+---@param message? string
+---@param level? integer
+---@return string
+function debug.traceback(message, level) end
+
 ---Loads another Lua file from the current resource or an explicitly included dependency.
 ---This overlays stock Lua's package-searcher semantics with FiveM's resource-aware module loading.
 ---@param modname string

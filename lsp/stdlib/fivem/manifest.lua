@@ -3,6 +3,38 @@
 ---Manifest-profile FiveM metadata bundle.
 ---Runtime ABI globals are intentionally unavailable while authoring `fxmanifest.lua` or `__resource.lua`.
 
+---FiveM's JSON helper library is available while evaluating manifest directives.
+---@class json
+json = {}
+
+---@param value any
+---@return string
+function json.encode(value) end
+
+---@param payload string
+---@return any
+function json.decode(payload) end
+
+---@type userdata|nil
+json.null = nil
+
+---The manifest runtime keeps the custom debug surface available for source tracking and metatable access.
+debug = debug
+
+---@param value any
+---@return table|nil
+function debug.getmetatable(value) end
+
+---@param value any
+---@param mt table|nil
+---@return any
+function debug.setmetatable(value, mt) end
+
+---@param message? string
+---@param level? integer
+---@return string
+function debug.traceback(message, level) end
+
 ---Selects the fxv2 manifest version for the resource.
 ---@param version string
 function fx_version(version) end

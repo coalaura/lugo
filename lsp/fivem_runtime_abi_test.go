@@ -17,14 +17,14 @@ shared_script 'shared.lua'
 `)
 
 	clientDoc := addFiveMTestDocument(t, s, filepath.Join(root, "runtime_resource", "client.lua"), `
-return Citizen, Wait, CreateThread, SetTimeout, ClearTimeout, TriggerServerEvent, RegisterNUICallback, GlobalState, msgpack, exports
-`)
+	return Citizen, Wait, CreateThread, SetTimeout, ClearTimeout, TriggerServerEvent, RegisterNUICallback, GlobalState, msgpack, json, debug, exports
+	`)
 	serverDoc := addFiveMTestDocument(t, s, filepath.Join(root, "runtime_resource", "server.lua"), `
-return Citizen, TriggerClientEvent, RegisterServerEvent, source, msgpack, exports
-`)
+	return Citizen, TriggerClientEvent, RegisterServerEvent, source, msgpack, json, debug, os, io, PerformHttpRequest, PerformHttpRequestAwait, GetPlayers, GetPlayerIdentifiers, GetPlayerTokens, exports
+	`)
 	sharedDoc := addFiveMTestDocument(t, s, filepath.Join(root, "runtime_resource", "shared.lua"), `
-return Citizen, AddEventHandler, RegisterNetEvent, TriggerEvent, GlobalState, msgpack, exports
-`)
+	return Citizen, AddEventHandler, RegisterNetEvent, TriggerEvent, GlobalState, msgpack, json, debug, exports
+	`)
 
 	assertResolvedGlobalTarget(t, s, clientDoc, "Citizen", "std:///fivem/shared.lua")
 	assertResolvedGlobalTarget(t, s, clientDoc, "Wait", "std:///fivem/shared.lua")
@@ -35,6 +35,8 @@ return Citizen, AddEventHandler, RegisterNetEvent, TriggerEvent, GlobalState, ms
 	assertResolvedGlobalTarget(t, s, clientDoc, "RegisterNUICallback", "std:///fivem/client.lua")
 	assertResolvedGlobalTarget(t, s, clientDoc, "GlobalState", "std:///fivem/shared.lua")
 	assertResolvedGlobalTarget(t, s, clientDoc, "msgpack", "std:///fivem/shared.lua")
+	assertResolvedGlobalTarget(t, s, clientDoc, "json", "std:///fivem/shared.lua")
+	assertResolvedGlobalTarget(t, s, clientDoc, "debug", "std:///fivem/shared.lua")
 	assertResolvedGlobalTarget(t, s, clientDoc, "exports", "std:///fivem/export_bridge.lua")
 
 	assertResolvedGlobalTarget(t, s, serverDoc, "Citizen", "std:///fivem/shared.lua")
@@ -42,6 +44,15 @@ return Citizen, AddEventHandler, RegisterNetEvent, TriggerEvent, GlobalState, ms
 	assertResolvedGlobalTarget(t, s, serverDoc, "RegisterServerEvent", "std:///fivem/server.lua")
 	assertResolvedGlobalTarget(t, s, serverDoc, "source", "std:///fivem/server.lua")
 	assertResolvedGlobalTarget(t, s, serverDoc, "msgpack", "std:///fivem/shared.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "json", "std:///fivem/shared.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "debug", "std:///fivem/shared.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "os", "std:///fivem/server.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "io", "std:///fivem/server.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "PerformHttpRequest", "std:///fivem/server.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "PerformHttpRequestAwait", "std:///fivem/server.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "GetPlayers", "std:///fivem/server.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "GetPlayerIdentifiers", "std:///fivem/server.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "GetPlayerTokens", "std:///fivem/server.lua")
 	assertResolvedGlobalTarget(t, s, serverDoc, "exports", "std:///fivem/export_bridge.lua")
 
 	assertResolvedGlobalTarget(t, s, sharedDoc, "Citizen", "std:///fivem/shared.lua")
@@ -50,6 +61,8 @@ return Citizen, AddEventHandler, RegisterNetEvent, TriggerEvent, GlobalState, ms
 	assertResolvedGlobalTarget(t, s, sharedDoc, "TriggerEvent", "std:///fivem/shared.lua")
 	assertResolvedGlobalTarget(t, s, sharedDoc, "GlobalState", "std:///fivem/shared.lua")
 	assertResolvedGlobalTarget(t, s, sharedDoc, "msgpack", "std:///fivem/shared.lua")
+	assertResolvedGlobalTarget(t, s, sharedDoc, "json", "std:///fivem/shared.lua")
+	assertResolvedGlobalTarget(t, s, sharedDoc, "debug", "std:///fivem/shared.lua")
 	assertResolvedGlobalTarget(t, s, sharedDoc, "exports", "std:///fivem/export_bridge.lua")
 
 	ctx := s.resolveSymbolNode(clientDoc.URI, clientDoc, mustFindIdentNode(t, clientDoc, "Wait"))
@@ -75,42 +88,68 @@ shared_script 'shared.lua'
 local manifestCitizen = Citizen
 local manifestWait = Wait
 local manifestMsgpack = msgpack
+local manifestJson = json
+local manifestDebug = debug
+local manifestOs = os
+local manifestIo = io
 `)
 	clientDoc := addFiveMTestDocument(t, s, filepath.Join(root, "runtime_resource", "client.lua"), `
-return TriggerClientEvent, RegisterServerEvent, source, Citizen, Wait, GlobalState
-`)
+	return TriggerClientEvent, RegisterServerEvent, source, Citizen, Wait, GlobalState, json, debug, PerformHttpRequest, GetPlayers, os, io
+	`)
 	serverDoc := addFiveMTestDocument(t, s, filepath.Join(root, "runtime_resource", "server.lua"), `
-return TriggerServerEvent, RegisterNUICallback, SendNUIMessage, Citizen, source
-`)
+	return TriggerServerEvent, RegisterNUICallback, SendNUIMessage, Citizen, source, json, debug, PerformHttpRequest, GetPlayers, os, io
+	`)
 	sharedDoc := addFiveMTestDocument(t, s, filepath.Join(root, "runtime_resource", "shared.lua"), `
-return Citizen, Wait, AddEventHandler, TriggerClientEvent, TriggerServerEvent, RegisterNUICallback, source, GlobalState
-`)
+	return Citizen, Wait, AddEventHandler, TriggerClientEvent, TriggerServerEvent, RegisterNUICallback, source, GlobalState, json, debug, PerformHttpRequest, GetPlayers, os, io
+	`)
 
 	assertUnresolvedGlobal(t, s, manifestDoc, "Citizen")
 	assertUnresolvedGlobal(t, s, manifestDoc, "Wait")
 	assertUnresolvedGlobal(t, s, manifestDoc, "msgpack")
+	assertResolvedGlobalTarget(t, s, manifestDoc, "json", "std:///fivem/manifest.lua")
+	assertResolvedGlobalTarget(t, s, manifestDoc, "debug", "std:///fivem/manifest.lua")
+	assertUnresolvedGlobal(t, s, manifestDoc, "os")
+	assertUnresolvedGlobal(t, s, manifestDoc, "io")
 
 	assertUnresolvedGlobal(t, s, clientDoc, "TriggerClientEvent")
 	assertUnresolvedGlobal(t, s, clientDoc, "RegisterServerEvent")
 	assertUnresolvedGlobal(t, s, clientDoc, "source")
+	assertUnresolvedGlobal(t, s, clientDoc, "PerformHttpRequest")
+	assertUnresolvedGlobal(t, s, clientDoc, "GetPlayers")
+	assertUnresolvedGlobal(t, s, clientDoc, "os")
+	assertUnresolvedGlobal(t, s, clientDoc, "io")
 	assertResolvedGlobalTarget(t, s, clientDoc, "Citizen", "std:///fivem/shared.lua")
 	assertResolvedGlobalTarget(t, s, clientDoc, "Wait", "std:///fivem/shared.lua")
 	assertResolvedGlobalTarget(t, s, clientDoc, "GlobalState", "std:///fivem/shared.lua")
+	assertResolvedGlobalTarget(t, s, clientDoc, "json", "std:///fivem/shared.lua")
+	assertResolvedGlobalTarget(t, s, clientDoc, "debug", "std:///fivem/shared.lua")
 
 	assertUnresolvedGlobal(t, s, serverDoc, "TriggerServerEvent")
 	assertUnresolvedGlobal(t, s, serverDoc, "RegisterNUICallback")
 	assertUnresolvedGlobal(t, s, serverDoc, "SendNUIMessage")
 	assertResolvedGlobalTarget(t, s, serverDoc, "Citizen", "std:///fivem/shared.lua")
 	assertResolvedGlobalTarget(t, s, serverDoc, "source", "std:///fivem/server.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "json", "std:///fivem/shared.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "debug", "std:///fivem/shared.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "os", "std:///fivem/server.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "io", "std:///fivem/server.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "PerformHttpRequest", "std:///fivem/server.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "GetPlayers", "std:///fivem/server.lua")
 
 	assertResolvedGlobalTarget(t, s, sharedDoc, "Citizen", "std:///fivem/shared.lua")
 	assertResolvedGlobalTarget(t, s, sharedDoc, "Wait", "std:///fivem/shared.lua")
 	assertResolvedGlobalTarget(t, s, sharedDoc, "AddEventHandler", "std:///fivem/shared.lua")
 	assertResolvedGlobalTarget(t, s, sharedDoc, "GlobalState", "std:///fivem/shared.lua")
+	assertResolvedGlobalTarget(t, s, sharedDoc, "json", "std:///fivem/shared.lua")
+	assertResolvedGlobalTarget(t, s, sharedDoc, "debug", "std:///fivem/shared.lua")
 	assertUnresolvedGlobal(t, s, sharedDoc, "TriggerClientEvent")
 	assertUnresolvedGlobal(t, s, sharedDoc, "TriggerServerEvent")
 	assertUnresolvedGlobal(t, s, sharedDoc, "RegisterNUICallback")
 	assertUnresolvedGlobal(t, s, sharedDoc, "source")
+	assertUnresolvedGlobal(t, s, sharedDoc, "PerformHttpRequest")
+	assertUnresolvedGlobal(t, s, sharedDoc, "GetPlayers")
+	assertUnresolvedGlobal(t, s, sharedDoc, "os")
+	assertUnresolvedGlobal(t, s, sharedDoc, "io")
 }
 
 func TestFiveMRuntimeABIHoverDocs(t *testing.T) {
