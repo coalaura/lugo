@@ -342,7 +342,7 @@ func TestFiveMLazyNativeResolution(t *testing.T) {
 	}
 
 	hover := h.hover("native_client_call")
-	if hover == nil || !strings.Contains(hover.Contents.Value, "current player's ped handle") {
+	if hover == nil || !strings.Contains(hover.Contents.Value, "Returns the entity handle for the local player ped") {
 		t.Fatalf("hover for native_client_call = %#v, want generated native docs", hover)
 	}
 
@@ -356,8 +356,8 @@ func TestFiveMNativeCatalogIsolation(t *testing.T) {
 	h := newFiveMFixtureHarness(t, "resource_natives")
 
 	assertResolvedGlobalTarget(t, h.server, h.docForMarker("native_client_call"), "PlayerPedId", "std:///fivem/natives_universal.lua")
-	assertUnresolvedGlobal(t, h.server, h.docForMarker("native_client_legacy_hidden"), "GetVehicleMaxNumberOfPassengers")
-	assertUnresolvedGlobal(t, h.server, h.docForMarker("native_client_server_hidden"), "GetInvokingResource")
+	assertResolvedGlobalTarget(t, h.server, h.docForMarker("native_client_legacy_hidden"), "GetVehicleMaxNumberOfPassengers", "std:///fivem/natives_universal.lua")
+	assertResolvedGlobalTarget(t, h.server, h.docForMarker("native_client_server_hidden"), "GetInvokingResource", "std:///fivem/natives_universal.lua")
 
 	assertResolvedGlobalTarget(t, h.server, h.docForMarker("native_server_call"), "GetInvokingResource", "std:///fivem/natives_server.lua")
 	assertUnresolvedGlobal(t, h.server, h.docForMarker("native_server_client_hidden"), "PlayerPedId")
