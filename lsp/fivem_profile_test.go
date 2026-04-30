@@ -189,8 +189,8 @@ shared_script 'shared.lua'
 		assertUnresolvedGlobal(t, s, doc, "os")
 	}
 
-	assertResolvedGlobalTarget(t, s, serverDoc, "io", "std:///io.lua")
-	assertResolvedGlobalTarget(t, s, serverDoc, "os", "std:///os.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "io", "std:///fivem/server.lua")
+	assertResolvedGlobalTarget(t, s, serverDoc, "os", "std:///fivem/server.lua")
 }
 
 func TestFiveMMetadataPrecedence(t *testing.T) {
