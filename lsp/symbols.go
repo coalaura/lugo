@@ -775,7 +775,11 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 
 				propType = doc.InferType(pID)
 			case ast.KindMethodCall, ast.KindMethodName:
-				propType = doc.inferMemberExpr(pNode)
+				if int(pID) < len(doc.Inferring) && doc.Inferring[pID] {
+					break
+				}
+
+				propType = doc.InferType(pID)
 			}
 
 			if propType.DeclNode != ast.InvalidNode && propType.DeclURI != "" {

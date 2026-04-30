@@ -198,14 +198,14 @@ func (s *Server) handleHover(req Request) {
 						if pID != ast.InvalidNode {
 							pNode := doc.Tree.Nodes[pID]
 
-							switch pNode.Kind {
-							case ast.KindMemberExpr:
-								baseType = doc.InferType(pID)
-							case ast.KindMethodCall, ast.KindMethodName:
-								baseType = doc.inferMemberExpr(pNode)
-							}
+						switch pNode.Kind {
+						case ast.KindMemberExpr:
+							baseType = doc.InferType(pID)
+						case ast.KindMethodCall, ast.KindMethodName:
+							baseType = doc.InferType(pID)
 						}
 					}
+				}
 
 					if ctx.IsProp {
 						inferred := doc.ContextualType(ctx.IdentNodeID, offset, baseType)
@@ -406,7 +406,7 @@ func (s *Server) handleHover(req Request) {
 					case ast.KindMemberExpr:
 						baseType = doc.InferType(pID)
 					case ast.KindMethodCall, ast.KindMethodName:
-						baseType = doc.inferMemberExpr(pNode)
+						baseType = doc.InferType(pID)
 					}
 				}
 			}

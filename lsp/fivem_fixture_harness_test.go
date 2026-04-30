@@ -144,6 +144,31 @@ func TestFiveMFixtureNonFiveMControl(t *testing.T) {
 	}
 }
 
+func TestCodeActionDoesNotRecurseOnUnresolvedMethodCall(t *testing.T) {
+	h := newFiveMFixtureHarness(t, "plain_lua")
+
+	h.writeWorkspaceFile("plain_lua/code_action.lua", `
+local subject = {}
+
+function subject:test()
+	return UnknownReceiver:missingMethod() --[[@code_action_unresolved_method]]
+end
+`)
+
+	h.reindex()
+
+	marker := h.requireMarker("code_action_unresolved_method")
+	actions := h.codeActions(marker.RelPath, Range{Start: marker.Position, End: marker.Position}, nil)
+
+	if actions == nil {
+		t.Fatal("code actions should return an empty slice instead of nil or crashing")
+	}
+
+	if hasDiagnosticCode(h.diagnostics("plain_lua/code_action.lua"), "unaccounted-file") {
+		t.Fatal("plain code-action regression fixture should not report a FiveM unaccounted-file diagnostic")
+	}
+}
+
 func newFiveMFixtureHarness(t testing.TB, fixtureNames ...string) *fiveMFixtureHarness {
 	t.Helper()
 
