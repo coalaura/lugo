@@ -191,6 +191,7 @@ func newFiveMFixtureHarnessWithoutIndex(t testing.TB, fixtureNames ...string) *f
 	s.DiagFiveMUnknownExport = true
 	s.DiagFiveMUnknownResource = true
 	s.SuggestFunctionParams = true
+	attachTestFiveMNativeBundleLoader(t, s)
 
 	rootURI := s.pathToURI(root)
 	rootPath := strings.ToLower(filepath.Clean(root))

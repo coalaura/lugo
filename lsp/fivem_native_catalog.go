@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/coalaura/lugo/ast"
@@ -25,7 +26,7 @@ func (s *Server) ensureFiveMNativeBundleLoaded(doc *Document) string {
 		return uri
 	}
 
-	b, err := stdlibFS.ReadFile("stdlib/fivem/" + selection.Build)
+	b, err := s.readFiveMNativeBundle(selection.Build)
 	if err != nil {
 		return ""
 	}
@@ -37,6 +38,23 @@ func (s *Server) ensureFiveMNativeBundleLoaded(doc *Document) string {
 	}
 
 	return ""
+}
+
+func (s *Server) readFiveMNativeBundle(name string) ([]byte, error) {
+	if name == "" {
+		return nil, errors.New("empty FiveM native bundle name")
+	}
+
+	b, err := stdlibFS.ReadFile("stdlib/fivem/" + name)
+	if err == nil {
+		return b, nil
+	}
+
+	if s != nil && s.fiveMNativeBundleLoader != nil {
+		return s.fiveMNativeBundleLoader(name)
+	}
+
+	return loadRuntimeFiveMNativeBundle(name)
 }
 
 func (s *Server) ensureFiveMNativeSymbol(doc *Document, name string) bool {

@@ -119,6 +119,7 @@ type Server struct {
 	DiagFiveMUnaccountedFile bool
 	DiagFiveMUnknownExport   bool
 	DiagFiveMUnknownResource bool
+	fiveMNativeBundleLoader  func(name string) ([]byte, error)
 
 	IsCI              bool
 	CIDiagnosticCount int

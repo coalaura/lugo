@@ -222,6 +222,7 @@ func newFiveMProfileTestServer(t *testing.T) (*Server, string) {
 	s.FeatureFiveM = true
 	s.FiveMResources = make(map[string]*FiveMResource)
 	s.FiveMResourceByName = make(map[string]*FiveMResource)
+	attachTestFiveMNativeBundleLoader(t, s)
 
 	return s, root
 }
