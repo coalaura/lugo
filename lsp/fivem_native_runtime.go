@@ -1,7 +1,6 @@
 package lsp
 
 import (
-	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,20 +15,16 @@ import (
 )
 
 const (
-	fiveMNativeGTACatalogURL    = "https://static.cfx.re/natives/natives.json"
-	fiveMNativeCFXCatalogURL    = "https://static.cfx.re/natives/natives_cfx.json"
-	fiveMNativeRDR3CatalogURL   = "https://raw.githubusercontent.com/VORPCORE/RDR3natives/main/rdr3natives.json"
-	fiveMNativeDocsURL          = "https://docs.fivem.net/natives/?_"
-	fiveMNativeRDR3DocsURL      = "https://rdr3natives.com/?_"
-	fiveMNativeCacheVersion     = "v1"
-	fiveMNativeGeneratorUA      = "lugo-fivem-native-runtime/1.0"
-	fiveMNativeHTTPTimeout      = 2 * time.Minute
-	fiveMNativeCacheFolderName  = "fivem-native-bundles"
-	fiveMNativeSnapshotFilePath = "fivem_native_snapshot/catalog.json"
+	fiveMNativeGTACatalogURL   = "https://static.cfx.re/natives/natives.json"
+	fiveMNativeCFXCatalogURL   = "https://static.cfx.re/natives/natives_cfx.json"
+	fiveMNativeRDR3CatalogURL  = "https://raw.githubusercontent.com/VORPCORE/RDR3natives/main/rdr3natives.json"
+	fiveMNativeDocsURL         = "https://docs.fivem.net/natives/?_"
+	fiveMNativeRDR3DocsURL     = "https://rdr3natives.com/?_"
+	fiveMNativeCacheVersion    = "v1"
+	fiveMNativeGeneratorUA     = "lugo-fivem-native-runtime/1.0"
+	fiveMNativeHTTPTimeout     = 2 * time.Minute
+	fiveMNativeCacheFolderName = "fivem-native-bundles"
 )
-
-//go:embed fivem_native_snapshot/catalog.json
-var fiveMNativeSnapshotFS embed.FS
 
 var fiveMNativeRuntimeCache = &runtimeFiveMNativeCache{}
 
@@ -69,6 +64,7 @@ type runtimeGeneratedBundle struct {
 	Description string
 	Natives     []runtimeGeneratedNative
 	Fallback    bool
+	RawContent  []byte
 }
 
 type runtimeGeneratedNative struct {
@@ -82,31 +78,6 @@ type runtimeGeneratedNative struct {
 type runtimeGeneratedParam struct {
 	Name string
 	Type string
-}
-
-type runtimeLegacySnapshot struct {
-	Bundles []runtimeLegacyBundle `json:"bundles"`
-}
-
-type runtimeLegacyBundle struct {
-	Name        string                `json:"name"`
-	Input       string                `json:"input"`
-	Family      string                `json:"family"`
-	Runtime     string                `json:"runtime"`
-	Description string                `json:"description"`
-	Natives     []runtimeLegacyNative `json:"natives"`
-}
-
-type runtimeLegacyNative struct {
-	Name        string               `json:"name"`
-	Description string               `json:"description"`
-	Params      []runtimeLegacyParam `json:"params"`
-	Returns     string               `json:"returns"`
-}
-
-type runtimeLegacyParam struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
 }
 
 func loadRuntimeFiveMNativeBundle(name string) ([]byte, error) {
@@ -167,7 +138,11 @@ func (c *runtimeFiveMNativeCache) ensureCacheDir() (string, error) {
 
 	for _, bundle := range bundles {
 		path := filepath.Join(cacheDir, bundle.Name)
-		if err := writeRuntimeFiveMNativeBundle(path, []byte(renderRuntimeFiveMNativeBundle(bundle))); err != nil {
+		content := bundle.RawContent
+		if len(content) == 0 {
+			content = []byte(renderRuntimeFiveMNativeBundle(bundle))
+		}
+		if err := writeRuntimeFiveMNativeBundle(path, content); err != nil {
 			return "", err
 		}
 	}
@@ -255,7 +230,7 @@ func buildRuntimeFiveMNativeBundles() ([]runtimeGeneratedBundle, error) {
 		buildRuntimeServerBundle(cfxCatalog),
 	}
 
-	nyBundle, err := buildRuntimeNYBundleFromEmbeddedSnapshot()
+	nyBundle, err := buildRuntimeNYBundleFromEmbeddedLua()
 	if err != nil {
 		return nil, err
 	}
@@ -354,54 +329,21 @@ func buildRuntimeServerBundle(cfxCatalog runtimeSourceCatalog) runtimeGeneratedB
 	return bundle
 }
 
-func buildRuntimeNYBundleFromEmbeddedSnapshot() (runtimeGeneratedBundle, error) {
-	b, err := fiveMNativeSnapshotFS.ReadFile(fiveMNativeSnapshotFilePath)
+func buildRuntimeNYBundleFromEmbeddedLua() (runtimeGeneratedBundle, error) {
+	b, err := stdlibFS.ReadFile("stdlib/fivem/ny_universal.lua")
 	if err != nil {
-		return runtimeGeneratedBundle{}, fmt.Errorf("read embedded FiveM native snapshot: %w", err)
+		return runtimeGeneratedBundle{}, fmt.Errorf("read embedded NY FiveM native bundle: %w", err)
 	}
 
-	var snap runtimeLegacySnapshot
-	if err := json.Unmarshal(b, &snap); err != nil {
-		return runtimeGeneratedBundle{}, fmt.Errorf("decode embedded FiveM native snapshot: %w", err)
-	}
-
-	for _, bundle := range snap.Bundles {
-		if bundle.Name != "ny_universal.lua" {
-			continue
-		}
-
-		out := runtimeGeneratedBundle{
-			Name:        bundle.Name,
-			Input:       bundle.Input,
-			Family:      bundle.Family,
-			Runtime:     bundle.Runtime,
-			Description: "Generated from Lugo's embedded NY snapshot because the upstream metadata feeds do not publish an NY catalog.",
-			Fallback:    true,
-		}
-
-		for _, native := range bundle.Natives {
-			params := make([]runtimeGeneratedParam, 0, len(native.Params))
-			for _, param := range native.Params {
-				params = append(params, runtimeGeneratedParam{Name: sanitizeRuntimeFiveMField(param.Name), Type: param.Type})
-			}
-
-			returns := []string{}
-			if native.Returns != "" && native.Returns != "void" {
-				returns = append(returns, native.Returns)
-			}
-
-			out.Natives = append(out.Natives, runtimeGeneratedNative{
-				Name:        native.Name,
-				Description: "---" + native.Description,
-				Params:      params,
-				Returns:     returns,
-			})
-		}
-
-		return out, nil
-	}
-
-	return runtimeGeneratedBundle{}, errors.New("embedded snapshot missing ny_universal.lua")
+	return runtimeGeneratedBundle{
+		Name:        "ny_universal.lua",
+		Input:       "stdlib/fivem/ny_universal.lua",
+		Family:      "ny",
+		Runtime:     "client",
+		Description: "Copied from Lugo's embedded NY compatibility bundle because the upstream metadata feeds do not publish an NY catalog.",
+		Fallback:    true,
+		RawContent:  b,
+	}, nil
 }
 
 func collectRuntimeGeneratedNatives(catalog runtimeSourceCatalog, docsBase string, include func(runtimeSourceNative) bool) []runtimeGeneratedNative {
