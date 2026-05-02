@@ -66,16 +66,34 @@ func (s *Server) ensureFiveMNativeSymbol(doc *Document, name string) bool {
 		return false
 	}
 
-	bundleURI := s.ensureFiveMNativeBundleLoaded(doc)
-	if bundleURI == "" {
+	selection := s.getFiveMNativeSelection(doc)
+	if !selection.Active() || selection.Build == "" {
 		return false
 	}
-
-	selection := s.getFiveMNativeSelection(doc)
 
 	key := GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes([]byte(name))}
 	syms, ok := s.GlobalIndex[key]
 	if !ok {
+		return false
+	}
+
+	for _, sym := range syms {
+		tgtDoc, ok := s.Documents[sym.URI]
+		if !ok {
+			continue
+		}
+
+		if fiveMNativeBundleNameFromDocument(tgtDoc) != selection.Build {
+			continue
+		}
+
+		if s.canSeeSymbol(doc, tgtDoc) {
+			return true
+		}
+	}
+
+	bundleURI := s.ensureFiveMNativeBundleLoaded(doc)
+	if bundleURI == "" {
 		return false
 	}
 

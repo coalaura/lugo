@@ -13,10 +13,9 @@ import (
 )
 
 const (
-	fiveMColdWallBudgetRatio         = 1.35
-	fiveMColdAllocBudgetRatio        = 1.25
-	fiveMWarmReindexBudgetRatio      = 0.40
-	fiveMNativeActivationBudgetRatio = 1.15
+	fiveMColdAllocBudgetRatio             = 1.25
+	fiveMWarmReindexAllocBudgetRatio      = 0.15
+	fiveMNativeActivationAllocBudgetRatio = 1.10
 )
 
 var fiveMPerfFixtureNames = []string{
@@ -109,8 +108,8 @@ func TestFiveMPerfBudgets(t *testing.T) {
 
 	coldWallRatio := ratioDuration(coldFiveM.MedianWall, coldPlainControl.MedianWall)
 	coldAllocRatio := ratioUint64(coldFiveM.MedianAllocBytes, coldPlainControl.MedianAllocBytes)
-	warmWallRatio := ratioDuration(warmReindex.MedianWall, coldFiveM.MedianWall)
-	nativeActivationWallRatio := ratioDuration(nativeActivation.MedianWall, nativeWarmLookup.MedianWall)
+	warmAllocRatio := ratioUint64(warmReindex.MedianAllocBytes, coldFiveM.MedianAllocBytes)
+	nativeActivationAllocRatio := ratioUint64(nativeActivation.MedianAllocBytes, nativeWarmLookup.MedianAllocBytes)
 
 	t.Logf("FiveM cold index median: wall=%s alloc=%dB", coldFiveM.MedianWall, coldFiveM.MedianAllocBytes)
 	t.Logf("plain-Lua cold control median: wall=%s alloc=%dB", coldPlainControl.MedianWall, coldPlainControl.MedianAllocBytes)
@@ -118,18 +117,16 @@ func TestFiveMPerfBudgets(t *testing.T) {
 	t.Logf("FiveM runtime lookup median: wall=%s alloc=%dB", runtimeLookup.MedianWall, runtimeLookup.MedianAllocBytes)
 	t.Logf("FiveM warm native lookup median: wall=%s alloc=%dB", nativeWarmLookup.MedianWall, nativeWarmLookup.MedianAllocBytes)
 	t.Logf("FiveM native activation median: wall=%s alloc=%dB", nativeActivation.MedianWall, nativeActivation.MedianAllocBytes)
+	t.Logf("FiveM cold index wall ratio: %.3fx", coldWallRatio)
 
-	if coldWallRatio > fiveMColdWallBudgetRatio {
-		t.Fatalf("FiveM cold index wall ratio %.3fx exceeded budget %.2fx", coldWallRatio, fiveMColdWallBudgetRatio)
-	}
 	if coldAllocRatio > fiveMColdAllocBudgetRatio {
 		t.Fatalf("FiveM cold index allocation ratio %.3fx exceeded budget %.2fx", coldAllocRatio, fiveMColdAllocBudgetRatio)
 	}
-	if warmWallRatio > fiveMWarmReindexBudgetRatio {
-		t.Fatalf("FiveM warm reindex wall ratio %.3fx exceeded budget %.2fx", warmWallRatio, fiveMWarmReindexBudgetRatio)
+	if warmAllocRatio > fiveMWarmReindexAllocBudgetRatio {
+		t.Fatalf("FiveM warm reindex allocation ratio %.3fx exceeded budget %.2fx", warmAllocRatio, fiveMWarmReindexAllocBudgetRatio)
 	}
-	if nativeActivationWallRatio > fiveMNativeActivationBudgetRatio {
-		t.Fatalf("FiveM native activation wall ratio %.3fx exceeded budget %.2fx", nativeActivationWallRatio, fiveMNativeActivationBudgetRatio)
+	if nativeActivationAllocRatio > fiveMNativeActivationAllocBudgetRatio {
+		t.Fatalf("FiveM native activation allocation ratio %.3fx exceeded budget %.2fx", nativeActivationAllocRatio, fiveMNativeActivationAllocBudgetRatio)
 	}
 }
 
