@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -71,37 +70,40 @@ func TestFiveMPerfBudgets(t *testing.T) {
 		if len(syms) == 0 || syms[0].URI != "std:///fivem/shared.lua" {
 			tb.Fatalf("runtime lookup resolved to %+v, want std:///fivem/shared.lua", syms)
 		}
-		if got := countLoadedFiveMNativeBundles(h.server); got != 0 {
-			tb.Fatalf("runtime lookup loaded %d native bundles, want 0", got)
+		if got := countLoadedFiveMNativeBundles(h.server); got != len(fiveMNativeBundleNames) {
+			tb.Fatalf("runtime lookup kept %d native bundles indexed, want %d", got, len(fiveMNativeBundleNames))
 		}
 	})
 
 	nativeWarmLookup := measureFiveMPerfMetric(t, 9, func(tb testing.TB) *fiveMFixtureHarness {
 		h := newFiveMNativePerfHarness(tb)
+		wantURI := requireFiveMNativeBundleURI(tb, h.server, "natives_universal.lua")
 		ctx := h.resolve("native_client_call")
-		if ctx == nil || ctx.TargetURI != "std:///fivem/natives_universal.lua" {
-			tb.Fatalf("native warm-up resolved to %+v, want std:///fivem/natives_universal.lua", ctx)
+		if ctx == nil || ctx.TargetURI != wantURI {
+			tb.Fatalf("native warm-up resolved to %+v, want %s", ctx, wantURI)
 		}
 		return h
 	}, func(tb testing.TB, h *fiveMFixtureHarness) {
+		wantURI := requireFiveMNativeBundleURI(tb, h.server, "natives_universal.lua")
 		ctx := h.resolve("native_client_call")
-		if ctx == nil || ctx.TargetURI != "std:///fivem/natives_universal.lua" {
-			tb.Fatalf("native warm lookup resolved to %+v, want std:///fivem/natives_universal.lua", ctx)
+		if ctx == nil || ctx.TargetURI != wantURI {
+			tb.Fatalf("native warm lookup resolved to %+v, want %s", ctx, wantURI)
 		}
-		if got := countLoadedFiveMNativeBundles(h.server); got != 1 {
-			tb.Fatalf("native warm lookup kept %d native bundles loaded, want 1", got)
+		if got := countLoadedFiveMNativeBundles(h.server); got != len(fiveMNativeBundleNames) {
+			tb.Fatalf("native warm lookup kept %d native bundles indexed, want %d", got, len(fiveMNativeBundleNames))
 		}
 	})
 
 	nativeActivation := measureFiveMPerfMetric(t, 9, func(tb testing.TB) *fiveMFixtureHarness {
 		return newFiveMNativePerfHarness(tb)
 	}, func(tb testing.TB, h *fiveMFixtureHarness) {
+		wantURI := requireFiveMNativeBundleURI(tb, h.server, "natives_universal.lua")
 		ctx := h.resolve("native_client_call")
-		if ctx == nil || ctx.TargetURI != "std:///fivem/natives_universal.lua" {
-			tb.Fatalf("native activation resolved to %+v, want std:///fivem/natives_universal.lua", ctx)
+		if ctx == nil || ctx.TargetURI != wantURI {
+			tb.Fatalf("native activation resolved to %+v, want %s", ctx, wantURI)
 		}
-		if got := countLoadedFiveMNativeBundles(h.server); got != 1 {
-			tb.Fatalf("native activation loaded %d native bundles, want 1", got)
+		if got := countLoadedFiveMNativeBundles(h.server); got != len(fiveMNativeBundleNames) {
+			tb.Fatalf("native activation kept %d native bundles indexed, want %d", got, len(fiveMNativeBundleNames))
 		}
 	})
 
@@ -166,14 +168,14 @@ func BenchmarkFiveM(b *testing.B) {
 
 	b.Run("NativeActivation", func(b *testing.B) {
 		h := newFiveMNativePerfHarness(b)
+		wantURI := requireFiveMNativeBundleURI(b, h.server, "natives_universal.lua")
 
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			clearLoadedFiveMNativeBundles(b, h)
 			ctx := h.resolve("native_client_call")
-			if ctx == nil || ctx.TargetURI != "std:///fivem/natives_universal.lua" {
-				b.Fatalf("native activation resolved to %+v, want std:///fivem/natives_universal.lua", ctx)
+			if ctx == nil || ctx.TargetURI != wantURI {
+				b.Fatalf("native activation resolved to %+v, want %s", ctx, wantURI)
 			}
 		}
 	})
@@ -207,8 +209,8 @@ func newFiveMNativePerfHarness(tb testing.TB) *fiveMFixtureHarness {
 	h := newFiveMFixtureHarnessWithoutIndex(tb, "resource_natives")
 	h.reindex()
 
-	if got := countLoadedFiveMNativeBundles(h.server); got != 0 {
-		tb.Fatalf("loaded native bundles after native perf setup = %d, want 0", got)
+	if got := countLoadedFiveMNativeBundles(h.server); got != len(fiveMNativeBundleNames) {
+		tb.Fatalf("loaded native bundles after native perf setup = %d, want %d", got, len(fiveMNativeBundleNames))
 	}
 
 	return h
@@ -251,26 +253,6 @@ func renameFiveMManifestFiles(tb testing.TB, root string) {
 	})
 	if err != nil {
 		tb.Fatalf("rename FiveM manifests under %s: %v", root, err)
-	}
-}
-
-func clearLoadedFiveMNativeBundles(tb testing.TB, h *fiveMFixtureHarness) {
-	tb.Helper()
-
-	var loaded []string
-	for uri := range h.server.Documents {
-		if strings.HasPrefix(uri, "std:///fivem/") && isFiveMNativeBundleName(strings.TrimPrefix(uri, "std:///fivem/")) {
-			loaded = append(loaded, uri)
-		}
-	}
-
-	for _, uri := range loaded {
-		h.server.clearDocument(uri)
-	}
-	h.resetRPC()
-
-	if got := countLoadedFiveMNativeBundles(h.server); got != 0 {
-		tb.Fatalf("loaded native bundles after clear = %d, want 0", got)
 	}
 }
 

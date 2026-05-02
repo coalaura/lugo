@@ -6,6 +6,9 @@ const { LanguageClient } = require("vscode-languageclient/node");
 
 let client, restarting, indexing, debounce;
 
+const fiveMNativeCacheVersion = "v1";
+const fiveMNativeCacheFolderName = "fivem-native-bundles";
+
 async function restartClient(context) {
 	if (restarting) {
 		return;
@@ -28,6 +31,7 @@ function buildInitializationOptions() {
 	const filesConfig = vscode.workspace.getConfiguration("files"),
 		searchConfig = vscode.workspace.getConfiguration("search"),
 		lugoConfig = vscode.workspace.getConfiguration("lugo");
+	const featureFiveM = lugoConfig.get("fivem.enabled") === true;
 
 	let ignoreGlobs = lugoConfig.get("workspace.ignoreGlobs") || [];
 
@@ -45,7 +49,7 @@ function buildInitializationOptions() {
 	ignoreGlobs = [...new Set(ignoreGlobs)];
 
 	return {
-		libraryPaths: lugoConfig.get("workspace.libraryPaths") || [],
+		libraryPaths: buildLibraryPaths(lugoConfig.get("workspace.libraryPaths") || [], featureFiveM),
 		ignoreGlobs: ignoreGlobs,
 		knownGlobals: lugoConfig.get("environment.knownGlobals") || [],
 		bannedSymbols: lugoConfig.get("diagnostics.bannedSymbols") || {},
@@ -92,11 +96,43 @@ function buildInitializationOptions() {
 		formatOpinionated: lugoConfig.get("features.formatOpinionated") === true,
 		suggestFunctionParams: lugoConfig.get("completion.suggestFunctionParams") !== false,
 
-		featureFiveM: lugoConfig.get("fivem.enabled") === true,
+		featureFiveM: featureFiveM,
 		diagFiveMUnaccountedFile: lugoConfig.get("fivem.diagnostics.unaccountedFile") !== false,
 		diagFiveMUnknownExport: lugoConfig.get("fivem.diagnostics.unknownExport") !== false,
 		diagFiveMUnknownResource: lugoConfig.get("fivem.diagnostics.unknownResource") !== false,
 	};
+}
+
+function buildLibraryPaths(paths, featureFiveM) {
+	const libraryPaths = [...paths];
+	if (!featureFiveM) {
+		return libraryPaths;
+	}
+
+	const runtimePath = resolveFiveMNativeCacheDir();
+	if (!libraryPaths.includes(runtimePath)) {
+		libraryPaths.push(runtimePath);
+	}
+
+	return libraryPaths;
+}
+
+function resolveFiveMNativeCacheDir() {
+	let base = "";
+
+	if (process.platform === "win32") {
+		base = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+	} else if (process.platform === "darwin") {
+		base = path.join(os.homedir(), "Library", "Caches");
+	} else {
+		base = process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache");
+	}
+
+	if (!base) {
+		base = os.tmpdir();
+	}
+
+	return path.join(base, "lugo", fiveMNativeCacheFolderName, fiveMNativeCacheVersion);
 }
 
 function scheduleConfigUpdate() {

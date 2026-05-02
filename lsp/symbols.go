@@ -278,7 +278,7 @@ func (s *Server) handleDocumentSymbol(req Request) {
 					lNode := doc.Tree.Nodes[lID]
 
 					var (
-						rID   ast.NodeID = ast.InvalidNode
+						rID   = ast.InvalidNode
 						rNode ast.Node
 					)
 
@@ -365,7 +365,7 @@ func (s *Server) handleDocumentSymbol(req Request) {
 			}
 
 			var (
-				targetFuncID ast.NodeID = ast.InvalidNode
+				targetFuncID = ast.InvalidNode
 				targetDoc    *Document
 				paramOffset  int
 			)
@@ -624,7 +624,7 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 	var (
 		gKey      GlobalKey
 		isProp    bool
-		recDef    ast.NodeID = ast.InvalidNode
+		recDef    = ast.InvalidNode
 		exportRes string
 	)
 
@@ -1054,7 +1054,7 @@ func (s *Server) getBestDefsForContext(ctx *SymbolContext, doc *Document, identN
 	}
 
 	var (
-		activeCallArgs int = -1
+		activeCallArgs = -1
 		isMethodCall   bool
 	)
 
@@ -1080,7 +1080,7 @@ func (s *Server) getBestDefsForContext(ctx *SymbolContext, doc *Document, identN
 	if activeCallArgs >= 0 {
 		var (
 			bestDefs  []GlobalSymbol
-			bestScore int = -1
+			bestScore = -1
 		)
 
 		for _, def := range defs {
@@ -1402,8 +1402,9 @@ func (s *Server) canSeeLibrarySymbol(srcDoc, tgtDoc *Document) bool {
 
 	uri := tgtDoc.URI
 	profile := s.getDocumentFiveMProfile(srcDoc)
+	bundleName := fiveMNativeBundleNameFromDocument(tgtDoc)
 
-	if strings.HasPrefix(uri, "std:///fivem/") {
+	if strings.HasPrefix(uri, "std:///fivem/") && bundleName == "" {
 		if srcDoc == nil {
 			return false
 		}
@@ -1420,14 +1421,17 @@ func (s *Server) canSeeLibrarySymbol(srcDoc, tgtDoc *Document) bool {
 		case "export_bridge.lua":
 			return s.hasFiveMExportBridge(srcDoc)
 		default:
-			name := strings.TrimPrefix(uri, "std:///fivem/")
-			if !isFiveMNativeBundleName(name) {
-				return false
-			}
-
-			selection := s.getFiveMNativeSelection(srcDoc)
-			return selection.Active() && selection.Build == name
+			return false
 		}
+	}
+
+	if bundleName != "" {
+		if srcDoc == nil {
+			return false
+		}
+
+		selection := s.getFiveMNativeSelection(srcDoc)
+		return selection.Active() && selection.Build == bundleName
 	}
 
 	if !strings.HasPrefix(uri, "std:///") || srcDoc == nil {
@@ -1449,6 +1453,14 @@ func (s *Server) canSeeLibrarySymbol(srcDoc, tgtDoc *Document) bool {
 }
 
 func (s *Server) globalSymbolPriority(uri string) int {
+	if doc, ok := s.Documents[uri]; ok && fiveMNativeBundleNameFromDocument(doc) != "" {
+		return 1
+	}
+
+	if name := fiveMNativeBundleNameFromURI(uri); name != "" {
+		return 1
+	}
+
 	if strings.HasPrefix(uri, "std:///fivem/") {
 		return 1
 	}

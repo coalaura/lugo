@@ -197,7 +197,8 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsReindex bool, needsRepublish bool) {
-	if s.setLibraryPaths(opts.LibraryPaths) {
+	effectiveLibraryPaths := s.buildConfiguredLibraryPaths(opts.LibraryPaths, opts.FeatureFiveM)
+	if s.setLibraryPaths(effectiveLibraryPaths) {
 		needsReindex = true
 	}
 
@@ -281,6 +282,26 @@ func (s *Server) setIgnoreGlobs(globs []string) bool {
 	s.compileIgnorePatterns()
 
 	return true
+}
+
+func (s *Server) buildConfiguredLibraryPaths(paths []string, featureFiveM bool) []string {
+	configured := slices.Clone(paths)
+	if !featureFiveM {
+		return configured
+	}
+
+	runtimePath, err := ensureRuntimeFiveMNativeLibraryPath()
+	if err != nil || strings.TrimSpace(runtimePath) == "" {
+		return configured
+	}
+
+	for _, existing := range configured {
+		if filepath.Clean(existing) == filepath.Clean(runtimePath) {
+			return configured
+		}
+	}
+
+	return append(configured, runtimePath)
 }
 
 func (s *Server) setKnownGlobals(globals []string) bool {

@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"fmt"
+	"path/filepath"
 	"testing"
 )
 
@@ -89,4 +90,27 @@ function GetCharCoordinates(charHandle) end
 		}
 		return []byte(content), nil
 	}
+}
+
+func materializeTestFiveMNativeLibrary(tb testing.TB, s *Server) string {
+	tb.Helper()
+	if s == nil {
+		tb.Fatal("server is nil")
+	}
+	if s.fiveMNativeBundleLoader == nil {
+		tb.Fatal("FiveM native bundle loader is nil")
+	}
+
+	dir := tb.TempDir()
+	for name := range fiveMNativeBundleNames {
+		content, err := s.fiveMNativeBundleLoader(name)
+		if err != nil {
+			tb.Fatalf("load test FiveM native bundle %s: %v", name, err)
+		}
+		if err := writeRuntimeFiveMNativeBundle(filepath.Join(dir, name), content); err != nil {
+			tb.Fatalf("write test FiveM native bundle %s: %v", name, err)
+		}
+	}
+
+	return dir
 }

@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"embed"
+	"path/filepath"
 	"strings"
 )
 
@@ -40,7 +41,7 @@ func fiveMNativeBundleURI(name string) string {
 
 func fiveMNativeBundleNameFromURI(uri string) string {
 	if !strings.HasPrefix(uri, "std:///fivem/") {
-		return ""
+		return fiveMNativeBundleNameFromPath(uri)
 	}
 
 	name := strings.TrimPrefix(uri, "std:///fivem/")
@@ -49,4 +50,33 @@ func fiveMNativeBundleNameFromURI(uri string) string {
 	}
 
 	return name
+}
+
+func fiveMNativeBundleNameFromPath(path string) string {
+	if path == "" {
+		return ""
+	}
+
+	name := filepath.Base(path)
+	if !isFiveMNativeBundleName(name) {
+		return ""
+	}
+
+	return name
+}
+
+func fiveMNativeBundleNameFromDocument(doc *Document) string {
+	if doc == nil {
+		return ""
+	}
+
+	if name := fiveMNativeBundleNameFromURI(doc.URI); name != "" {
+		return name
+	}
+
+	if !doc.IsLibrary {
+		return ""
+	}
+
+	return fiveMNativeBundleNameFromPath(doc.Path)
 }

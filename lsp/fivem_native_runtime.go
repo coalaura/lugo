@@ -114,7 +114,7 @@ func loadRuntimeFiveMNativeBundle(name string) ([]byte, error) {
 		return nil, fmt.Errorf("unknown FiveM native bundle %q", name)
 	}
 
-	cacheDir, err := fiveMNativeRuntimeCache.ensureCacheDir()
+	cacheDir, err := ensureRuntimeFiveMNativeLibraryPath()
 	if err != nil {
 		return nil, err
 	}
@@ -125,6 +125,10 @@ func loadRuntimeFiveMNativeBundle(name string) ([]byte, error) {
 	}
 
 	return b, nil
+}
+
+func ensureRuntimeFiveMNativeLibraryPath() (string, error) {
+	return fiveMNativeRuntimeCache.ensureCacheDir()
 }
 
 func (c *runtimeFiveMNativeCache) ensureCacheDir() (string, error) {
@@ -151,6 +155,13 @@ func (c *runtimeFiveMNativeCache) ensureCacheDir() (string, error) {
 			c.cacheDir = cacheDir
 			return cacheDir, nil
 		}
+
+		if seedErr := seedRuntimeFiveMNativeBundlesFromEmbedded(cacheDir); seedErr == nil {
+			c.initialized = true
+			c.cacheDir = cacheDir
+			return cacheDir, nil
+		}
+
 		return "", err
 	}
 
@@ -200,6 +211,21 @@ func writeRuntimeFiveMNativeBundle(path string, content []byte) error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("publish FiveM native bundle %s: %w", filepath.Base(path), err)
 	}
+	return nil
+}
+
+func seedRuntimeFiveMNativeBundlesFromEmbedded(cacheDir string) error {
+	for name := range fiveMNativeBundleNames {
+		content, err := stdlibFS.ReadFile("stdlib/fivem/" + name)
+		if err != nil {
+			return fmt.Errorf("read embedded FiveM native bundle %s: %w", name, err)
+		}
+
+		if err := writeRuntimeFiveMNativeBundle(filepath.Join(cacheDir, name), content); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

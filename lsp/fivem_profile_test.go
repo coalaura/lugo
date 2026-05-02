@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -223,6 +224,7 @@ func newFiveMProfileTestServer(t *testing.T) (*Server, string) {
 	s.FiveMResources = make(map[string]*FiveMResource)
 	s.FiveMResourceByName = make(map[string]*FiveMResource)
 	attachTestFiveMNativeBundleLoader(t, s)
+	s.setLibraryPaths([]string{materializeTestFiveMNativeLibrary(t, s)})
 
 	return s, root
 }
@@ -263,6 +265,20 @@ func indexEmbeddedStdlibForTest(t *testing.T, s *Server) {
 		b, err := stdlibFS.ReadFile("stdlib/" + job.Path)
 		if err != nil {
 			t.Fatalf("read stdlib %s: %v", job.Path, err)
+		}
+
+		s.updateDocument(job.Uri, b)
+	}
+
+	pendingJobs = pendingJobs[:0]
+	for _, libPath := range s.LibraryPaths {
+		s.indexWorkspace(libPath, &pendingJobs, &unchanged, new(int))
+	}
+
+	for _, job := range pendingJobs {
+		b, err := os.ReadFile(job.Path)
+		if err != nil {
+			t.Fatalf("read library %s: %v", job.Path, err)
 		}
 
 		s.updateDocument(job.Uri, b)
@@ -312,4 +328,15 @@ func assertUnresolvedGlobal(t *testing.T, s *Server, doc *Document, name string)
 	if ctx != nil && (ctx.TargetDefID != ast.InvalidNode || len(ctx.GlobalDefs) > 0) {
 		t.Fatalf("expected %s to stay hidden in %s", name, doc.URI)
 	}
+}
+
+func requireFiveMNativeBundleURI(t testing.TB, s *Server, name string) string {
+	t.Helper()
+
+	uri := s.findFiveMNativeBundleURI(name)
+	if uri == "" {
+		t.Fatalf("FiveM native bundle %s was not indexed", name)
+	}
+
+	return uri
 }

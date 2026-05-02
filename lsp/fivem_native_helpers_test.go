@@ -290,24 +290,25 @@ func TestFiveMNativeCatalogSelection(t *testing.T) {
 
 			addFiveMTestDocument(t, s, filepath.Join(root, tc.resourceDir, tc.manifestName), tc.manifest)
 			doc := addFiveMTestDocument(t, s, filepath.Join(root, tc.resourceDir, tc.docName), tc.source)
+			wantURI := requireFiveMNativeBundleURI(t, s, tc.wantBuild)
 
 			selection := s.getFiveMNativeSelection(doc)
 			if selection.Family != tc.wantFamily || selection.Build != tc.wantBuild {
 				t.Fatalf("selection = %+v, want family=%v build=%s", selection, tc.wantFamily, tc.wantBuild)
 			}
 
-			if got := countLoadedFiveMNativeBundles(s); got != 0 {
-				t.Fatalf("loaded native bundles before resolution = %d, want 0", got)
+			if got := countLoadedFiveMNativeBundles(s); got != len(fiveMNativeBundleNames) {
+				t.Fatalf("loaded native bundles before resolution = %d, want %d pre-indexed bundles", got, len(fiveMNativeBundleNames))
 			}
 
-			assertResolvedGlobalTarget(t, s, doc, tc.symbol, "std:///fivem/"+tc.wantBuild)
+			assertResolvedGlobalTarget(t, s, doc, tc.symbol, wantURI)
 
-			if got := countLoadedFiveMNativeBundles(s); got != 1 {
-				t.Fatalf("loaded native bundles after resolution = %d, want 1", got)
+			if got := countLoadedFiveMNativeBundles(s); got != len(fiveMNativeBundleNames) {
+				t.Fatalf("loaded native bundles after resolution = %d, want %d pre-indexed bundles", got, len(fiveMNativeBundleNames))
 			}
 
-			if _, ok := s.Documents["std:///fivem/"+tc.wantBuild]; !ok {
-				t.Fatalf("expected selected bundle std:///fivem/%s to be indexed", tc.wantBuild)
+			if _, ok := s.Documents[wantURI]; !ok {
+				t.Fatalf("expected selected bundle %s to be indexed", wantURI)
 			}
 		})
 	}
@@ -315,30 +316,31 @@ func TestFiveMNativeCatalogSelection(t *testing.T) {
 
 func TestFiveMLazyNativeResolution(t *testing.T) {
 	h := newFiveMFixtureHarness(t, "resource_natives")
+	wantURI := requireFiveMNativeBundleURI(t, h.server, "natives_universal.lua")
 
-	if got := countLoadedFiveMNativeBundles(h.server); got != 0 {
-		t.Fatalf("loaded native bundles before first lookup = %d, want 0", got)
-	}
-
-	if _, ok := h.server.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes([]byte("PlayerPedId"))}]; ok {
-		t.Fatal("PlayerPedId should not be indexed before lazy materialization")
-	}
-
-	ctx := h.resolve("native_client_call")
-	if ctx == nil || ctx.TargetURI != "std:///fivem/natives_universal.lua" {
-		t.Fatalf("native_client_call resolved to %+v, want std:///fivem/natives_universal.lua", ctx)
-	}
-
-	if got := countLoadedFiveMNativeBundles(h.server); got != 1 {
-		t.Fatalf("loaded native bundles after first lookup = %d, want 1", got)
-	}
-
-	if _, ok := h.server.Documents["std:///fivem/natives_universal.lua"]; !ok {
-		t.Fatal("expected natives_universal.lua document to be indexed after lazy lookup")
+	if got := countLoadedFiveMNativeBundles(h.server); got != len(fiveMNativeBundleNames) {
+		t.Fatalf("loaded native bundles before first lookup = %d, want %d pre-indexed bundles", got, len(fiveMNativeBundleNames))
 	}
 
 	if _, ok := h.server.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes([]byte("PlayerPedId"))}]; !ok {
-		t.Fatal("PlayerPedId should be indexed after lazy materialization")
+		t.Fatal("PlayerPedId should be indexed from the preloaded runtime native library")
+	}
+
+	ctx := h.resolve("native_client_call")
+	if ctx == nil || ctx.TargetURI != wantURI {
+		t.Fatalf("native_client_call resolved to %+v, want %s", ctx, wantURI)
+	}
+
+	if got := countLoadedFiveMNativeBundles(h.server); got != len(fiveMNativeBundleNames) {
+		t.Fatalf("loaded native bundles after first lookup = %d, want %d pre-indexed bundles", got, len(fiveMNativeBundleNames))
+	}
+
+	if _, ok := h.server.Documents[wantURI]; !ok {
+		t.Fatalf("expected %s document to be indexed", wantURI)
+	}
+
+	if _, ok := h.server.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes([]byte("PlayerPedId"))}]; !ok {
+		t.Fatal("PlayerPedId should remain indexed after resolution")
 	}
 
 	hover := h.hover("native_client_call")
@@ -347,19 +349,21 @@ func TestFiveMLazyNativeResolution(t *testing.T) {
 	}
 
 	defs := h.definition("native_client_call")
-	if len(defs) != 1 || defs[0].URI != "std:///fivem/natives_universal.lua" {
-		t.Fatalf("definitions for native_client_call = %+v, want std:///fivem/natives_universal.lua", defs)
+	if len(defs) != 1 || defs[0].URI != wantURI {
+		t.Fatalf("definitions for native_client_call = %+v, want %s", defs, wantURI)
 	}
 }
 
 func TestFiveMNativeCatalogIsolation(t *testing.T) {
 	h := newFiveMFixtureHarness(t, "resource_natives")
+	clientURI := requireFiveMNativeBundleURI(t, h.server, "natives_universal.lua")
+	serverURI := requireFiveMNativeBundleURI(t, h.server, "natives_server.lua")
 
-	assertResolvedGlobalTarget(t, h.server, h.docForMarker("native_client_call"), "PlayerPedId", "std:///fivem/natives_universal.lua")
-	assertResolvedGlobalTarget(t, h.server, h.docForMarker("native_client_legacy_hidden"), "GetVehicleMaxNumberOfPassengers", "std:///fivem/natives_universal.lua")
-	assertResolvedGlobalTarget(t, h.server, h.docForMarker("native_client_server_hidden"), "GetInvokingResource", "std:///fivem/natives_universal.lua")
+	assertResolvedGlobalTarget(t, h.server, h.docForMarker("native_client_call"), "PlayerPedId", clientURI)
+	assertResolvedGlobalTarget(t, h.server, h.docForMarker("native_client_legacy_hidden"), "GetVehicleMaxNumberOfPassengers", clientURI)
+	assertResolvedGlobalTarget(t, h.server, h.docForMarker("native_client_server_hidden"), "GetInvokingResource", clientURI)
 
-	assertResolvedGlobalTarget(t, h.server, h.docForMarker("native_server_call"), "GetInvokingResource", "std:///fivem/natives_server.lua")
+	assertResolvedGlobalTarget(t, h.server, h.docForMarker("native_server_call"), "GetInvokingResource", serverURI)
 	assertUnresolvedGlobal(t, h.server, h.docForMarker("native_server_client_hidden"), "PlayerPedId")
 
 	assertUnresolvedGlobal(t, h.server, h.docForMarker("native_plain_call"), "PlayerPedId")

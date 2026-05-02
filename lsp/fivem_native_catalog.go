@@ -2,7 +2,6 @@ package lsp
 
 import (
 	"errors"
-	"strings"
 
 	"github.com/coalaura/lugo/ast"
 )
@@ -17,7 +16,12 @@ func (s *Server) ensureFiveMNativeBundleLoaded(doc *Document) string {
 		return ""
 	}
 
-	uri := fiveMNativeBundleURI(selection.Build)
+	uri := s.findFiveMNativeBundleURI(selection.Build)
+	if uri != "" {
+		return uri
+	}
+
+	uri = fiveMNativeBundleURI(selection.Build)
 	if uri == "" {
 		return ""
 	}
@@ -45,16 +49,16 @@ func (s *Server) readFiveMNativeBundle(name string) ([]byte, error) {
 		return nil, errors.New("empty FiveM native bundle name")
 	}
 
-	b, err := stdlibFS.ReadFile("stdlib/fivem/" + name)
-	if err == nil {
-		return b, nil
-	}
-
 	if s != nil && s.fiveMNativeBundleLoader != nil {
 		return s.fiveMNativeBundleLoader(name)
 	}
 
-	return loadRuntimeFiveMNativeBundle(name)
+	b, err := loadRuntimeFiveMNativeBundle(name)
+	if err == nil {
+		return b, nil
+	}
+
+	return stdlibFS.ReadFile("stdlib/fivem/" + name)
 }
 
 func (s *Server) ensureFiveMNativeSymbol(doc *Document, name string) bool {
@@ -67,6 +71,8 @@ func (s *Server) ensureFiveMNativeSymbol(doc *Document, name string) bool {
 		return false
 	}
 
+	selection := s.getFiveMNativeSelection(doc)
+
 	key := GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes([]byte(name))}
 	syms, ok := s.GlobalIndex[key]
 	if !ok {
@@ -74,12 +80,12 @@ func (s *Server) ensureFiveMNativeSymbol(doc *Document, name string) bool {
 	}
 
 	for _, sym := range syms {
-		if sym.URI != bundleURI {
+		tgtDoc, ok := s.Documents[sym.URI]
+		if !ok {
 			continue
 		}
 
-		tgtDoc, ok := s.Documents[sym.URI]
-		if !ok {
+		if fiveMNativeBundleNameFromDocument(tgtDoc) != selection.Build && sym.URI != bundleURI {
 			continue
 		}
 
@@ -91,14 +97,28 @@ func (s *Server) ensureFiveMNativeSymbol(doc *Document, name string) bool {
 	return false
 }
 
+func (s *Server) findFiveMNativeBundleURI(name string) string {
+	if s == nil || name == "" {
+		return ""
+	}
+
+	for uri, doc := range s.Documents {
+		if fiveMNativeBundleNameFromDocument(doc) == name {
+			return uri
+		}
+	}
+
+	return ""
+}
+
 func countLoadedFiveMNativeBundles(s *Server) int {
 	if s == nil {
 		return 0
 	}
 
 	count := 0
-	for uri := range s.Documents {
-		if strings.HasPrefix(uri, "std:///fivem/") && isFiveMNativeBundleName(strings.TrimPrefix(uri, "std:///fivem/")) {
+	for _, doc := range s.Documents {
+		if fiveMNativeBundleNameFromDocument(doc) != "" {
 			count++
 		}
 	}
