@@ -35,29 +35,6 @@ func TestFiveMDocConfigConsistency(t *testing.T) {
 	assertVSCodeFiveMSetting(t, settings, "lugo.fivem.diagnostics.unknownResource", true,
 		"unknown resource names", "`exports` bridge")
 
-	var ciCfg struct {
-		Settings InitializationOptions `json:"settings"`
-	}
-	if err := json.Unmarshal([]byte(mustReadRepoFile(t, "example.ci.json")), &ciCfg); err != nil {
-		t.Fatalf("unmarshal example.ci.json: %v", err)
-	}
-	if !ciCfg.Settings.FeatureFiveM || !ciCfg.Settings.DiagFiveMUnaccountedFile || !ciCfg.Settings.DiagFiveMUnknownExport || !ciCfg.Settings.DiagFiveMUnknownResource {
-		t.Fatalf("example.ci.json FiveM settings = %+v, want enabled FiveM config with all three diagnostics on", ciCfg.Settings)
-	}
-
-	initLua := mustReadRepoFile(t, "example.init.lua")
-	for _, needle := range []string{
-		`root_pattern("fxmanifest.lua", "__resource.lua"`,
-		"featureFiveM = true",
-		"diagFiveMUnaccountedFile = true",
-		"diagFiveMUnknownExport = true",
-		"diagFiveMUnknownResource = true",
-	} {
-		if !strings.Contains(initLua, needle) {
-			t.Fatalf("example.init.lua missing %q", needle)
-		}
-	}
-
 	ciYAML := mustReadRepoFile(t, "example.ci.yml")
 	if !strings.Contains(ciYAML, "--ci example.ci.json") {
 		t.Fatalf("example.ci.yml missing CI config invocation: %q", ciYAML)

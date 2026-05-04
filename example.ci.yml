@@ -14,4 +14,4 @@ jobs:
           chmod +x lugo_linux_amd64
 
       - name: Run Lugo LSP in CI mode
-        run: ./lugo_linux_amd64 --ci ci.json
+        run: ./lugo_linux_amd64 --ci example.ci.json
