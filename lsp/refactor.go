@@ -580,7 +580,7 @@ func (s *Server) handleCodeAction(req Request) {
 			}
 		}
 
-		_, isSafe := s.checkSafetyAndBudget(doc, targetIf, 3)
+		isSafe := s.checkSafety(doc, targetIf)
 
 		if !hasElseIf && isSafe {
 			actions = append(actions, CodeAction{
@@ -851,7 +851,7 @@ func (s *Server) resolveEarlyReturn(doc *Document, nodeID ast.NodeID, uri string
 
 	indent := s.getIndent(doc, ifNode.Start)
 
-	outText := s.formatStatement(doc, nodeID, indent, 3)
+	outText := s.formatStatement(doc, nodeID, indent)
 
 	return &WorkspaceEdit{
 		Changes: map[string][]TextEdit{
@@ -982,7 +982,7 @@ func (s *Server) resolveMergeNestedIf(doc *Document, nodeID ast.NodeID, uri stri
 	newText.WriteString(newCond)
 	newText.WriteString(" then\n")
 
-	innerBody := s.flattenBlock(doc, innerIfNode.Right, innerIndent, 999)
+	innerBody := s.flattenBlock(doc, innerIfNode.Right, innerIndent)
 	if innerBody != "" {
 		newText.WriteString(innerIndent)
 		newText.WriteString(innerBody)
@@ -1121,7 +1121,7 @@ func (s *Server) resolveSwapIfElse(doc *Document, nodeID ast.NodeID, uri string)
 	newText.WriteString(newCond)
 	newText.WriteString(" then\n")
 
-	elseBody := s.flattenBlock(doc, elseNode.Left, innerIndent, 999)
+	elseBody := s.flattenBlock(doc, elseNode.Left, innerIndent)
 	if elseBody != "" {
 		newText.WriteString(innerIndent)
 		newText.WriteString(elseBody)
@@ -1131,7 +1131,7 @@ func (s *Server) resolveSwapIfElse(doc *Document, nodeID ast.NodeID, uri string)
 	newText.WriteString(indent)
 	newText.WriteString("else\n")
 
-	thenBody := s.flattenBlock(doc, ifNode.Right, innerIndent, 999)
+	thenBody := s.flattenBlock(doc, ifNode.Right, innerIndent)
 	if thenBody != "" {
 		newText.WriteString(innerIndent)
 		newText.WriteString(thenBody)
@@ -1213,7 +1213,7 @@ func (s *Server) resolveForNumToIpairs(doc *Document, nodeID ast.NodeID, uri str
 
 			fmt.Fprintf(&newText, "for %s, v in ipairs(%s) do\n", identName, tableName)
 
-			body := s.flattenBlock(doc, forNode.Right, innerIndent, 999)
+			body := s.flattenBlock(doc, forNode.Right, innerIndent)
 
 			if body != "" {
 				newText.WriteString(innerIndent)
@@ -2368,11 +2368,8 @@ func (s *Server) createRenameFix(doc *Document, id ast.NodeID) SafeFix {
 	}
 }
 
-func (s *Server) checkSafetyAndBudget(doc *Document, targetIf ast.NodeID, budget int) ([]ast.NodeID, bool) {
-	var trailing []ast.NodeID
-
+func (s *Server) checkSafety(doc *Document, targetIf ast.NodeID) bool {
 	curr := targetIf
-	isImmediateBlock := true
 
 	for curr != ast.InvalidNode {
 		parentID := doc.Tree.Nodes[curr].Parent
@@ -2383,45 +2380,33 @@ func (s *Server) checkSafetyAndBudget(doc *Document, targetIf ast.NodeID, budget
 		parentNode := doc.Tree.Nodes[parentID]
 
 		switch parentNode.Kind {
-		case ast.KindBlock, ast.KindFile, ast.KindRepeat:
+		case ast.KindBlock, ast.KindFile:
 			idx := doc.Tree.IndexOfExtra(parentID, curr)
 
 			if idx != -1 {
 				elementsAfter := int(parentNode.Count) - 1 - idx
 
-				if isImmediateBlock {
-					if elementsAfter > budget {
-						return nil, false
-					}
-
-					for i := idx + 1; i < int(parentNode.Count); i++ {
-						trailing = append(trailing, doc.Tree.ExtraList[parentNode.Extra+uint32(i)])
-					}
-
-					isImmediateBlock = false
-				} else {
-					// If ANY outer block has trailing statements, we cannot early return,
-					// because we would accidentally skip executing them!
-					if elementsAfter > 0 {
-						return nil, false
-					}
+				// If ANY block has trailing statements, we cannot early return,
+				// because we would accidentally skip executing them!
+				if elementsAfter > 0 {
+					return false
 				}
 			}
 		case ast.KindIf, ast.KindElseIf, ast.KindElse, ast.KindDo:
 			// Transparent structural blocks
 		case ast.KindFunctionExpr, ast.KindFunctionStmt, ast.KindLocalFunction:
-			return trailing, true // Safe function boundary
-		case ast.KindWhile, ast.KindForIn, ast.KindForNum:
-			return nil, false // Exiting a loop is a break, not a return. Unsafe.
+			return true // Safe function boundary
+		case ast.KindWhile, ast.KindForIn, ast.KindForNum, ast.KindRepeat:
+			return false // Exiting a loop is a break, not a return. Unsafe.
 		}
 
 		curr = parentID
 	}
 
-	return trailing, true
+	return true
 }
 
-func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string, budget int) string {
+func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string) string {
 	if stmtID == ast.InvalidNode || int(stmtID) >= len(doc.Tree.Nodes) {
 		return ""
 	}
@@ -2437,7 +2422,7 @@ func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string
 		var out strings.Builder
 
 		out.WriteString("do\n")
-		out.WriteString(s.flattenBlock(doc, node.Left, innerIndent, budget))
+		out.WriteString(s.flattenBlock(doc, node.Left, innerIndent))
 		out.WriteString("\n")
 		out.WriteString(indent)
 		out.WriteString("end")
@@ -2470,7 +2455,7 @@ func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string
 		}
 	}
 
-	trailing, isSafe := s.checkSafetyAndBudget(doc, stmtID, budget)
+	isSafe := s.checkSafety(doc, stmtID)
 
 	// Wrap string extraction block to prevent slicing errors
 	getCondStr := func(condID ast.NodeID) string {
@@ -2522,33 +2507,19 @@ func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string
 		}
 
 		if !isTerminal(doc, lastEmitted) {
-			for _, trailID := range trailing {
-				if lastEmitted != ast.InvalidNode {
-					out.WriteString("\n")
-				}
-
-				out.WriteString(innerIndent)
-				out.WriteString(reindentNodeText(doc, trailID, innerIndent))
+			if lastEmitted != ast.InvalidNode {
 				out.WriteString("\n")
-
-				lastEmitted = trailID
 			}
 
-			if !isTerminal(doc, lastEmitted) {
-				if lastEmitted != ast.InvalidNode {
-					out.WriteString("\n")
-				}
-
-				out.WriteString(innerIndent)
-				out.WriteString("return\n")
-			}
+			out.WriteString(innerIndent)
+			out.WriteString("return\n")
 		}
 
 		out.WriteString(indent)
 		out.WriteString("end\n\n")
 
 		out.WriteString(indent)
-		out.WriteString(s.flattenBlock(doc, node.Right, indent, budget))
+		out.WriteString(s.flattenBlock(doc, node.Right, indent))
 
 		return out.String()
 	}
@@ -2559,7 +2530,7 @@ func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string
 	out.WriteString(getCondStr(node.Left))
 	out.WriteString(" then\n")
 
-	thenText := s.flattenBlock(doc, node.Right, innerIndent, budget)
+	thenText := s.flattenBlock(doc, node.Right, innerIndent)
 	if thenText != "" {
 		out.WriteString(innerIndent)
 		out.WriteString(thenText)
@@ -2585,7 +2556,7 @@ func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string
 			out.WriteString(getCondStr(child.Left))
 			out.WriteString(" then\n")
 
-			eiText := s.flattenBlock(doc, child.Right, innerIndent, budget)
+			eiText := s.flattenBlock(doc, child.Right, innerIndent)
 			if eiText != "" {
 				out.WriteString(innerIndent)
 				out.WriteString(eiText)
@@ -2595,7 +2566,7 @@ func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string
 			out.WriteString(indent)
 			out.WriteString("else\n")
 
-			eText := s.flattenBlock(doc, child.Left, innerIndent, budget)
+			eText := s.flattenBlock(doc, child.Left, innerIndent)
 			if eText != "" {
 				out.WriteString(innerIndent)
 				out.WriteString(eText)
@@ -2610,7 +2581,7 @@ func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string
 	return out.String()
 }
 
-func (s *Server) flattenBlock(doc *Document, blockID ast.NodeID, indent string, budget int) string {
+func (s *Server) flattenBlock(doc *Document, blockID ast.NodeID, indent string) string {
 	if blockID == ast.InvalidNode || int(blockID) >= len(doc.Tree.Nodes) {
 		return ""
 	}
@@ -2625,7 +2596,7 @@ func (s *Server) flattenBlock(doc *Document, blockID ast.NodeID, indent string, 
 		}
 
 		childID := doc.Tree.ExtraList[blockNode.Extra+uint32(i)]
-		stmtStr := s.formatStatement(doc, childID, indent, budget)
+		stmtStr := s.formatStatement(doc, childID, indent)
 
 		if i > 0 {
 			prevID := doc.Tree.ExtraList[blockNode.Extra+uint32(i-1)]
