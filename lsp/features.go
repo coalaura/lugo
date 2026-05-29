@@ -719,7 +719,7 @@ func (s *Server) handleCompletion(req Request) {
 			}
 		}
 
-		var recDef ast.NodeID = ast.InvalidNode
+		recDef := ast.InvalidNode
 
 		if len(rootName) > 0 {
 			for name, defID := range doc.LocalsAt(offset) {
@@ -739,7 +739,7 @@ func (s *Server) handleCompletion(req Request) {
 						for _, exp := range exports {
 							if syms, ok := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes([]byte(exp))}]; ok {
 								var (
-									funcValID ast.NodeID = ast.InvalidNode
+									funcValID = ast.InvalidNode
 									targetDoc *Document
 								)
 
@@ -811,7 +811,7 @@ func (s *Server) handleCompletion(req Request) {
 					addExportCompletions := func(exports []string, detail string) {
 						for _, exp := range exports {
 							var (
-								funcValID ast.NodeID = ast.InvalidNode
+								funcValID = ast.InvalidNode
 								targetDoc *Document
 							)
 
@@ -1254,7 +1254,7 @@ func (s *Server) handleSignatureHelp(req Request) {
 		return
 	}
 
-	var callID ast.NodeID = ast.InvalidNode
+	callID := ast.InvalidNode
 
 	curr := doc.Tree.NodeAt(offset)
 

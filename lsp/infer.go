@@ -312,7 +312,7 @@ func (doc *Document) inferIdent(id ast.NodeID) TypeSet {
 		targetDef = doc.Resolver.References[id]
 	}
 
-	var targetDoc *Document = doc
+	targetDoc := doc
 
 	localDefID := targetDef
 
@@ -427,7 +427,7 @@ func (doc *Document) inferFunctionParameter(defID, funcExprID ast.NodeID) TypeSe
 
 	grandParentNode := doc.Tree.Nodes[grandParentID]
 
-	var funcDefID ast.NodeID = ast.InvalidNode
+	funcDefID := ast.InvalidNode
 
 	switch grandParentNode.Kind {
 	case ast.KindLocalFunction, ast.KindFunctionStmt:

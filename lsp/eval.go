@@ -23,7 +23,7 @@ func (doc *Document) FindEvaluableParent(offset uint32) (uint32, uint32, string,
 	curr := doc.Tree.NodeAt(offset)
 
 	var (
-		highestEvalNode ast.NodeID = ast.InvalidNode
+		highestEvalNode = ast.InvalidNode
 		highestVal      string
 	)
 
@@ -76,7 +76,7 @@ func (doc *Document) findPartialEval(offset uint32) (uint32, uint32, string, boo
 	}
 
 	var (
-		chainRoot ast.NodeID = ast.InvalidNode
+		chainRoot = ast.InvalidNode
 		chainOp   token.Kind
 	)
 

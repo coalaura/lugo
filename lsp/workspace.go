@@ -798,7 +798,7 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 
 		luadoc := parseLuaDoc(cleaned, s.FeatureFormatAlerts)
 
-		var virtualNodeID ast.NodeID = ast.InvalidNode
+		virtualNodeID := ast.InvalidNode
 
 		if luadoc.Export != "" && s.FeatureFiveM {
 			virtualNodeID = ast.NodeID(len(tree.Nodes))
@@ -875,7 +875,8 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 
 					fieldVirtualNodeID := ast.NodeID(len(tree.Nodes))
 
-					var kind ast.NodeKind = ast.KindIdent
+					kind := ast.KindIdent
+
 					if strings.Contains(field.Type, "fun") || strings.Contains(field.Type, "function") {
 						kind = ast.KindFunctionExpr
 					}

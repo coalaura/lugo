@@ -295,7 +295,7 @@ func (r *Resolver) GetReceiverContext(recID ast.NodeID) (ast.NodeID, uint64, []b
 
 	curr := recID
 
-	var rootDef ast.NodeID = ast.InvalidNode
+	rootDef := ast.InvalidNode
 
 	for curr != ast.InvalidNode {
 		node := r.Tree.Nodes[curr]
@@ -323,7 +323,7 @@ func (r *Resolver) getReceiverContextArena(recID ast.NodeID) (ast.NodeID, uint64
 
 	curr := recID
 
-	var rootDef ast.NodeID = ast.InvalidNode
+	rootDef := ast.InvalidNode
 
 	for curr != ast.InvalidNode {
 		node := r.Tree.Nodes[curr]
@@ -511,7 +511,7 @@ func (r *Resolver) visit(id ast.NodeID) {
 				defID := r.References[exprID]
 				rhsList := node.Right
 
-				var valID ast.NodeID = ast.InvalidNode
+				valID := ast.InvalidNode
 
 				if rhsList != ast.InvalidNode {
 					rhsNode := r.Tree.Nodes[rhsList]

@@ -329,22 +329,22 @@ func (s *Server) handleCodeAction(req Request) {
 	}
 
 	var (
-		targetIf            ast.NodeID = ast.InvalidNode
-		targetCond          ast.NodeID = ast.InvalidNode
+		targetIf            = ast.InvalidNode
+		targetCond          = ast.InvalidNode
 		condTitle           string
-		targetTableInsert   ast.NodeID = ast.InvalidNode
-		targetMethod        ast.NodeID = ast.InvalidNode
-		targetNestedIf      ast.NodeID = ast.InvalidNode
+		targetTableInsert   = ast.InvalidNode
+		targetMethod        = ast.InvalidNode
+		targetNestedIf      = ast.InvalidNode
 		nestedIfTitle       string
-		targetMultiAssign   ast.NodeID = ast.InvalidNode
-		targetSwapIfElse    ast.NodeID = ast.InvalidNode
-		targetParen         ast.NodeID = ast.InvalidNode
-		targetForNum        ast.NodeID = ast.InvalidNode
+		targetMultiAssign   = ast.InvalidNode
+		targetSwapIfElse    = ast.InvalidNode
+		targetParen         = ast.InvalidNode
+		targetForNum        = ast.InvalidNode
 		forNumTable         string
-		targetIndexToMember ast.NodeID = ast.InvalidNode
+		targetIndexToMember = ast.InvalidNode
 		indexToMemberStr    string
-		targetMemberToIndex ast.NodeID = ast.InvalidNode
-		targetConcat        ast.NodeID = ast.InvalidNode
+		targetMemberToIndex = ast.InvalidNode
+		targetConcat        = ast.InvalidNode
 	)
 
 	cursorLine := params.Range.Start.Line
@@ -2895,7 +2895,7 @@ func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string
 
 	var (
 		hasElseIf bool
-		elseBlock ast.NodeID = ast.InvalidNode
+		elseBlock = ast.InvalidNode
 	)
 
 	for i := uint16(0); i < node.Count; i++ {
@@ -2941,7 +2941,7 @@ func (s *Server) formatStatement(doc *Document, stmtID ast.NodeID, indent string
 		out.WriteString(s.invertCondition(doc, node.Left))
 		out.WriteString(" then\n")
 
-		var lastEmitted ast.NodeID = ast.InvalidNode
+		lastEmitted := ast.InvalidNode
 
 		if elseBlock != ast.InvalidNode {
 			elseNode := doc.Tree.Nodes[elseBlock]

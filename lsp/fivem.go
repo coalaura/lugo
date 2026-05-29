@@ -265,7 +265,7 @@ func (s *Server) getDocFileEnv(res *FiveMResource, doc *Document) FileEnv {
 		relPath = ""
 	}
 
-	var env FileEnv = EnvUnknown
+	env := EnvUnknown
 
 	for _, glob := range res.SharedGlobs {
 		if matchGlob(glob, relPath) {

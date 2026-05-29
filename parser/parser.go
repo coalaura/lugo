@@ -24,11 +24,10 @@ const (
 )
 
 var (
-	stopBlockIf     = token.NewTokenSet(token.ElseIf, token.Else, token.End)
-	stopBlockEnd    = token.NewTokenSet(token.End)
-	stopBlockUntil  = token.NewTokenSet(token.Until)
-	stopBlockEOF    = token.NewTokenSet(token.EOF)
-	stopBlockElseIf = token.NewTokenSet() // Handled dynamically if needed
+	stopBlockIf    = token.NewTokenSet(token.ElseIf, token.Else, token.End)
+	stopBlockEnd   = token.NewTokenSet(token.End)
+	stopBlockUntil = token.NewTokenSet(token.Until)
+	stopBlockEOF   = token.NewTokenSet(token.EOF)
 )
 
 var precedences = [256]int{
@@ -359,7 +358,7 @@ func (p *Parser) parseLocal() ast.NodeID {
 
 		p.nextToken()
 
-		var attr ast.Attr = ast.AttrNone
+		attr := ast.AttrNone
 
 		if p.curr.Kind == token.Less && p.peek.Kind == token.Ident {
 			p.nextToken() // consume '<'
@@ -416,7 +415,7 @@ func (p *Parser) parseLocal() ast.NodeID {
 		Count: uint16(count),
 	})
 
-	var rhsList ast.NodeID = ast.InvalidNode
+	rhsList := ast.InvalidNode
 
 	if p.curr.Kind == token.Assign {
 		p.nextToken() // consume '='
@@ -470,7 +469,7 @@ func (p *Parser) parseIf() ast.NodeID {
 		p.listStack = append(p.listStack, elseifNode)
 	}
 
-	var elseBlock ast.NodeID = ast.InvalidNode
+	elseBlock := ast.InvalidNode
 
 	if p.curr.Kind == token.Else {
 		elseStart := p.curr.Start
@@ -510,7 +509,7 @@ func (p *Parser) parseReturn() ast.NodeID {
 
 	p.nextToken()
 
-	var exprList ast.NodeID = ast.InvalidNode
+	exprList := ast.InvalidNode
 
 	if p.curr.Kind != token.End && p.curr.Kind != token.ElseIf && p.curr.Kind != token.Else && p.curr.Kind != token.Until && p.curr.Kind != token.EOF && p.curr.Kind != token.Semicolon {
 		exprList = p.parseExprList()
@@ -800,7 +799,7 @@ func (p *Parser) parseGoto() ast.NodeID {
 
 	p.nextToken()
 
-	var label ast.NodeID = ast.InvalidNode
+	label := ast.InvalidNode
 
 	if p.curr.Kind == token.Ident {
 		label = p.tree.AddNode(ast.Node{Kind: ast.KindIdent, Start: p.curr.Start, End: p.curr.End})
@@ -818,7 +817,7 @@ func (p *Parser) parseLabel() ast.NodeID {
 
 	p.nextToken()
 
-	var name ast.NodeID = ast.InvalidNode
+	name := ast.InvalidNode
 
 	if p.curr.Kind == token.Ident {
 		name = p.tree.AddNode(ast.Node{Kind: ast.KindIdent, Start: p.curr.Start, End: p.curr.End})

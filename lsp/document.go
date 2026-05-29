@@ -452,7 +452,7 @@ func (doc *Document) LocalsAt(offset uint32) iter.Seq2[[]byte, ast.NodeID] {
 					}
 				}
 			case ast.KindFunctionExpr, ast.KindFunctionStmt:
-				var funcExpr ast.NodeID = curr
+				funcExpr := curr
 
 				if node.Kind == ast.KindFunctionStmt {
 					funcExpr = node.Right

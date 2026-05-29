@@ -278,7 +278,7 @@ func (s *Server) handleDocumentSymbol(req Request) {
 					lNode := doc.Tree.Nodes[lID]
 
 					var (
-						rID   ast.NodeID = ast.InvalidNode
+						rID   = ast.InvalidNode
 						rNode ast.Node
 					)
 
@@ -365,7 +365,7 @@ func (s *Server) handleDocumentSymbol(req Request) {
 			}
 
 			var (
-				targetFuncID ast.NodeID = ast.InvalidNode
+				targetFuncID = ast.InvalidNode
 				targetDoc    *Document
 				paramOffset  int
 			)
@@ -624,7 +624,7 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 	var (
 		gKey      GlobalKey
 		isProp    bool
-		recDef    ast.NodeID = ast.InvalidNode
+		recDef    = ast.InvalidNode
 		exportRes string
 	)
 
@@ -898,7 +898,6 @@ func (s *Server) getFiveMExportResource(doc *Document, nodeID ast.NodeID) string
 			pNode := doc.Tree.Nodes[pID]
 			if pNode.Kind == ast.KindIndexExpr && pNode.Right == nodeID {
 				node = pNode
-				nodeID = pID
 			}
 		}
 	case ast.KindIdent:
@@ -907,7 +906,6 @@ func (s *Server) getFiveMExportResource(doc *Document, nodeID ast.NodeID) string
 			pNode := doc.Tree.Nodes[pID]
 			if pNode.Kind == ast.KindMemberExpr && pNode.Right == nodeID {
 				node = pNode
-				nodeID = pID
 			}
 		}
 	}
