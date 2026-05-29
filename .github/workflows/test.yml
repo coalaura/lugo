@@ -5,8 +5,38 @@ on:
   pull_request:
 
 jobs:
+  vet:
+    name: Vet & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Install Staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: Generate Temporary Staticcheck Config
+        run: |
+          cat << 'EOF' > staticcheck.conf
+          checks = ["inherit", "SA9003", "ST1016", "ST1023", "-ST1000", "-ST1003", "-ST1020", "-ST1021", "-ST1022"]
+          http_status_code_whitelist = []
+          EOF
+
+      - name: Run Go Vet
+        run: go vet ./...
+
+      - name: Run Staticcheck
+        run: staticcheck ./...
+
   test:
     runs-on: ubuntu-latest
+    needs: vet
     steps:
     - name: Checkout code
       uses: actions/checkout@v6
