@@ -1456,10 +1456,7 @@ func (s *Server) handleSignatureHelp(req Request) {
 			Parameters:    paramsInfo,
 		})
 
-		expectedArgs := int(funcNode.Count) - paramOffset
-		if expectedArgs < 0 {
-			expectedArgs = 0
-		}
+		expectedArgs := max(int(funcNode.Count)-paramOffset, 0)
 
 		var score int
 

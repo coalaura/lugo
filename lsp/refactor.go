@@ -2435,10 +2435,7 @@ func (s *Server) getSafeFixesForDocument(doc *Document) []SafeFix {
 
 							paramOffset := getImplicitSelfOffset(ctx, node, tDoc, def.NodeID)
 
-							expectedArgs := int(funcNode.Count) - paramOffset
-							if expectedArgs < 0 {
-								expectedArgs = 0
-							}
+							expectedArgs := max(int(funcNode.Count)-paramOffset, 0)
 
 							if int(node.Count) <= expectedArgs {
 								matchedAny = true

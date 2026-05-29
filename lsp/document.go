@@ -55,12 +55,12 @@ func (doc *Document) parseDiagnosticPragmas() {
 	for _, c := range doc.Tree.Comments {
 		src := doc.Source[c.Start:c.End]
 
-		idx := bytes.Index(src, []byte("---@diagnostic"))
-		if idx == -1 {
+		_, after, ok := bytes.Cut(src, []byte("---@diagnostic"))
+		if !ok {
 			continue
 		}
 
-		rest := src[idx+14:]
+		rest := after
 		rest = bytes.TrimLeft(rest, " \t")
 
 		var action string
@@ -79,12 +79,12 @@ func (doc *Document) parseDiagnosticPragmas() {
 		}
 
 		rest = bytes.TrimLeft(rest, " \t")
-		spaceIdx := bytes.IndexByte(rest, ' ')
+		before, _, ok := bytes.Cut(rest, []byte{' '})
 
 		var rulesBytes []byte
 
-		if spaceIdx != -1 {
-			rulesBytes = rest[:spaceIdx]
+		if ok {
+			rulesBytes = before
 		} else {
 			rulesBytes = rest
 		}
