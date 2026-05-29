@@ -18,9 +18,6 @@ type DiagPragmas struct {
 }
 
 type Document struct {
-	Server             *Server
-	Tree               *ast.Tree
-	Resolver           *semantic.Resolver
 	TypeCache          []TypeSet
 	Inferring          []bool
 	LuaDocCache        []*LuaDoc
@@ -29,23 +26,26 @@ type Document struct {
 	ExportedGlobalDefs []ExportedSymbol
 	Source             []byte
 	Errors             []parser.ParseError
+	FiveMLuaExports    []FiveMLuaExport
+	ModTime            time.Time
 	URI                string
 	Path               string
 	LowerPath          string
 	Dir                string
 	ModuleName         string
 	FiveMRoot          string
+	DiagPragmas        DiagPragmas
+	Server             *Server
+	Tree               *ast.Tree
+	Resolver           *semantic.Resolver
 	ExportedNode       ast.NodeID
 	FiveMEnv           FileEnv
 	IsMeta             bool
 	IsLibrary          bool
 	IsWorkspace        bool
 	IsFiveMManifest    bool
-	FiveMLuaExports    []FiveMLuaExport
 	FiveMResolved      bool
 	EnvResolved        bool
-	ModTime            time.Time
-	DiagPragmas        DiagPragmas
 }
 
 func (doc *Document) parseDiagnosticPragmas() {

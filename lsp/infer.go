@@ -306,12 +306,16 @@ func (doc *Document) InferType(id ast.NodeID) TypeSet {
 }
 
 func (doc *Document) inferIdent(id ast.NodeID) TypeSet {
-	var (
-		targetDoc *Document  = doc
-		targetDef ast.NodeID = doc.Resolver.References[id]
-	)
+	var targetDef ast.NodeID
+
+	if int(id) < len(doc.Resolver.References) {
+		targetDef = doc.Resolver.References[id]
+	}
+
+	var targetDoc *Document = doc
 
 	localDefID := targetDef
+
 	identName := doc.Source[doc.Tree.Nodes[id].Start:doc.Tree.Nodes[id].End]
 	identHash := ast.HashBytes(identName)
 

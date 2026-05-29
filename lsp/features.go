@@ -220,24 +220,30 @@ func (s *Server) handleHover(req Request) {
 				docBuilder.WriteString("**@deprecated**")
 
 				if luadoc.DeprecatedMsg != "" {
-					docBuilder.WriteString(" - " + luadoc.DeprecatedMsg)
+					docBuilder.WriteString(" - ")
+					docBuilder.WriteString(luadoc.DeprecatedMsg)
 				}
 
 				docBuilder.WriteString("\n\n")
 			}
 
 			if luadoc.Description != "" {
-				docBuilder.WriteString(luadoc.Description + "\n\n")
+				docBuilder.WriteString(luadoc.Description)
+				docBuilder.WriteString("\n\n")
 			}
 
 			if len(luadoc.Generics) > 0 {
 				docBuilder.WriteString("**Generics**\n\n")
 
 				for _, g := range luadoc.Generics {
-					docBuilder.WriteString("* **`" + g.Name + "`**")
+					docBuilder.WriteString("* **`")
+					docBuilder.WriteString(g.Name)
+					docBuilder.WriteString("`**")
 
 					if g.Parent != "" {
-						docBuilder.WriteString(" : *`" + g.Parent + "`*")
+						docBuilder.WriteString(" : *`")
+						docBuilder.WriteString(g.Parent)
+						docBuilder.WriteString("`*")
 					}
 
 					docBuilder.WriteString("\n")
@@ -250,16 +256,22 @@ func (s *Server) handleHover(req Request) {
 				docBuilder.WriteString("**Parameters**\n\n")
 
 				for _, p := range luadoc.Params {
-					docBuilder.WriteString("* **`" + p.Name + "`**")
+					docBuilder.WriteString("* **`")
+					docBuilder.WriteString(p.Name)
+					docBuilder.WriteString("`**")
 
 					if p.Type != "" {
-						docBuilder.WriteString(" *`" + p.Type + "`*")
+						docBuilder.WriteString(" *`")
+						docBuilder.WriteString(p.Type)
+						docBuilder.WriteString("`*")
 					}
 
 					if p.Desc != "" {
 						// Replace newlines with indented newlines for list alignment
 						desc := strings.ReplaceAll(p.Desc, "\n", "\n  ")
-						docBuilder.WriteString(" - " + desc)
+
+						docBuilder.WriteString(" - ")
+						docBuilder.WriteString(desc)
 					}
 
 					docBuilder.WriteString("\n")
@@ -275,7 +287,9 @@ func (s *Server) handleHover(req Request) {
 					docBuilder.WriteString("* ")
 
 					if ret.Type != "" {
-						docBuilder.WriteString("*`" + ret.Type + "`*")
+						docBuilder.WriteString("*`")
+						docBuilder.WriteString(ret.Type)
+						docBuilder.WriteString("`*")
 					}
 
 					if ret.Desc != "" {
@@ -284,6 +298,7 @@ func (s *Server) handleHover(req Request) {
 						}
 
 						desc := strings.ReplaceAll(ret.Desc, "\n", "\n  ")
+
 						docBuilder.WriteString(desc)
 					}
 
@@ -297,15 +312,20 @@ func (s *Server) handleHover(req Request) {
 				docBuilder.WriteString("**Fields**\n\n")
 
 				for _, f := range luadoc.Fields {
-					docBuilder.WriteString("* **`" + f.Name + "`**")
+					docBuilder.WriteString("* **`")
+					docBuilder.WriteString(f.Name)
+					docBuilder.WriteString("`**")
 
 					if f.Type != "" {
-						docBuilder.WriteString(" *`" + f.Type + "`*")
+						docBuilder.WriteString(" *`")
+						docBuilder.WriteString(f.Type)
+						docBuilder.WriteString("`*")
 					}
 
 					if f.Desc != "" {
 						desc := strings.ReplaceAll(f.Desc, "\n", "\n  ")
-						docBuilder.WriteString(" - " + desc)
+						docBuilder.WriteString(" - ")
+						docBuilder.WriteString(desc)
 					}
 
 					docBuilder.WriteString("\n")
@@ -317,8 +337,10 @@ func (s *Server) handleHover(req Request) {
 			if len(luadoc.Overloads) > 0 {
 				docBuilder.WriteString("**Overloads**\n\n")
 
-				for _, o := range luadoc.Overloads {
-					docBuilder.WriteString("```lua\n" + o + "\n```\n")
+				for _, overload := range luadoc.Overloads {
+					docBuilder.WriteString("```lua\n")
+					docBuilder.WriteString(overload)
+					docBuilder.WriteString("\n```\n")
 				}
 
 				docBuilder.WriteString("\n")
@@ -328,7 +350,9 @@ func (s *Server) handleHover(req Request) {
 				docBuilder.WriteString("**See also**\n\n")
 
 				for _, see := range luadoc.See {
-					docBuilder.WriteString("* `" + see + "`\n")
+					docBuilder.WriteString("* `")
+					docBuilder.WriteString(see)
+					docBuilder.WriteString("`\n")
 				}
 
 				docBuilder.WriteString("\n")
@@ -1777,7 +1801,12 @@ func (s *Server) handleSemanticTokensFull(req Request) {
 
 			identBytes := doc.Source[node.Start:node.End]
 
-			defID := doc.Resolver.References[i]
+			var defID ast.NodeID
+
+			if i < len(doc.Resolver.References) {
+				defID = doc.Resolver.References[i]
+			}
+
 			isDecl := ast.NodeID(i) == defID
 
 			if isDecl {
