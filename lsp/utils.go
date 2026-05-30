@@ -666,3 +666,102 @@ func isExpression(kind ast.NodeKind) bool {
 
 	return false
 }
+
+func pathContainsFold(text, queryLower string) bool {
+	if len(queryLower) == 0 {
+		return true
+	}
+
+	if len(text) < len(queryLower) {
+		return false
+	}
+
+	for i := 0; i <= len(text)-len(queryLower); i++ {
+		match := true
+
+		for j := 0; j < len(queryLower); j++ {
+			c1 := text[i+j]
+			c2 := queryLower[j]
+
+			if c1 == '\\' {
+				c1 = '/'
+			}
+
+			if c1 >= 'A' && c1 <= 'Z' {
+				c1 ^= 32
+			}
+
+			if c1 != c2 {
+				match = false
+
+				break
+			}
+		}
+
+		if match {
+			return true
+		}
+	}
+
+	return false
+}
+
+func pathHasSuffixFold(text, suffixLower string) bool {
+	if len(suffixLower) == 0 {
+		return true
+	}
+
+	if len(text) < len(suffixLower) {
+		return false
+	}
+
+	offset := len(text) - len(suffixLower)
+
+	for i := 0; i < len(suffixLower); i++ {
+		c1 := text[offset+i]
+		c2 := suffixLower[i]
+
+		if c1 == '\\' {
+			c1 = '/'
+		}
+
+		if c1 >= 'A' && c1 <= 'Z' {
+			c1 ^= 32
+		}
+
+		if c1 != c2 {
+			return false
+		}
+	}
+
+	return true
+}
+
+func pathHasPrefixFold(text, prefixLower string) bool {
+	if len(prefixLower) == 0 {
+		return true
+	}
+
+	if len(text) < len(prefixLower) {
+		return false
+	}
+
+	for i := 0; i < len(prefixLower); i++ {
+		c1 := text[i]
+		c2 := prefixLower[i]
+
+		if c1 == '\\' {
+			c1 = '/'
+		}
+
+		if c1 >= 'A' && c1 <= 'Z' {
+			c1 ^= 32
+		}
+
+		if c1 != c2 {
+			return false
+		}
+	}
+
+	return true
+}

@@ -1239,8 +1239,10 @@ func (s *Server) clearDocument(uri string) {
 func (s *Server) compileIgnorePatterns() {
 	s.compiledIgnores = make([]IgnorePattern, 0, len(s.IgnoreGlobs))
 
-	for _, g := range s.IgnoreGlobs {
-		cleanGlob := strings.TrimPrefix(strings.TrimPrefix(g, "**/"), "*/")
+	for _, glob := range s.IgnoreGlobs {
+		glob = strings.ToLower(filepath.ToSlash(glob))
+
+		cleanGlob := strings.TrimPrefix(strings.TrimPrefix(glob, "**/"), "*/")
 		cleanGlob = strings.TrimSuffix(strings.TrimSuffix(cleanGlob, "/**"), "/*")
 
 		if cleanGlob == "" {
@@ -1248,11 +1250,9 @@ func (s *Server) compileIgnorePatterns() {
 		}
 
 		if !strings.ContainsAny(cleanGlob, "*?") {
-			cleanPath := filepath.FromSlash(cleanGlob)
-
 			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{
-				ContainsPath: string(filepath.Separator) + cleanPath + string(filepath.Separator),
-				SuffixPath:   string(filepath.Separator) + cleanPath,
+				ContainsPath: "/" + cleanGlob + "/",
+				SuffixPath:   "/" + cleanGlob,
 				HasSuffix:    cleanGlob,
 			})
 		} else if strings.HasPrefix(cleanGlob, "*") && !strings.ContainsAny(cleanGlob[1:], "*?") {
@@ -1260,7 +1260,7 @@ func (s *Server) compileIgnorePatterns() {
 		} else if strings.HasSuffix(cleanGlob, "*") && !strings.ContainsAny(cleanGlob[:len(cleanGlob)-1], "*?") {
 			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{HasPrefix: cleanGlob[:len(cleanGlob)-1]})
 		} else {
-			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{MatchFallback: g})
+			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{MatchFallback: cleanGlob})
 		}
 	}
 }
@@ -1271,24 +1271,24 @@ func (s *Server) isIgnored(fullPath, name string) bool {
 	}
 
 	for _, p := range s.compiledIgnores {
-		if p.HasSuffix != "" && strings.HasSuffix(name, p.HasSuffix) {
+		if p.HasSuffix != "" && pathHasSuffixFold(name, p.HasSuffix) {
 			return true
 		}
 
-		if p.HasPrefix != "" && strings.HasPrefix(name, p.HasPrefix) {
+		if p.HasPrefix != "" && pathHasPrefixFold(name, p.HasPrefix) {
 			return true
 		}
 
-		if p.ContainsPath != "" && strings.Contains(fullPath, p.ContainsPath) {
+		if p.ContainsPath != "" && pathContainsFold(fullPath, p.ContainsPath) {
 			return true
 		}
 
-		if p.SuffixPath != "" && strings.HasSuffix(fullPath, p.SuffixPath) {
+		if p.SuffixPath != "" && pathHasSuffixFold(fullPath, p.SuffixPath) {
 			return true
 		}
 
 		if p.MatchFallback != "" {
-			if matched, _ := filepath.Match(p.MatchFallback, name); matched {
+			if matchGlob(p.MatchFallback, name) {
 				return true
 			}
 		}
