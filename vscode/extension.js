@@ -25,79 +25,113 @@ async function restartClient(context) {
 }
 
 function buildInitializationOptions() {
-	const filesConfig = vscode.workspace.getConfiguration("files"),
-		searchConfig = vscode.workspace.getConfiguration("search"),
-		lugoConfig = vscode.workspace.getConfiguration("lugo");
+	let ignoreGlobs = [],
+		libraryPaths = [],
+		knownGlobals = [],
+		bannedSymbols = {};
 
-	let ignoreGlobs = lugoConfig.get("workspace.ignoreGlobs") || [];
+	const folders = vscode.workspace.workspaceFolders || [],
+		scopes = folders.map(folder => folder.uri);
 
-	const nativeExcludes = {
-		...(filesConfig.get("exclude") || {}),
-		...(searchConfig.get("exclude") || {}),
-	};
+	if (scopes.length === 0) {
+		scopes.push(null);
+	}
 
-	for (const [key, val] of Object.entries(nativeExcludes)) {
-		if (val === true) {
-			ignoreGlobs.push(key);
+	const activeEditor = vscode.window.activeTextEditor;
+
+	if (activeEditor?.document) {
+		const activeUri = activeEditor.document.uri;
+
+		if (!scopes.some(scope => scope && scope.toString() === activeUri.toString())) {
+			scopes.push(activeUri);
 		}
 	}
 
+	const primaryScope = activeEditor?.document?.uri || scopes[0],
+		primaryLugoConfig = vscode.workspace.getConfiguration("lugo", primaryScope);
+
+	for (const scope of scopes) {
+		const filesConfig = vscode.workspace.getConfiguration("files", scope),
+			searchConfig = vscode.workspace.getConfiguration("search", scope),
+			lugoConfig = vscode.workspace.getConfiguration("lugo", scope);
+
+		const folderIgnoreGlobs = lugoConfig.get("workspace.ignoreGlobs") || [],
+			nativeExcludes = {
+				...(filesConfig.get("exclude") || {}),
+				...(searchConfig.get("exclude") || {}),
+			};
+
+		for (const [key, val] of Object.entries(nativeExcludes)) {
+			if (val === true) {
+				folderIgnoreGlobs.push(key);
+			}
+		}
+
+		ignoreGlobs.push(...folderIgnoreGlobs);
+		libraryPaths.push(...(lugoConfig.get("workspace.libraryPaths") || []));
+		knownGlobals.push(...(lugoConfig.get("environment.knownGlobals") || []));
+
+		Object.assign(bannedSymbols, lugoConfig.get("diagnostics.bannedSymbols") || {});
+	}
+
 	ignoreGlobs = [...new Set(ignoreGlobs)];
+	libraryPaths = [...new Set(libraryPaths)];
+	knownGlobals = [...new Set(knownGlobals)];
 
 	return {
-		libraryPaths: lugoConfig.get("workspace.libraryPaths") || [],
+		libraryPaths: libraryPaths,
 		ignoreGlobs: ignoreGlobs,
-		knownGlobals: lugoConfig.get("environment.knownGlobals") || [],
-		bannedSymbols: lugoConfig.get("diagnostics.bannedSymbols") || {},
-		maxFileSizeMB: lugoConfig.get("workspace.maxFileSizeMB") ?? 4,
+		knownGlobals: knownGlobals,
+		bannedSymbols: bannedSymbols,
+		maxFileSizeMB: primaryLugoConfig.get("workspace.maxFileSizeMB") ?? 4,
 
-		parserMaxErrors: lugoConfig.get("parser.maxErrors") ?? 50,
+		parserMaxErrors: primaryLugoConfig.get("parser.maxErrors") ?? 50,
 
-		diagUndefinedGlobals: lugoConfig.get("diagnostics.undefinedGlobals") !== false,
-		diagImplicitGlobals: lugoConfig.get("diagnostics.implicitGlobals") !== false,
-		diagUnusedLocal: lugoConfig.get("diagnostics.unused.local") !== false,
-		diagUnusedFunction: lugoConfig.get("diagnostics.unused.function") !== false,
-		diagUnusedParameter: lugoConfig.get("diagnostics.unused.parameter") !== false,
-		diagUnusedLoopVar: lugoConfig.get("diagnostics.unused.loopVar") !== false,
-		diagShadowing: lugoConfig.get("diagnostics.shadowing") !== false,
-		diagUnreachableCode: lugoConfig.get("diagnostics.unreachableCode") !== false,
-		diagAmbiguousReturns: lugoConfig.get("diagnostics.ambiguousReturns") !== false,
-		diagDeprecated: lugoConfig.get("diagnostics.deprecated") !== false,
-		diagDuplicateField: lugoConfig.get("diagnostics.duplicateField") !== false,
-		diagUnbalancedAssignment: lugoConfig.get("diagnostics.unbalancedAssignment") !== false,
-		diagDuplicateLocal: lugoConfig.get("diagnostics.duplicateLocal") !== false,
-		diagSelfAssignment: lugoConfig.get("diagnostics.selfAssignment") !== false,
-		diagEmptyBlock: lugoConfig.get("diagnostics.emptyBlock") !== false,
-		diagFormatString: lugoConfig.get("diagnostics.formatString") !== false,
-		diagTypeCheck: lugoConfig.get("diagnostics.typeCheck") === true,
-		diagRedundantParameter: lugoConfig.get("diagnostics.redundantParameter") !== false,
-		diagRedundantValue: lugoConfig.get("diagnostics.redundantValue") !== false,
-		diagRedundantReturn: lugoConfig.get("diagnostics.redundantReturn") !== false,
-		diagLoopVarMutation: lugoConfig.get("diagnostics.loopVarMutation") !== false,
-		diagIncorrectVararg: lugoConfig.get("diagnostics.incorrectVararg") !== false,
-		diagShadowingLoopVar: lugoConfig.get("diagnostics.shadowingLoopVar") !== false,
-		diagConstantCondition: lugoConfig.get("diagnostics.constantCondition") !== false,
-		diagUnreachableElse: lugoConfig.get("diagnostics.unreachableElse") !== false,
-		diagUsedIgnoredVar: lugoConfig.get("diagnostics.usedIgnoredVariable") !== false,
-		diagMinVariableNameLength: lugoConfig.get("diagnostics.minVariableNameLength") ?? 0,
-		diagIgnoredVariableNames: lugoConfig.get("diagnostics.ignoredVariableNames") || ["_", "i", "j", "x", "y", "z", "w", "id", "to"],
+		diagUndefinedGlobals: primaryLugoConfig.get("diagnostics.undefinedGlobals") !== false,
+		diagImplicitGlobals: primaryLugoConfig.get("diagnostics.implicitGlobals") !== false,
+		diagUnusedLocal: primaryLugoConfig.get("diagnostics.unused.local") !== false,
+		diagUnusedFunction: primaryLugoConfig.get("diagnostics.unused.function") !== false,
+		diagUnusedParameter: primaryLugoConfig.get("diagnostics.unused.parameter") !== false,
+		diagUnusedLoopVar: primaryLugoConfig.get("diagnostics.unused.loopVar") !== false,
+		diagShadowing: primaryLugoConfig.get("diagnostics.shadowing") !== false,
+		diagUnreachableCode: primaryLugoConfig.get("diagnostics.unreachableCode") !== false,
+		diagAmbiguousReturns: primaryLugoConfig.get("diagnostics.ambiguousReturns") !== false,
+		diagDeprecated: primaryLugoConfig.get("diagnostics.deprecated") !== false,
+		diagDuplicateField: primaryLugoConfig.get("diagnostics.duplicateField") !== false,
+		diagUnbalancedAssignment: primaryLugoConfig.get("diagnostics.unbalancedAssignment") !== false,
+		diagDuplicateLocal: primaryLugoConfig.get("diagnostics.duplicateLocal") !== false,
+		diagSelfAssignment: primaryLugoConfig.get("diagnostics.selfAssignment") !== false,
+		diagEmptyBlock: primaryLugoConfig.get("diagnostics.emptyBlock") !== false,
+		diagFormatString: primaryLugoConfig.get("diagnostics.formatString") !== false,
+		diagTypeCheck: primaryLugoConfig.get("diagnostics.typeCheck") === true,
+		diagRedundantParameter: primaryLugoConfig.get("diagnostics.redundantParameter") !== false,
+		diagRedundantValue: primaryLugoConfig.get("diagnostics.redundantValue") !== false,
+		diagRedundantReturn: primaryLugoConfig.get("diagnostics.redundantReturn") !== false,
+		diagLoopVarMutation: primaryLugoConfig.get("diagnostics.loopVarMutation") !== false,
+		diagIncorrectVararg: primaryLugoConfig.get("diagnostics.incorrectVararg") !== false,
+		diagShadowingLoopVar: primaryLugoConfig.get("diagnostics.shadowingLoopVar") !== false,
+		diagConstantCondition: primaryLugoConfig.get("diagnostics.constantCondition") !== false,
+		diagUnreachableElse: primaryLugoConfig.get("diagnostics.unreachableElse") !== false,
+		diagUsedIgnoredVar: primaryLugoConfig.get("diagnostics.usedIgnoredVariable") !== false,
+		diagMinVariableNameLength: primaryLugoConfig.get("diagnostics.minVariableNameLength") ?? 0,
+		diagIgnoredVariableNames: primaryLugoConfig.get("diagnostics.ignoredVariableNames") || ["_", "i", "j", "x", "y", "z", "w", "id", "to"],
 
-		inlayParamHints: lugoConfig.get("inlayHints.parameterNames") !== false,
-		inlaySuppressMatch: lugoConfig.get("inlayHints.suppressWhenArgumentMatchesName") !== false,
-		inlayImplicitSelf: lugoConfig.get("inlayHints.implicitSelf") !== false,
+		inlayParamHints: primaryLugoConfig.get("inlayHints.parameterNames") !== false,
+		inlaySuppressMatch: primaryLugoConfig.get("inlayHints.suppressWhenArgumentMatchesName") !== false,
+		inlayImplicitSelf: primaryLugoConfig.get("inlayHints.implicitSelf") !== false,
 
-		featureDocHighlight: lugoConfig.get("features.documentHighlight") !== false,
-		featureHoverEval: lugoConfig.get("features.hoverEvaluation") !== false,
-		featureCodeLens: lugoConfig.get("features.codeLens") !== false,
-		featureFormatAlerts: lugoConfig.get("features.formatAlerts") !== false,
-		featureFormatting: lugoConfig.get("features.formatting") !== false,
-		formatOpinionated: lugoConfig.get("features.formatOpinionated") === true,
-		suggestFunctionParams: lugoConfig.get("completion.suggestFunctionParams") !== false,
+		featureDocHighlight: primaryLugoConfig.get("features.documentHighlight") !== false,
+		featureHoverEval: primaryLugoConfig.get("features.hoverEvaluation") !== false,
+		featureCodeLens: primaryLugoConfig.get("features.codeLens") !== false,
+		featureFormatAlerts: primaryLugoConfig.get("features.formatAlerts") !== false,
+		featureFormatting: primaryLugoConfig.get("features.formatting") !== false,
+		formatOpinionated: primaryLugoConfig.get("features.formatOpinionated") === true,
+		suggestFunctionParams: primaryLugoConfig.get("completion.suggestFunctionParams") !== false,
 
-		featureFiveM: lugoConfig.get("fivem.enabled") === true,
-		diagFiveMUnaccountedFile: lugoConfig.get("fivem.diagnostics.unaccountedFile") !== false,
-		diagFiveMUnknownExport: lugoConfig.get("fivem.diagnostics.unknownExport") !== false,
-		diagFiveMUnknownResource: lugoConfig.get("fivem.diagnostics.unknownResource") !== false,
+		featureFiveM: primaryLugoConfig.get("fivem.enabled") === true,
+		diagFiveMUnaccountedFile: primaryLugoConfig.get("fivem.diagnostics.unaccountedFile") !== false,
+		diagFiveMUnknownExport: primaryLugoConfig.get("fivem.diagnostics.unknownExport") !== false,
+		diagFiveMUnknownResource: primaryLugoConfig.get("fivem.diagnostics.unknownResource") !== false,
 	};
 }
 
