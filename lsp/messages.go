@@ -101,11 +101,12 @@ type CIConfig struct {
 
 // gost:preserve-layout
 type InitializationOptions struct {
-	LibraryPaths  []string          `json:"libraryPaths,omitempty"`
-	IgnoreGlobs   []string          `json:"ignoreGlobs,omitempty"`
-	KnownGlobals  []string          `json:"knownGlobals,omitempty"`
-	BannedSymbols map[string]string `json:"bannedSymbols,omitempty"`
-	MaxFileSizeMB int               `json:"maxFileSizeMB"`
+	LibraryPaths    []string          `json:"libraryPaths,omitempty"`
+	IgnoreGlobs     []string          `json:"ignoreGlobs,omitempty"`
+	DiagIgnoreGlobs []string          `json:"diagIgnoreGlobs,omitempty"`
+	KnownGlobals    []string          `json:"knownGlobals,omitempty"`
+	BannedSymbols   map[string]string `json:"bannedSymbols,omitempty"`
+	MaxFileSizeMB   int               `json:"maxFileSizeMB"`
 
 	ParserMaxErrors int `json:"parserMaxErrors"`
 

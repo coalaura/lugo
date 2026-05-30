@@ -26,6 +26,7 @@ async function restartClient(context) {
 
 function buildInitializationOptions() {
 	let ignoreGlobs = [],
+		diagIgnoreGlobs = [],
 		libraryPaths = [],
 		knownGlobals = [],
 		bannedSymbols = {};
@@ -56,6 +57,7 @@ function buildInitializationOptions() {
 			lugoConfig = vscode.workspace.getConfiguration("lugo", scope);
 
 		const folderIgnoreGlobs = lugoConfig.get("workspace.ignoreGlobs") || [],
+			folderDiagIgnoreGlobs = lugoConfig.get("diagnostics.ignoreGlobs") || [],
 			nativeExcludes = {
 				...(filesConfig.get("exclude") || {}),
 				...(searchConfig.get("exclude") || {}),
@@ -68,6 +70,7 @@ function buildInitializationOptions() {
 		}
 
 		ignoreGlobs.push(...folderIgnoreGlobs);
+		diagIgnoreGlobs.push(...folderDiagIgnoreGlobs);
 		libraryPaths.push(...(lugoConfig.get("workspace.libraryPaths") || []));
 		knownGlobals.push(...(lugoConfig.get("environment.knownGlobals") || []));
 
@@ -75,12 +78,14 @@ function buildInitializationOptions() {
 	}
 
 	ignoreGlobs = [...new Set(ignoreGlobs)];
+	diagIgnoreGlobs = [...new Set(diagIgnoreGlobs)];
 	libraryPaths = [...new Set(libraryPaths)];
 	knownGlobals = [...new Set(knownGlobals)];
 
 	return {
 		libraryPaths: libraryPaths,
 		ignoreGlobs: ignoreGlobs,
+		diagIgnoreGlobs: diagIgnoreGlobs,
 		knownGlobals: knownGlobals,
 		bannedSymbols: bannedSymbols,
 		maxFileSizeMB: primaryLugoConfig.get("workspace.maxFileSizeMB") ?? 4,

@@ -40,14 +40,16 @@ type Server struct {
 	symlinkCache        map[string]string
 
 	// Global Index & Resolution
-	GlobalIndex       map[GlobalKey][]GlobalSymbol
-	KnownGlobals      map[string]bool
-	KnownGlobalGlobs  []string
-	LibraryPaths      []string
-	lowerLibraryPaths []string
-	IgnoreGlobs       []string
-	compiledIgnores   []IgnorePattern
-	BannedSymbols     map[string]string
+	GlobalIndex         map[GlobalKey][]GlobalSymbol
+	KnownGlobals        map[string]bool
+	KnownGlobalGlobs    []string
+	LibraryPaths        []string
+	lowerLibraryPaths   []string
+	IgnoreGlobs         []string
+	compiledIgnores     []IgnorePattern
+	IgnoreDiagGlobs     []string
+	compiledDiagIgnores []IgnorePattern
+	BannedSymbols       map[string]string
 
 	// Shared Buffers & Parsers
 	sharedParser     *parser.Parser
@@ -204,6 +206,10 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 		needsReindex = true
 	}
 
+	if s.setDiagIgnoreGlobs(opts.DiagIgnoreGlobs) {
+		needsRepublish = true
+	}
+
 	if s.setKnownGlobals(opts.KnownGlobals) {
 		needsReindex = true
 	}
@@ -296,6 +302,17 @@ func (s *Server) setIgnoreGlobs(globs []string) bool {
 
 	s.IgnoreGlobs = slices.Clone(globs)
 	s.compileIgnorePatterns()
+
+	return true
+}
+
+func (s *Server) setDiagIgnoreGlobs(globs []string) bool {
+	if slices.Equal(s.IgnoreDiagGlobs, globs) {
+		return false
+	}
+
+	s.IgnoreDiagGlobs = slices.Clone(globs)
+	s.compileDiagIgnorePatterns()
 
 	return true
 }

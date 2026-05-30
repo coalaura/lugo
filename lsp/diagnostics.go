@@ -49,6 +49,23 @@ func (s *Server) publishDiagnostics(uri string) {
 		return
 	}
 
+	if s.isDiagIgnored(doc.Path, filepath.Base(doc.Path)) {
+		if s.IsCI {
+			return
+		}
+
+		WriteMessage(s.Writer, OutgoingNotification{
+			RPC:    "2.0",
+			Method: "textDocument/publishDiagnostics",
+			Params: PublishDiagnosticsParams{
+				URI:         uri,
+				Diagnostics: []Diagnostic{},
+			},
+		})
+
+		return
+	}
+
 	if s.FeatureFiveM && doc.IsFiveMManifest {
 		if !s.IsCI {
 			WriteMessage(s.Writer, OutgoingNotification{

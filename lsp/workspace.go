@@ -1237,9 +1237,17 @@ func (s *Server) clearDocument(uri string) {
 }
 
 func (s *Server) compileIgnorePatterns() {
-	s.compiledIgnores = make([]IgnorePattern, 0, len(s.IgnoreGlobs))
+	s.compiledIgnores = s.compilePatterns(s.IgnoreGlobs)
+}
 
-	for _, glob := range s.IgnoreGlobs {
+func (s *Server) compileDiagIgnorePatterns() {
+	s.compiledDiagIgnores = s.compilePatterns(s.IgnoreDiagGlobs)
+}
+
+func (s *Server) compilePatterns(globs []string) []IgnorePattern {
+	patterns := make([]IgnorePattern, 0, len(globs))
+
+	for _, glob := range globs {
 		glob = strings.ToLower(filepath.ToSlash(glob))
 
 		cleanGlob := strings.TrimPrefix(strings.TrimPrefix(glob, "**/"), "*/")
@@ -1250,45 +1258,55 @@ func (s *Server) compileIgnorePatterns() {
 		}
 
 		if !strings.ContainsAny(cleanGlob, "*?") {
-			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{
+			patterns = append(patterns, IgnorePattern{
 				ContainsPath: "/" + cleanGlob + "/",
 				SuffixPath:   "/" + cleanGlob,
 				HasSuffix:    cleanGlob,
 			})
 		} else if strings.HasPrefix(cleanGlob, "*") && !strings.ContainsAny(cleanGlob[1:], "*?") {
-			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{HasSuffix: cleanGlob[1:]})
+			patterns = append(patterns, IgnorePattern{HasSuffix: cleanGlob[1:]})
 		} else if strings.HasSuffix(cleanGlob, "*") && !strings.ContainsAny(cleanGlob[:len(cleanGlob)-1], "*?") {
-			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{HasPrefix: cleanGlob[:len(cleanGlob)-1]})
+			patterns = append(patterns, IgnorePattern{HasPrefix: cleanGlob[:len(cleanGlob)-1]})
 		} else {
-			s.compiledIgnores = append(s.compiledIgnores, IgnorePattern{MatchFallback: cleanGlob})
+			patterns = append(patterns, IgnorePattern{MatchFallback: cleanGlob})
 		}
 	}
+
+	return patterns
 }
 
 func (s *Server) isIgnored(fullPath, name string) bool {
+	return s.matchesPatterns(fullPath, name, s.compiledIgnores)
+}
+
+func (s *Server) isDiagIgnored(fullPath, name string) bool {
+	return s.matchesPatterns(fullPath, name, s.compiledDiagIgnores)
+}
+
+func (s *Server) matchesPatterns(fullPath, name string, patterns []IgnorePattern) bool {
 	if s.FeatureFiveM && (name == "fxmanifest.lua" || name == "__resource.lua") {
 		return false
 	}
 
-	for _, p := range s.compiledIgnores {
-		if p.HasSuffix != "" && pathHasSuffixFold(name, p.HasSuffix) {
+	for _, pattern := range patterns {
+		if pattern.HasSuffix != "" && pathHasSuffixFold(name, pattern.HasSuffix) {
 			return true
 		}
 
-		if p.HasPrefix != "" && pathHasPrefixFold(name, p.HasPrefix) {
+		if pattern.HasPrefix != "" && pathHasPrefixFold(name, pattern.HasPrefix) {
 			return true
 		}
 
-		if p.ContainsPath != "" && pathContainsFold(fullPath, p.ContainsPath) {
+		if pattern.ContainsPath != "" && pathContainsFold(fullPath, pattern.ContainsPath) {
 			return true
 		}
 
-		if p.SuffixPath != "" && pathHasSuffixFold(fullPath, p.SuffixPath) {
+		if pattern.SuffixPath != "" && pathHasSuffixFold(fullPath, pattern.SuffixPath) {
 			return true
 		}
 
-		if p.MatchFallback != "" {
-			if matchGlob(p.MatchFallback, name) {
+		if pattern.MatchFallback != "" {
+			if matchGlob(pattern.MatchFallback, name) {
 				return true
 			}
 		}

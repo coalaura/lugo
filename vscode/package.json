@@ -106,202 +106,212 @@
                 "title": "Lugo: Parser & Diagnostics",
                 "order": 2,
                 "properties": {
+                    "lugo.diagnostics.ignoreGlobs": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "default": [],
+                        "scope": "resource",
+                        "markdownDescription": "List of globs/files where diagnostics should be skipped, but symbols and exports are still indexed and resolved.",
+                        "order": 1
+                    },
                     "lugo.parser.maxErrors": {
                         "type": "integer",
                         "default": 50,
                         "minimum": 0,
                         "scope": "resource",
                         "markdownDescription": "Maximum number of syntax errors to report per file. Set to `0` for unlimited. Reduces cascade noise on heavily broken files.",
-                        "order": 1
+                        "order": 2
                     },
                     "lugo.diagnostics.undefinedGlobals": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for undefined global variables. Ignores variables listed in `#lugo.environment.knownGlobals#`.",
-                        "order": 2
+                        "order": 3
                     },
                     "lugo.diagnostics.implicitGlobals": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for implicit global variable creation (e.g., forgetting the `local` keyword inside a function).",
-                        "order": 3
+                        "order": 4
                     },
                     "lugo.diagnostics.shadowing": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics when a local variable shadows a global or outer local.",
-                        "order": 4
+                        "order": 5
                     },
                     "lugo.diagnostics.unreachableCode": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for unreachable code (e.g., statements strictly following a `return` or `break`).",
-                        "order": 5
+                        "order": 6
                     },
                     "lugo.diagnostics.ambiguousReturns": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for ambiguous returns where an expression on the next line is accidentally evaluated as the return value.",
-                        "order": 6
+                        "order": 7
                     },
                     "lugo.diagnostics.deprecated": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for usage of symbols marked with `@deprecated`.",
-                        "order": 7
+                        "order": 8
                     },
                     "lugo.diagnostics.unused.local": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for unused local variables.",
-                        "order": 8
+                        "order": 9
                     },
                     "lugo.diagnostics.unused.function": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for unused local functions.",
-                        "order": 9
+                        "order": 10
                     },
                     "lugo.diagnostics.unused.parameter": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for unused function parameters (and varargs).",
-                        "order": 10
+                        "order": 11
                     },
                     "lugo.diagnostics.unused.loopVar": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for unused loop variables.",
-                        "order": 11
+                        "order": 12
                     },
                     "lugo.diagnostics.duplicateField": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for duplicate fields inside table literals.",
-                        "order": 12
+                        "order": 13
                     },
                     "lugo.diagnostics.unbalancedAssignment": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics when assigning fewer or more values than variables.",
-                        "order": 13
+                        "order": 14
                     },
                     "lugo.diagnostics.duplicateLocal": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics when a local variable is defined twice in the exact same scope.",
-                        "order": 14
+                        "order": 15
                     },
                     "lugo.diagnostics.selfAssignment": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics when assigning a variable to itself.",
-                        "order": 15
+                        "order": 16
                     },
                     "lugo.diagnostics.emptyBlock": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable hints for empty blocks (e.g., `do end`).",
-                        "order": 16
+                        "order": 17
                     },
                     "lugo.diagnostics.formatString": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for `string.format` argument counts.",
-                        "order": 17
+                        "order": 18
                     },
                     "lugo.diagnostics.typeCheck": {
                         "type": "boolean",
                         "default": false,
                         "scope": "resource",
                         "markdownDescription": "Enable strict type checking for definitely-invalid operations (calling numbers, indexing nil, etc.). **Warning:** Lua is highly dynamic; this will produce false positives unless your codebase uses comprehensive LuaCATS `@type` annotations.",
-                        "order": 18
+                        "order": 19
                     },
                     "lugo.diagnostics.redundantParameter": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for passing more arguments to a function than it accepts.",
-                        "order": 19
+                        "order": 20
                     },
                     "lugo.diagnostics.redundantValue": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for assigning more values than there are variables.",
-                        "order": 20
+                        "order": 21
                     },
                     "lugo.diagnostics.redundantReturn": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for empty return statements at the very end of a function.",
-                        "order": 21
+                        "order": 22
                     },
                     "lugo.diagnostics.loopVarMutation": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for mutating a loop variable inside the loop body.",
-                        "order": 22
+                        "order": 23
                     },
                     "lugo.diagnostics.incorrectVararg": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for using the vararg `...` expression outside of a vararg function.",
-                        "order": 23
+                        "order": 24
                     },
                     "lugo.diagnostics.shadowingLoopVar": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics when a loop variable shadows an outer local or global variable.",
-                        "order": 24
+                        "order": 25
                     },
                     "lugo.diagnostics.unreachableElse": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for unreachable `elseif` or `else` branches (e.g., after an `if true then`).",
-                        "order": 25
+                        "order": 26
                     },
                     "lugo.diagnostics.constantCondition": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for conditions that are statically known to be always true or always false.",
-                        "order": 26
+                        "order": 27
                     },
                     "lugo.diagnostics.usedIgnoredVariable": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for variables that are used but their name starts with `_` (which conventionally marks them as unused).",
-                        "order": 27
+                        "order": 28
                     },
                     "lugo.diagnostics.bannedSymbols": {
                         "type": "object",
                         "default": {},
                         "scope": "resource",
                         "markdownDescription": "Map of banned global functions/symbols to a custom warning message (e.g., `{\"print\": \"Use customLogger instead\"}`).",
-                        "order": 28
+                        "order": 29
                     },
                     "lugo.diagnostics.minVariableNameLength": {
                         "type": "integer",
@@ -309,7 +319,7 @@
                         "minimum": 0,
                         "scope": "resource",
                         "markdownDescription": "Minimum allowed length for variable names. Variables shorter than this are flagged. Set to `0` to disable.",
-                        "order": 29
+                        "order": 30
                     },
                     "lugo.diagnostics.ignoredVariableNames": {
                         "type": "array",
@@ -319,7 +329,7 @@
                         "default": ["_", "i", "j", "x", "y", "z", "w", "id", "to"],
                         "scope": "resource",
                         "markdownDescription": "List of variable names that are exempt from the minimum length check.",
-                        "order": 30
+                        "order": 31
                     }
                 }
             },
