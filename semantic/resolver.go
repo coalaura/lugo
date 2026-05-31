@@ -270,7 +270,7 @@ func (r *Resolver) resolveReference(identID ast.NodeID, isDef bool) {
 		defNode := r.Tree.Nodes[defID]
 
 		if defNode.End-defNode.Start == targetLen {
-			if bytes.Equal(targetSrc, r.Tree.Source[defNode.Start:defNode.End]) {
+			if bytes.Equal(targetSrc, r.source(defID)) {
 				r.References[identID] = defID
 
 				return
