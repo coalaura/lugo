@@ -193,10 +193,10 @@ func (r *Resolver) declare(identID ast.NodeID) {
 		nameLen := uint32(len(name))
 		for i := len(r.scopeStack) - 1; i >= 0; i-- {
 			defID := r.scopeStack[i]
-			defNode := r.Tree.Nodes[defID]
+			defName := r.source(defID)
 
-			if defNode.End-defNode.Start == nameLen {
-				if bytes.Equal(r.Tree.Source[defNode.Start:defNode.End], name) {
+			if len(defName) == int(nameLen) {
+				if bytes.Equal(defName, name) {
 					if i >= scopeStart {
 						r.DuplicateLocals = append(r.DuplicateLocals, identID)
 					} else {

@@ -112,7 +112,12 @@ func (s *Server) parseFiveMManifest(doc *Document) *FiveMResource {
 		ManifestURI: doc.URI,
 	}
 
-	res.RootURI = doc.URI[:strings.LastIndex(doc.URI, "/")]
+	idx := strings.LastIndex(doc.URI, "/")
+	if idx == -1 {
+		res.RootURI = doc.URI
+	} else {
+		res.RootURI = doc.URI[:idx]
+	}
 
 	parts := strings.Split(res.RootURI, "/")
 

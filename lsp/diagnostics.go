@@ -800,7 +800,19 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 
 		for _, pf := range doc.Resolver.PendingFields {
-			propName := utils.String(doc.Source[doc.Tree.Nodes[pf.PropNodeID].Start:doc.Tree.Nodes[pf.PropNodeID].End])
+			var propName string
+
+			if int(pf.PropNodeID) < len(doc.Tree.Nodes) {
+				pNode := doc.Tree.Nodes[pf.PropNodeID]
+				if pNode.Start <= pNode.End && pNode.End <= uint32(len(doc.Source)) {
+					propName = utils.String(doc.Source[pNode.Start:pNode.End])
+				}
+			}
+
+			if propName == "" {
+				continue
+			}
+
 			fullName := string(pf.ReceiverName) + "." + propName
 
 			if reason, ok := s.BannedSymbols[fullName]; ok {

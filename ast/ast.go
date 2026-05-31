@@ -254,7 +254,7 @@ func (t *Tree) NodeAt(offset uint32) NodeID {
 
 		node := t.Nodes[curr]
 
-		var next NodeID = InvalidNode
+		next := InvalidNode
 
 		check := func(childID NodeID) {
 			if childID != InvalidNode && next == InvalidNode {

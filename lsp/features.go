@@ -602,7 +602,11 @@ func (s *Server) handleCompletion(req Request) {
 					if p.Name == "..." {
 						params = append(params, fmt.Sprintf("${%d:...}", snippetIdx))
 					} else {
-						params = append(params, fmt.Sprintf("${%d:%s}", snippetIdx, p.Name))
+						safeName := strings.ReplaceAll(p.Name, "\\", "\\\\")
+						safeName = strings.ReplaceAll(safeName, "$", "\\$")
+						safeName = strings.ReplaceAll(safeName, "}", "\\}")
+
+						params = append(params, fmt.Sprintf("${%d:%s}", snippetIdx, safeName))
 					}
 
 					snippetIdx++
@@ -640,7 +644,11 @@ func (s *Server) handleCompletion(req Request) {
 			if pName == "..." {
 				params = append(params, fmt.Sprintf("${%d:...}", snippetIdx))
 			} else {
-				params = append(params, fmt.Sprintf("${%d:%s}", snippetIdx, pName))
+				safeName := strings.ReplaceAll(pName, "\\", "\\\\")
+				safeName = strings.ReplaceAll(safeName, "$", "\\$")
+				safeName = strings.ReplaceAll(safeName, "}", "\\}")
+
+				params = append(params, fmt.Sprintf("${%d:%s}", snippetIdx, safeName))
 			}
 
 			snippetIdx++
