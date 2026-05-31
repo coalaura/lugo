@@ -10,6 +10,7 @@ import (
 	"github.com/coalaura/lugo/parser"
 	"github.com/coalaura/lugo/semantic"
 	"github.com/coalaura/lugo/token"
+	"github.com/coalaura/lugo/utils"
 )
 
 type DiagPragmas struct {
@@ -243,7 +244,7 @@ func (doc *Document) getFunctionParams(funcExprID ast.NodeID, luadoc *LuaDoc) st
 		pID := doc.Tree.ExtraList[node.Extra+uint32(i)]
 		pNode := doc.Tree.Nodes[pID]
 
-		name := ast.String(doc.Source[pNode.Start:pNode.End])
+		name := utils.String(doc.Source[pNode.Start:pNode.End])
 
 		if typ, ok := paramTypes[name]; ok && typ != "" {
 			params = append(params, name+": "+typ)

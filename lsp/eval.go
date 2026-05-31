@@ -8,6 +8,7 @@ import (
 
 	"github.com/coalaura/lugo/ast"
 	"github.com/coalaura/lugo/token"
+	"github.com/coalaura/lugo/utils"
 )
 
 type evalResult struct {
@@ -226,7 +227,7 @@ func (doc *Document) evalNode(id ast.NodeID, depth int) (evalResult, bool) {
 
 	switch node.Kind {
 	case ast.KindNumber:
-		raw := ast.String(doc.Source[node.Start:node.End])
+		raw := utils.String(doc.Source[node.Start:node.End])
 
 		floatVal, err := strconv.ParseFloat(raw, 64)
 		if err != nil {
@@ -240,7 +241,7 @@ func (doc *Document) evalNode(id ast.NodeID, depth int) (evalResult, bool) {
 
 		return evalResult{kind: ast.KindNumber, num: floatVal}, true
 	case ast.KindString:
-		raw := ast.String(doc.Source[node.Start:node.End])
+		raw := utils.String(doc.Source[node.Start:node.End])
 		if len(raw) >= 2 && (raw[0] == '\'' || raw[0] == '"') {
 			unq, err := strconv.Unquote(raw)
 			if err == nil {
@@ -330,19 +331,16 @@ func (doc *Document) evalNode(id ast.NodeID, depth int) (evalResult, bool) {
 
 func applyOp(left, right evalResult, op token.Kind) (evalResult, bool) {
 	if op == token.Concat {
-		var (
-			str1 string
-			str2 string
-		)
+		var sb strings.Builder
 
 		switch left.kind {
 		case ast.KindString:
-			str1 = left.str
+			sb.WriteString(left.str)
 		case ast.KindNumber:
 			if left.num == math.Trunc(left.num) && left.num >= math.MinInt64 && left.num <= math.MaxInt64 {
-				str1 = strconv.FormatInt(int64(left.num), 10)
+				sb.WriteString(strconv.FormatInt(int64(left.num), 10))
 			} else {
-				str1 = strconv.FormatFloat(left.num, 'g', 14, 64)
+				sb.WriteString(strconv.FormatFloat(left.num, 'g', 14, 64))
 			}
 		default:
 			return evalResult{}, false
@@ -350,18 +348,18 @@ func applyOp(left, right evalResult, op token.Kind) (evalResult, bool) {
 
 		switch right.kind {
 		case ast.KindString:
-			str2 = right.str
+			sb.WriteString(right.str)
 		case ast.KindNumber:
 			if right.num == math.Trunc(right.num) && right.num >= math.MinInt64 && right.num <= math.MaxInt64 {
-				str2 = strconv.FormatInt(int64(right.num), 10)
+				sb.WriteString(strconv.FormatInt(int64(right.num), 10))
 			} else {
-				str2 = strconv.FormatFloat(right.num, 'g', 14, 64)
+				sb.WriteString(strconv.FormatFloat(right.num, 'g', 14, 64))
 			}
 		default:
 			return evalResult{}, false
 		}
 
-		return evalResult{kind: ast.KindString, str: str1 + str2}, true
+		return evalResult{kind: ast.KindString, str: sb.String()}, true
 	}
 
 	if left.kind == ast.KindNumber && right.kind == ast.KindNumber {

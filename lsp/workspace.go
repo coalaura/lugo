@@ -15,6 +15,7 @@ import (
 	"github.com/coalaura/lugo/ast"
 	"github.com/coalaura/lugo/parser"
 	"github.com/coalaura/lugo/semantic"
+	"github.com/coalaura/lugo/utils"
 )
 
 type IndexJob struct {
@@ -232,7 +233,7 @@ func (s *Server) handleReadStd(req Request) {
 
 	b, err := stdlibFS.ReadFile("stdlib/" + filename)
 	if err == nil {
-		content = ast.String(b)
+		content = utils.String(b)
 	}
 
 	WriteMessage(s.Writer, Response{
@@ -834,11 +835,11 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 
 			lastDot := bytes.LastIndexByte(nameBytes, '.')
 			if lastDot != -1 {
-				recHash = ast.HashBytes(nameBytes[:lastDot])
-				propHash = ast.HashBytes(nameBytes[lastDot+1:])
+				recHash = utils.HashBytes(nameBytes[:lastDot])
+				propHash = utils.HashBytes(nameBytes[lastDot+1:])
 			} else {
 				recHash = 0
-				propHash = ast.HashBytes(nameBytes)
+				propHash = utils.HashBytes(nameBytes)
 			}
 
 			var parentName string
@@ -861,10 +862,10 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 			s.setGlobalSymbol(GlobalKey{ReceiverHash: recHash, PropHash: propHash}, uri, virtualNodeID, typeName, parentName, true, luadoc.IsDeprecated, luadoc.DeprecatedMsg)
 
 			if len(luadoc.Fields) > 0 {
-				classHash := ast.HashBytes(nameBytes)
+				classHash := utils.HashBytes(nameBytes)
 
 				for _, field := range luadoc.Fields {
-					fieldHash := ast.HashBytes([]byte(field.Name))
+					fieldHash := utils.HashBytes([]byte(field.Name))
 
 					var sb strings.Builder
 
@@ -903,7 +904,7 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 		}
 
 		identBytes := tree.Source[node.Start:node.End]
-		hash := ast.HashBytes(identBytes)
+		hash := utils.HashBytes(identBytes)
 
 		isRoot := isRootLevel(tree, defID)
 		isDep, depMsg := doc.HasDeprecatedTag(defID)
@@ -911,7 +912,7 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 		s.setGlobalSymbol(GlobalKey{ReceiverHash: 0, PropHash: hash}, uri, defID, string(identBytes), "", isRoot, isDep, depMsg)
 
 		for name := range doc.ExtractLuaDocFields(defID) {
-			fieldHash := ast.HashBytes(name)
+			fieldHash := utils.HashBytes(name)
 
 			var sb strings.Builder
 
@@ -956,7 +957,7 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 						} else if len(fd.ReceiverName) > len(localName) && bytes.HasPrefix(fd.ReceiverName, localName) && fd.ReceiverName[len(localName)] == '.' {
 							suffix := fd.ReceiverName[len(localName)+1:]
 
-							newRecHash := ast.HashBytesConcat(globalBytes, []byte{'.'}, suffix)
+							newRecHash := utils.HashBytesConcat(globalBytes, []byte{'.'}, suffix)
 
 							propBytes := doc.Source[doc.Tree.Nodes[fd.NodeID].Start:doc.Tree.Nodes[fd.NodeID].End]
 
@@ -992,7 +993,7 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 			if valID != ast.InvalidNode {
 				globalRecName = s.getGlobalPath(doc, valID, 0)
 				if globalRecName != nil {
-					globalRecHash = ast.HashBytes(globalRecName)
+					globalRecHash = utils.HashBytes(globalRecName)
 				}
 			}
 		}
@@ -1030,14 +1031,14 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 			modName = "module"
 		}
 
-		modHash := ast.HashBytesConcat([]byte("module:"), nil, []byte(uri))
+		modHash := utils.HashBytesConcat([]byte("module:"), nil, []byte(uri))
 
 		exportNode := doc.Tree.Nodes[doc.ExportedNode]
 		if exportNode.Kind == ast.KindIdent {
 			exportDef := doc.Resolver.References[doc.ExportedNode]
 			if exportDef != ast.InvalidNode {
 				exportDefNode := doc.Tree.Nodes[exportDef]
-				exportHash := ast.HashBytes(doc.Source[exportDefNode.Start:exportDefNode.End])
+				exportHash := utils.HashBytes(doc.Source[exportDefNode.Start:exportDefNode.End])
 
 				for _, fd := range doc.Resolver.FieldDefs {
 					if fd.ReceiverDef == exportDef && fd.ReceiverHash == exportHash {
@@ -1062,7 +1063,7 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 					if field.Kind == ast.KindRecordField {
 						key := doc.Tree.Nodes[field.Left]
 						if key.Kind == ast.KindIdent {
-							propHash := ast.HashBytes(doc.Source[key.Start:key.End])
+							propHash := utils.HashBytes(doc.Source[key.Start:key.End])
 							propName := doc.Source[key.Start:key.End]
 
 							isRoot := isRootLevel(doc.Tree, field.Left)
@@ -1095,7 +1096,7 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 		if reqModName != "" {
 			targetDoc := s.resolveModule(uri, reqModName)
 			if targetDoc != nil {
-				modHash := ast.HashBytesConcat([]byte("module:"), nil, []byte(targetDoc.URI))
+				modHash := utils.HashBytesConcat([]byte("module:"), nil, []byte(targetDoc.URI))
 				res.PendingFields[i].ReceiverHash = modHash
 			}
 		}
@@ -1108,7 +1109,7 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 				if valID != ast.InvalidNode {
 					path := s.getGlobalPath(doc, valID, 0)
 					if path != nil {
-						recHash = ast.HashBytes(path)
+						recHash = utils.HashBytes(path)
 					}
 				}
 			} else {

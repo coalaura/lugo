@@ -7,6 +7,7 @@ import (
 
 	"github.com/coalaura/lugo/ast"
 	"github.com/coalaura/lugo/token"
+	"github.com/coalaura/lugo/utils"
 )
 
 type BasicType uint16
@@ -317,7 +318,7 @@ func (doc *Document) inferIdent(id ast.NodeID) TypeSet {
 	localDefID := targetDef
 
 	identName := doc.Source[doc.Tree.Nodes[id].Start:doc.Tree.Nodes[id].End]
-	identHash := ast.HashBytes(identName)
+	identHash := utils.HashBytes(identName)
 
 	if doc.Server != nil {
 		ctx := doc.Server.resolveSymbolNode(doc.URI, doc, id)
@@ -534,7 +535,7 @@ func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 	}
 
 	fieldName := doc.Source[rightNode.Start:rightNode.End]
-	propHash := ast.HashBytes(fieldName)
+	propHash := utils.HashBytes(fieldName)
 
 	mergeType := func(rt TypeSet) {
 		if rt.Basics == TypeUnknown && rt.CustomName == "" {
@@ -585,7 +586,7 @@ func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 		recDef := tDoc.getDefForValue(tableID)
 		if recDef != ast.InvalidNode {
 			recDefNode := tDoc.Tree.Nodes[recDef]
-			recHash := ast.HashBytes(tDoc.Source[recDefNode.Start:recDefNode.End])
+			recHash := utils.HashBytes(tDoc.Source[recDefNode.Start:recDefNode.End])
 
 			for _, fd := range tDoc.Resolver.FieldDefs {
 				if fd.ReceiverDef == recDef && fd.ReceiverHash == recHash && fd.PropHash == propHash {
@@ -655,7 +656,7 @@ func (doc *Document) inferMemberExpr(node ast.Node) TypeSet {
 				break
 			}
 
-			classHash := ast.HashBytes([]byte(currClassName))
+			classHash := utils.HashBytes([]byte(currClassName))
 			if syms, ok := doc.Server.getGlobalSymbols(doc, classHash, propHash); ok && len(syms) > 0 {
 				sym := syms[0]
 				if gDoc, ok := doc.Server.Documents[sym.URI]; ok {
@@ -732,7 +733,7 @@ func (doc *Document) inferCallExpr(node ast.Node) TypeSet {
 							metaNodeID = valID
 						}
 					} else {
-						identHash := ast.HashBytes(doc.Source[doc.Tree.Nodes[arg2ID].Start:doc.Tree.Nodes[arg2ID].End])
+						identHash := utils.HashBytes(doc.Source[doc.Tree.Nodes[arg2ID].Start:doc.Tree.Nodes[arg2ID].End])
 						if syms, ok := doc.Server.getGlobalSymbols(doc, 0, identHash); ok && len(syms) > 0 {
 							sym := syms[0]
 							if gDoc, ok := doc.Server.Documents[sym.URI]; ok {
@@ -884,9 +885,9 @@ func (doc *Document) getIndexTable(metaNodeID ast.NodeID) (*Document, ast.NodeID
 		recDef := doc.getDefForValue(metaNodeID)
 		if recDef != ast.InvalidNode {
 			recDefNode := doc.Tree.Nodes[recDef]
-			recHash := ast.HashBytes(doc.Source[recDefNode.Start:recDefNode.End])
+			recHash := utils.HashBytes(doc.Source[recDefNode.Start:recDefNode.End])
 
-			propHash := ast.HashBytes([]byte("__index"))
+			propHash := utils.HashBytes([]byte("__index"))
 			for _, fd := range doc.Resolver.FieldDefs {
 				if fd.ReceiverDef == recDef && fd.ReceiverHash == recHash && fd.PropHash == propHash {
 					indexValID = doc.getAssignedValue(fd.NodeID)
@@ -913,7 +914,7 @@ func (doc *Document) getIndexTable(metaNodeID ast.NodeID) (*Document, ast.NodeID
 					return doc, valID
 				}
 			} else if doc.Server != nil {
-				identHash := ast.HashBytes(doc.Source[doc.Tree.Nodes[indexValID].Start:doc.Tree.Nodes[indexValID].End])
+				identHash := utils.HashBytes(doc.Source[doc.Tree.Nodes[indexValID].Start:doc.Tree.Nodes[indexValID].End])
 				if syms, ok := doc.Server.getGlobalSymbols(doc, 0, identHash); ok && len(syms) > 0 {
 					sym := syms[0]
 					if gDoc, ok := doc.Server.Documents[sym.URI]; ok {

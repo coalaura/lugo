@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"github.com/coalaura/lugo/ast"
+	"github.com/coalaura/lugo/utils"
 )
 
 type FieldDef struct {
@@ -225,7 +226,7 @@ func (r *Resolver) defineField(memberNodeID ast.NodeID) {
 		return
 	}
 
-	propHash := ast.HashBytes(r.source(node.Right))
+	propHash := utils.HashBytes(r.source(node.Right))
 
 	fk := FieldKey{
 		RecDef:   recDef,
@@ -313,7 +314,7 @@ func (r *Resolver) GetReceiverContext(recID ast.NodeID) (ast.NodeID, uint64, []b
 
 	recBytes := r.buildMemberName(recID, nil)
 
-	return rootDef, ast.HashBytes(recBytes), recBytes
+	return rootDef, utils.HashBytes(recBytes), recBytes
 }
 
 func (r *Resolver) getReceiverContextArena(recID ast.NodeID) (ast.NodeID, uint64, []byte) {
@@ -344,7 +345,7 @@ func (r *Resolver) getReceiverContextArena(recID ast.NodeID) (ast.NodeID, uint64
 
 	recBytes := r.nameArena[startIdx:]
 
-	return rootDef, ast.HashBytes(recBytes), recBytes
+	return rootDef, utils.HashBytes(recBytes), recBytes
 }
 
 func (r *Resolver) buildMemberName(id ast.NodeID, buf []byte) []byte {
@@ -523,7 +524,7 @@ func (r *Resolver) visit(id ast.NodeID) {
 				var nameHash uint64
 
 				if defID == ast.InvalidNode {
-					nameHash = ast.HashBytes(r.source(exprID))
+					nameHash = utils.HashBytes(r.source(exprID))
 				}
 
 				r.Reassignments = append(r.Reassignments, Reassignment{
@@ -554,7 +555,7 @@ func (r *Resolver) visit(id ast.NodeID) {
 			recDef, recHash, recName := r.getReceiverContextArena(node.Left)
 
 			if len(recName) > 0 {
-				propHash := ast.HashBytes(r.source(node.Right))
+				propHash := utils.HashBytes(r.source(node.Right))
 
 				r.PendingFields = append(r.PendingFields, FieldRef{
 					PropNodeID:   node.Right,
@@ -580,7 +581,7 @@ func (r *Resolver) visit(id ast.NodeID) {
 		var recHash uint64
 
 		if len(recBytes) > 0 {
-			recHash = ast.HashBytes(recBytes)
+			recHash = utils.HashBytes(recBytes)
 		}
 
 		for i := uint16(0); i < node.Count; i++ {
@@ -590,7 +591,7 @@ func (r *Resolver) visit(id ast.NodeID) {
 			switch fieldNode.Kind {
 			case ast.KindRecordField:
 				if len(recBytes) > 0 && r.Tree.Nodes[fieldNode.Left].Kind == ast.KindIdent && r.Tree.Nodes[fieldNode.Left].Start < r.Tree.Nodes[fieldNode.Left].End {
-					propHash := ast.HashBytes(r.source(fieldNode.Left))
+					propHash := utils.HashBytes(r.source(fieldNode.Left))
 
 					r.FieldDefs = append(r.FieldDefs, FieldDef{
 						ReceiverDef:  recDef,

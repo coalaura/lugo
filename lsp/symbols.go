@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/coalaura/lugo/ast"
+	"github.com/coalaura/lugo/utils"
 )
 
 var luaKeywords = []string{
@@ -192,7 +193,7 @@ func (s *Server) handleDocumentSymbol(req Request) {
 				keyNode := doc.Tree.Nodes[fieldNode.Left]
 				valNode := doc.Tree.Nodes[fieldNode.Right]
 
-				name := ast.String(doc.Source[keyNode.Start:keyNode.End])
+				name := utils.String(doc.Source[keyNode.Start:keyNode.End])
 				if name == "" {
 					name = "<error>"
 				}
@@ -240,7 +241,7 @@ func (s *Server) handleDocumentSymbol(req Request) {
 		case ast.KindLocalFunction, ast.KindFunctionStmt:
 			nameNode := doc.Tree.Nodes[node.Left]
 
-			name := ast.String(doc.Source[nameNode.Start:nameNode.End])
+			name := utils.String(doc.Source[nameNode.Start:nameNode.End])
 			if name == "" {
 				name = "<error>"
 			}
@@ -287,7 +288,7 @@ func (s *Server) handleDocumentSymbol(req Request) {
 						rNode = doc.Tree.Nodes[rID]
 					}
 
-					name := ast.String(doc.Source[lNode.Start:lNode.End])
+					name := utils.String(doc.Source[lNode.Start:lNode.End])
 					if name == "" {
 						name = "<error>"
 					}
@@ -346,14 +347,14 @@ func (s *Server) handleDocumentSymbol(req Request) {
 					rightNode := doc.Tree.Nodes[node.Right]
 
 					if leftNode.Start <= rightNode.End && rightNode.End <= uint32(len(doc.Source)) {
-						funcName = ast.String(doc.Source[leftNode.Start:rightNode.End])
+						funcName = utils.String(doc.Source[leftNode.Start:rightNode.End])
 					}
 				}
 			} else {
 				if int(node.Left) < len(doc.Tree.Nodes) {
 					leftNode := doc.Tree.Nodes[node.Left]
 					if leftNode.Start <= leftNode.End && leftNode.End <= uint32(len(doc.Source)) {
-						funcName = ast.String(doc.Source[leftNode.Start:leftNode.End])
+						funcName = utils.String(doc.Source[leftNode.Start:leftNode.End])
 					}
 
 					if leftNode.Kind == ast.KindMemberExpr {
@@ -403,7 +404,7 @@ func (s *Server) handleDocumentSymbol(req Request) {
 								if int(pID) < len(targetDoc.Tree.Nodes) {
 									pNode := targetDoc.Tree.Nodes[pID]
 									if pNode.Start <= pNode.End && pNode.End <= uint32(len(targetDoc.Source)) {
-										pNameStr := ast.String(targetDoc.Source[pNode.Start:pNode.End])
+										pNameStr := utils.String(targetDoc.Source[pNode.Start:pNode.End])
 										if pNameStr != "" && pNameStr != "..." {
 											paramName = pNameStr
 										}
@@ -649,7 +650,7 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 	}
 
 	identBytes := doc.Source[identNode.Start:identNode.End]
-	identName := ast.String(identBytes)
+	identName := utils.String(identBytes)
 
 	displayName := identName
 	if displayName == "" {
@@ -679,12 +680,12 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 				recNode := doc.Tree.Nodes[recID]
 
 				if recNode.Start <= identNode.End && identNode.End <= uint32(len(doc.Source)) {
-					displayName = ast.String(doc.Source[recNode.Start:identNode.End])
+					displayName = utils.String(doc.Source[recNode.Start:identNode.End])
 				}
 
 				if recNode.Start <= recNode.End && recNode.End <= uint32(len(doc.Source)) {
 					recBytes := doc.Source[recNode.Start:recNode.End]
-					gKey = GlobalKey{ReceiverHash: ast.HashBytes(recBytes), PropHash: ast.HashBytes(identBytes)}
+					gKey = GlobalKey{ReceiverHash: utils.HashBytes(recBytes), PropHash: utils.HashBytes(identBytes)}
 				}
 
 				curr := recID
@@ -715,7 +716,7 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 				if modName != "" {
 					targetDoc := s.resolveModule(uri, modName)
 					if targetDoc != nil {
-						gKey.ReceiverHash = ast.HashBytesConcat([]byte("module:"), nil, []byte(targetDoc.URI))
+						gKey.ReceiverHash = utils.HashBytesConcat([]byte("module:"), nil, []byte(targetDoc.URI))
 					}
 				}
 
@@ -728,14 +729,14 @@ func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID)
 
 			gKey = GlobalKey{ReceiverHash: 0, PropHash: 0}
 		} else {
-			gKey = GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes(identBytes)}
+			gKey = GlobalKey{ReceiverHash: 0, PropHash: utils.HashBytes(identBytes)}
 
 			if defID == ast.InvalidNode && (pNode.Kind == ast.KindNameList || pNode.Kind == ast.KindFunctionExpr || pNode.Kind == ast.KindForNum || pNode.Kind == ast.KindLocalFunction || pNode.Kind == ast.KindFunctionStmt) {
 				defID = nodeID
 			}
 		}
 	} else {
-		gKey = GlobalKey{ReceiverHash: 0, PropHash: ast.HashBytes(identBytes)}
+		gKey = GlobalKey{ReceiverHash: 0, PropHash: utils.HashBytes(identBytes)}
 	}
 
 	var isModuleAccess bool
@@ -1178,7 +1179,7 @@ func (s *Server) iterateGlobalReferences(ctx *SymbolContext) iter.Seq[GlobalRefe
 
 			if ctx.GKey.ReceiverHash == 0 {
 				for _, id := range dDoc.Resolver.GlobalDefs {
-					if ast.HashBytes(dDoc.Source[dDoc.Tree.Nodes[id].Start:dDoc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
+					if utils.HashBytes(dDoc.Source[dDoc.Tree.Nodes[id].Start:dDoc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
 						if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: id}) {
 							return
 						}
@@ -1186,7 +1187,7 @@ func (s *Server) iterateGlobalReferences(ctx *SymbolContext) iter.Seq[GlobalRefe
 				}
 
 				for _, id := range dDoc.Resolver.GlobalRefs {
-					if ast.HashBytes(dDoc.Source[dDoc.Tree.Nodes[id].Start:dDoc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
+					if utils.HashBytes(dDoc.Source[dDoc.Tree.Nodes[id].Start:dDoc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
 						if dDoc.Resolver.References[id] == ast.InvalidNode {
 							if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: id}) {
 								return
@@ -1245,7 +1246,7 @@ func (s *Server) getGlobalSymbols(srcDoc *Document, recHash, propHash uint64) ([
 
 		classSyms, ok := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: currRec}]
 		if ok && len(classSyms) > 0 && classSyms[0].Parent != "" {
-			currRec = ast.HashBytes([]byte(classSyms[0].Parent))
+			currRec = utils.HashBytes([]byte(classSyms[0].Parent))
 
 			continue
 		}
@@ -1330,7 +1331,7 @@ func (s *Server) getGlobalAlias(hash uint64) uint64 {
 			return 0
 		}
 
-		return ast.HashBytes(doc.Source[node.Start:node.End])
+		return utils.HashBytes(doc.Source[node.Start:node.End])
 	}
 
 	return 0
@@ -1580,7 +1581,7 @@ func (s *Server) canSeeSymbol(srcDoc, tgtDoc *Document) bool {
 }
 
 func (s *Server) isKnownGlobal(name []byte) bool {
-	strName := ast.String(name)
+	strName := utils.String(name)
 
 	if s.KnownGlobals[strName] {
 		return true

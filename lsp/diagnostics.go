@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/coalaura/lugo/ast"
 	"github.com/coalaura/lugo/token"
+	"github.com/coalaura/lugo/utils"
 )
 
 type DepInfo struct {
@@ -178,11 +180,19 @@ func (s *Server) publishDiagnostics(uri string) {
 								}
 
 								if !isExported && s.DiagFiveMUnknownExport {
+									var msg strings.Builder
+
+									msg.WriteString("Resource '")
+									msg.WriteString(exportRes)
+									msg.WriteString("' does not export '")
+									msg.WriteString(methodName)
+									msg.WriteString("'.")
+
 									s.diagBuf = append(s.diagBuf, Diagnostic{
 										Range:    getNodeRange(doc.Tree, errNode),
 										Severity: SeverityWarning,
 										Code:     "fivem-unknown-export",
-										Message:  fmt.Sprintf("Resource '%s' does not export '%s'.", exportRes, methodName),
+										Message:  msg.String(),
 									})
 								}
 							}
@@ -229,12 +239,19 @@ func (s *Server) publishDiagnostics(uri string) {
 									}
 								}
 
-								msg := fmt.Sprintf("Unknown FiveM resource '%s'.", resName)
+								var msg strings.Builder
+
+								msg.WriteString("Unknown FiveM resource '")
+								msg.WriteString(resName)
+								msg.WriteString("'.")
 
 								var diagData any
 
 								if bestMatch != "" {
-									msg = fmt.Sprintf("Unknown FiveM resource '%s'. Did you mean '%s'?", resName, bestMatch)
+									msg.WriteString(" Did you mean '")
+									msg.WriteString(bestMatch)
+									msg.WriteString("'?")
+
 									diagData = bestMatch
 								}
 
@@ -242,7 +259,7 @@ func (s *Server) publishDiagnostics(uri string) {
 									Range:    getNodeRange(doc.Tree, errNode),
 									Severity: SeverityWarning,
 									Code:     "fivem-unknown-resource",
-									Message:  msg,
+									Message:  msg.String(),
 									Data:     diagData,
 								})
 							}
@@ -316,7 +333,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				continue
 			}
 
-			hash := ast.HashBytes(identBytes)
+			hash := utils.HashBytes(identBytes)
 			key := GlobalKey{ReceiverHash: 0, PropHash: hash}
 
 			var exists bool
@@ -332,7 +349,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			}
 
 			if !exists {
-				identStr := ast.String(identBytes)
+				identStr := utils.String(identBytes)
 
 				suggestion, ok := suggestCache[identStr]
 				if !ok {
@@ -340,20 +357,29 @@ func (s *Server) publishDiagnostics(uri string) {
 					suggestCache[identStr] = suggestion
 				}
 
-				msg := "Undefined global '" + identStr + "'."
+				var msg strings.Builder
+
+				msg.WriteString("Undefined global '")
+				msg.WriteString(identStr)
+				msg.WriteString("'")
 
 				var diagData any
 
 				if suggestion != "" {
-					msg = "Undefined global '" + identStr + "'. Did you mean '" + suggestion + "'?"
+					msg.WriteString(". Did you mean '")
+					msg.WriteString(suggestion)
+					msg.WriteString("'?")
+
 					diagData = suggestion
+				} else {
+					msg.WriteString(".")
 				}
 
 				s.diagBuf = append(s.diagBuf, Diagnostic{
 					Range:    getNodeRange(doc.Tree, refID),
 					Severity: SeverityWarning,
 					Code:     "undefined-global",
-					Message:  msg,
+					Message:  msg.String(),
 					Data:     diagData,
 				})
 			}
@@ -381,11 +407,19 @@ func (s *Server) publishDiagnostics(uri string) {
 
 			if s.DiagMinVariableNameLength > 0 && len(identBytes) < s.DiagMinVariableNameLength {
 				if !s.DiagIgnoredVariableNames[string(identBytes)] {
+					var msg strings.Builder
+
+					msg.WriteString("Global name '")
+					msg.Write(identBytes)
+					msg.WriteString("' is too short (minimum length is ")
+					msg.WriteString(strconv.Itoa(s.DiagMinVariableNameLength))
+					msg.WriteString(").")
+
 					s.diagBuf = append(s.diagBuf, Diagnostic{
 						Range:    getNodeRange(doc.Tree, defID),
 						Severity: SeverityWarning,
 						Code:     "short-variable-name",
-						Message:  fmt.Sprintf("Global name '%s' is too short (minimum length is %d).", ast.String(identBytes), s.DiagMinVariableNameLength),
+						Message:  msg.String(),
 					})
 				}
 			}
@@ -398,7 +432,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				continue
 			}
 
-			hash := ast.HashBytes(identBytes)
+			hash := utils.HashBytes(identBytes)
 			key := GlobalKey{ReceiverHash: 0, PropHash: hash}
 
 			var isDefinedAtRoot bool
@@ -427,7 +461,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				Range:    getNodeRange(doc.Tree, defID),
 				Severity: SeverityWarning,
 				Code:     "implicit-global",
-				Message:  "Implicit global creation '" + ast.String(identBytes) + "'. Did you forget the 'local' keyword?",
+				Message:  "Implicit global creation '" + utils.String(identBytes) + "'. Did you forget the 'local' keyword?",
 			})
 		}
 	}
@@ -449,11 +483,19 @@ func (s *Server) publishDiagnostics(uri string) {
 
 			if s.DiagMinVariableNameLength > 0 && len(nameBytes) < s.DiagMinVariableNameLength {
 				if !s.DiagIgnoredVariableNames[string(nameBytes)] {
+					var msg strings.Builder
+
+					msg.WriteString("Variable name '")
+					msg.Write(nameBytes)
+					msg.WriteString("' is too short (minimum length is ")
+					msg.WriteString(strconv.Itoa(s.DiagMinVariableNameLength))
+					msg.WriteString(").")
+
 					s.diagBuf = append(s.diagBuf, Diagnostic{
 						Range:    r,
 						Severity: SeverityWarning,
 						Code:     "short-variable-name",
-						Message:  fmt.Sprintf("Variable name '%s' is too short (minimum length is %d).", ast.String(nameBytes), s.DiagMinVariableNameLength),
+						Message:  msg.String(),
 					})
 				}
 			}
@@ -463,7 +505,7 @@ func (s *Server) publishDiagnostics(uri string) {
 					Range:    r,
 					Severity: SeverityWarning,
 					Code:     "used-ignored-var",
-					Message:  "Variable '" + ast.String(nameBytes) + "' is used but its name starts with '_' (conventionally reserved for unused variables).",
+					Message:  "Variable '" + utils.String(nameBytes) + "' is used but its name starts with '_' (conventionally reserved for unused variables).",
 					Data:     float64(defID),
 				})
 			}
@@ -505,21 +547,27 @@ func (s *Server) publishDiagnostics(uri string) {
 				}
 
 				var (
-					msg          string
+					msg          strings.Builder
 					shouldReport bool
 				)
 
 				if bytes.Equal(nameBytes, []byte("...")) {
 					category = "parameter"
-					msg = "Unused vararg '...'. Remove it from the parameter list if it is not needed."
+
+					msg.WriteString("Unused vararg '...'. Remove it from the parameter list if it is not needed.")
+
 					code = "unused-vararg"
 				} else {
-					msg = "Unused " + category + " '" + ast.String(nameBytes) + "'."
+					msg.WriteString("Unused ")
+					msg.WriteString(category)
+					msg.WriteString(" '")
+					msg.Write(nameBytes)
+					msg.WriteString("'.")
 
 					if category == "parameter" || category == "loop variable" {
-						msg += " Prefix with '_' to ignore."
+						msg.WriteString(" Prefix with '_' to ignore.")
 					} else {
-						msg += " Prefix with '_' to ignore or remove it."
+						msg.WriteString(" Prefix with '_' to ignore or remove it.")
 					}
 				}
 
@@ -540,7 +588,7 @@ func (s *Server) publishDiagnostics(uri string) {
 						Severity: SeverityWarning,
 						Code:     code,
 						Tags:     []DiagnosticTag{Unnecessary},
-						Message:  msg,
+						Message:  msg.String(),
 						Data:     float64(defID),
 					})
 				}
@@ -574,7 +622,7 @@ func (s *Server) publishDiagnostics(uri string) {
 
 			node := doc.Tree.Nodes[pair.Shadowing]
 			nameBytes := doc.Source[node.Start:node.End]
-			nameStr := ast.String(nameBytes)
+			nameStr := utils.String(nameBytes)
 
 			var related []DiagnosticRelatedInformation
 
@@ -636,12 +684,18 @@ func (s *Server) publishDiagnostics(uri string) {
 				info := checkDep(doc, defID)
 				if info.IsDep {
 					identBytes := doc.Source[doc.Tree.Nodes[i].Start:doc.Tree.Nodes[i].End]
-					diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", ast.String(identBytes))
+
+					var diagMsg strings.Builder
+
+					diagMsg.WriteString("Use of deprecated symbol '")
+					diagMsg.Write(identBytes)
+					diagMsg.WriteString("'")
 
 					if info.Msg != "" {
-						diagMsg += ": " + info.Msg
+						diagMsg.WriteString(": ")
+						diagMsg.WriteString(info.Msg)
 					} else {
-						diagMsg += "."
+						diagMsg.WriteString(".")
 					}
 
 					s.diagBuf = append(s.diagBuf, Diagnostic{
@@ -649,7 +703,7 @@ func (s *Server) publishDiagnostics(uri string) {
 						Severity: SeverityHint,
 						Code:     "deprecated",
 						Tags:     []DiagnosticTag{Deprecated},
-						Message:  diagMsg,
+						Message:  diagMsg.String(),
 					})
 				}
 			}
@@ -658,17 +712,22 @@ func (s *Server) publishDiagnostics(uri string) {
 		// Check unresolved global references
 		for _, refID := range doc.Resolver.GlobalRefs {
 			identBytes := doc.Source[doc.Tree.Nodes[refID].Start:doc.Tree.Nodes[refID].End]
-			hash := ast.HashBytes(identBytes)
+			hash := utils.HashBytes(identBytes)
 
 			if syms, ok := s.getGlobalSymbols(doc, 0, hash); ok && len(syms) > 0 && syms[0].NodeID != ast.InvalidNode {
 				sym := syms[0]
 				if sym.IsDeprecated {
-					diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", ast.String(identBytes))
+					var diagMsg strings.Builder
+
+					diagMsg.WriteString("Use of deprecated symbol '")
+					diagMsg.Write(identBytes)
+					diagMsg.WriteString("'")
 
 					if sym.DeprecatedMsg != "" {
-						diagMsg += ": " + sym.DeprecatedMsg
+						diagMsg.WriteString(": ")
+						diagMsg.WriteString(sym.DeprecatedMsg)
 					} else {
-						diagMsg += "."
+						diagMsg.WriteString(".")
 					}
 
 					s.diagBuf = append(s.diagBuf, Diagnostic{
@@ -676,7 +735,7 @@ func (s *Server) publishDiagnostics(uri string) {
 						Severity: SeverityHint,
 						Code:     "deprecated",
 						Tags:     []DiagnosticTag{Deprecated},
-						Message:  diagMsg,
+						Message:  diagMsg.String(),
 					})
 				}
 			}
@@ -689,12 +748,18 @@ func (s *Server) publishDiagnostics(uri string) {
 					sym := syms[0]
 					if sym.IsDeprecated {
 						identBytes := doc.Source[doc.Tree.Nodes[pf.PropNodeID].Start:doc.Tree.Nodes[pf.PropNodeID].End]
-						diagMsg := fmt.Sprintf("Use of deprecated symbol '%s'", ast.String(identBytes))
+
+						var diagMsg strings.Builder
+
+						diagMsg.WriteString("Use of deprecated symbol '")
+						diagMsg.Write(identBytes)
+						diagMsg.WriteString("'")
 
 						if sym.DeprecatedMsg != "" {
-							diagMsg += ": " + sym.DeprecatedMsg
+							diagMsg.WriteString(": ")
+							diagMsg.WriteString(sym.DeprecatedMsg)
 						} else {
-							diagMsg += "."
+							diagMsg.WriteString(".")
 						}
 
 						s.diagBuf = append(s.diagBuf, Diagnostic{
@@ -702,7 +767,7 @@ func (s *Server) publishDiagnostics(uri string) {
 							Severity: SeverityHint,
 							Code:     "deprecated",
 							Tags:     []DiagnosticTag{Deprecated},
-							Message:  diagMsg,
+							Message:  diagMsg.String(),
 						})
 					}
 				}
@@ -718,7 +783,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				continue
 			}
 
-			name := ast.String(doc.Source[node.Start:node.End])
+			name := utils.String(doc.Source[node.Start:node.End])
 			if reason, ok := s.BannedSymbols[name]; ok {
 				msg := "Usage of banned symbol '" + name + "'."
 				if reason != "" {
@@ -735,7 +800,7 @@ func (s *Server) publishDiagnostics(uri string) {
 		}
 
 		for _, pf := range doc.Resolver.PendingFields {
-			propName := ast.String(doc.Source[doc.Tree.Nodes[pf.PropNodeID].Start:doc.Tree.Nodes[pf.PropNodeID].End])
+			propName := utils.String(doc.Source[doc.Tree.Nodes[pf.PropNodeID].Start:doc.Tree.Nodes[pf.PropNodeID].End])
 			fullName := string(pf.ReceiverName) + "." + propName
 
 			if reason, ok := s.BannedSymbols[fullName]; ok {
@@ -907,7 +972,7 @@ func (s *Server) publishDiagnostics(uri string) {
 								Severity: SeverityWarning,
 								Code:     "self-assignment",
 								Tags:     []DiagnosticTag{Unnecessary},
-								Message:  fmt.Sprintf("Assigning variable '%s' to itself.", ast.String(lSource)),
+								Message:  fmt.Sprintf("Assigning variable '%s' to itself.", utils.String(lSource)),
 								Data:     float64(nodeID),
 							})
 						}
@@ -1026,14 +1091,14 @@ func (s *Server) publishDiagnostics(uri string) {
 						keyNode := doc.Tree.Nodes[fieldNode.Left]
 						if keyNode.Kind == ast.KindIdent {
 							keyBytes := doc.Source[keyNode.Start:keyNode.End]
-							hash := ast.HashBytes(keyBytes)
+							hash := utils.HashBytes(keyBytes)
 
 							if prevID, exists := seenKeys[hash]; exists {
 								s.diagBuf = append(s.diagBuf, Diagnostic{
 									Range:    getNodeRange(doc.Tree, fieldNode.Left),
 									Severity: SeverityWarning,
 									Code:     "duplicate-field",
-									Message:  "Duplicate field '" + ast.String(keyBytes) + "' in table.",
+									Message:  "Duplicate field '" + utils.String(keyBytes) + "' in table.",
 									RelatedInformation: []DiagnosticRelatedInformation{
 										{
 											Location: Location{URI: uri, Range: getNodeRange(doc.Tree, prevID)},
@@ -1443,7 +1508,7 @@ func (s *Server) publishDiagnostics(uri string) {
 				Range:    getNodeRange(doc.Tree, defID),
 				Severity: SeverityWarning,
 				Code:     "duplicate-local",
-				Message:  fmt.Sprintf("Local variable '%s' is already defined in the current scope.", ast.String(nameBytes)),
+				Message:  fmt.Sprintf("Local variable '%s' is already defined in the current scope.", utils.String(nameBytes)),
 			})
 		}
 	}
@@ -1882,10 +1947,10 @@ func (s *Server) checkGlobalShadowing(uri string, nameBytes []byte, isLoopVar bo
 			Range:    r,
 			Severity: SeverityWarning,
 			Code:     "shadow-global",
-			Message:  varType + " variable '" + ast.String(nameBytes) + "' shadows a known global.",
+			Message:  varType + " variable '" + utils.String(nameBytes) + "' shadows a known global.",
 		})
 	} else {
-		hash := ast.HashBytes(nameBytes)
+		hash := utils.HashBytes(nameBytes)
 
 		if syms, exists := s.GlobalIndex[GlobalKey{ReceiverHash: 0, PropHash: hash}]; exists && len(syms) > 0 {
 			var visibleSym *GlobalSymbol
@@ -1918,7 +1983,7 @@ func (s *Server) checkGlobalShadowing(uri string, nameBytes []byte, isLoopVar bo
 						URI:   sym.URI,
 						Range: getNodeRange(symDoc.Tree, sym.NodeID),
 					},
-					Message: fmt.Sprintf("Global '%s' defined here%s", ast.String(nameBytes), fromFile),
+					Message: fmt.Sprintf("Global '%s' defined here%s", utils.String(nameBytes), fromFile),
 				})
 			}
 
@@ -1926,7 +1991,7 @@ func (s *Server) checkGlobalShadowing(uri string, nameBytes []byte, isLoopVar bo
 				Range:              r,
 				Severity:           SeverityWarning,
 				Code:               "shadow-global",
-				Message:            varType + " variable '" + ast.String(nameBytes) + "' shadows a global definition.",
+				Message:            varType + " variable '" + utils.String(nameBytes) + "' shadows a global definition.",
 				RelatedInformation: related,
 			})
 		}
