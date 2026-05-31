@@ -52,20 +52,39 @@ func (s *Server) handleHover(req Request) {
 		}
 
 		if ctx.TargetDoc != nil && ctx.TargetDefID != ast.InvalidNode {
-			luadoc := *ctx.TargetDoc.GetLuaDoc(ctx.TargetDefID)
+			tDoc, tDefID, isAlias := s.resolveAliasTarget(ctx.TargetDoc, ctx.TargetDefID, 0)
 
-			valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
-			isFunc := valID != ast.InvalidNode && ctx.TargetDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr
+			luadoc := *tDoc.GetLuaDoc(tDefID)
+
+			valID := tDoc.getAssignedValue(tDefID)
+			isFunc := valID != ast.InvalidNode && tDoc.Tree.Nodes[valID].Kind == ast.KindFunctionExpr
+
+			var aliasTargetName string
+			if isAlias {
+				tNode := tDoc.Tree.Nodes[tDefID]
+				if tNode.Start <= tNode.End && tNode.End <= uint32(len(tDoc.Source)) {
+					aliasTargetName = string(tDoc.Source[tNode.Start:tNode.End])
+				}
+				if tNode.Parent != ast.InvalidNode {
+					pNode := tDoc.Tree.Nodes[tNode.Parent]
+					if pNode.Kind == ast.KindMemberExpr || pNode.Kind == ast.KindMethodName {
+						_, _, recName := tDoc.Resolver.GetReceiverContext(pNode.Left)
+						if len(recName) > 0 {
+							aliasTargetName = string(recName) + "." + aliasTargetName
+						}
+					}
+				}
+			}
 
 			var valStr string
 
-			if valID != ast.InvalidNode && int(valID) < len(ctx.TargetDoc.Tree.Nodes) {
-				vNode := ctx.TargetDoc.Tree.Nodes[valID]
+			if valID != ast.InvalidNode && int(valID) < len(tDoc.Tree.Nodes) {
+				vNode := tDoc.Tree.Nodes[valID]
 
 				switch vNode.Kind {
 				case ast.KindNumber, ast.KindString, ast.KindTrue, ast.KindFalse, ast.KindNil:
-					if vNode.Start <= vNode.End && vNode.End <= uint32(len(ctx.TargetDoc.Source)) {
-						valStr = " = " + ast.String(ctx.TargetDoc.Source[vNode.Start:vNode.End])
+					if vNode.Start <= vNode.End && vNode.End <= uint32(len(tDoc.Source)) {
+						valStr = " = " + ast.String(tDoc.Source[vNode.Start:vNode.End])
 					}
 				}
 			}
@@ -90,14 +109,17 @@ func (s *Server) handleHover(req Request) {
 			)
 
 			if isFunc {
-				paramsStr := ctx.TargetDoc.getFunctionParams(valID, &luadoc)
+				paramsStr := tDoc.getFunctionParams(valID, &luadoc)
 
-				genericStr := ""
+				var genericStr string
+
 				if len(luadoc.Generics) > 0 {
 					var gNames []string
-					for _, g := range luadoc.Generics {
-						gNames = append(gNames, g.Name)
+
+					for _, generic := range luadoc.Generics {
+						gNames = append(gNames, generic.Name)
 					}
+
 					genericStr = "<" + strings.Join(gNames, ", ") + ">"
 				}
 
@@ -159,8 +181,8 @@ func (s *Server) handleHover(req Request) {
 				} else {
 					var baseType TypeSet
 
-					if ctx.TargetDoc != nil && ctx.TargetDefID != ast.InvalidNode {
-						baseType = ctx.TargetDoc.InferType(ctx.TargetDefID)
+					if tDoc != nil && tDefID != ast.InvalidNode {
+						baseType = tDoc.InferType(tDefID)
 					} else if ctx.IsProp {
 						pID := doc.Tree.Nodes[ctx.IdentNodeID].Parent
 						if pID != ast.InvalidNode {
@@ -215,6 +237,12 @@ func (s *Server) handleHover(req Request) {
 			}
 
 			var docBuilder strings.Builder
+
+			if isAlias && aliasTargetName != "" {
+				docBuilder.WriteString("Alias of `")
+				docBuilder.WriteString(aliasTargetName)
+				docBuilder.WriteString("`\n\n")
+			}
 
 			if luadoc.IsDeprecated {
 				docBuilder.WriteString("**@deprecated**")
@@ -1354,13 +1382,15 @@ func (s *Server) handleSignatureHelp(req Request) {
 			continue
 		}
 
-		valID := tDoc.getAssignedValue(def.NodeID)
-		if valID == ast.InvalidNode || int(valID) >= len(tDoc.Tree.Nodes) || tDoc.Tree.Nodes[valID].Kind != ast.KindFunctionExpr {
+		targetDoc, targetDefID, _ := s.resolveAliasTarget(tDoc, def.NodeID, 0)
+
+		valID := targetDoc.getAssignedValue(targetDefID)
+		if valID == ast.InvalidNode || int(valID) >= len(targetDoc.Tree.Nodes) || targetDoc.Tree.Nodes[valID].Kind != ast.KindFunctionExpr {
 			continue
 		}
 
-		luadoc := *tDoc.GetLuaDoc(def.NodeID)
-		funcNode := tDoc.Tree.Nodes[valID]
+		luadoc := *targetDoc.GetLuaDoc(targetDefID)
+		funcNode := targetDoc.Tree.Nodes[valID]
 
 		var (
 			paramsInfo []ParameterInformation
@@ -1373,25 +1403,25 @@ func (s *Server) handleSignatureHelp(req Request) {
 			paramDocs[p.Name] = p
 		}
 
-		paramOffset := getImplicitSelfOffset(ctx, callNode, tDoc, def.NodeID)
+		paramOffset := getImplicitSelfOffset(ctx, callNode, targetDoc, targetDefID)
 
 		if funcNode.Count > 0 {
 			for i := uint16(0); i < funcNode.Count; i++ {
-				if funcNode.Extra+uint32(i) >= uint32(len(tDoc.Tree.ExtraList)) {
+				if funcNode.Extra+uint32(i) >= uint32(len(targetDoc.Tree.ExtraList)) {
 					continue
 				}
 
-				pID := tDoc.Tree.ExtraList[funcNode.Extra+uint32(i)]
-				if pID == ast.InvalidNode || int(pID) >= len(tDoc.Tree.Nodes) {
+				pID := targetDoc.Tree.ExtraList[funcNode.Extra+uint32(i)]
+				if pID == ast.InvalidNode || int(pID) >= len(targetDoc.Tree.Nodes) {
 					continue
 				}
 
-				pNode := tDoc.Tree.Nodes[pID]
-				if pNode.Start > pNode.End || pNode.End > uint32(len(tDoc.Source)) {
+				pNode := targetDoc.Tree.Nodes[pID]
+				if pNode.Start > pNode.End || pNode.End > uint32(len(targetDoc.Source)) {
 					continue
 				}
 
-				pName := ast.String(tDoc.Source[pNode.Start:pNode.End])
+				pName := ast.String(targetDoc.Source[pNode.Start:pNode.End])
 
 				if i == 0 && paramOffset == 1 && pName == "self" {
 					continue
@@ -1603,14 +1633,16 @@ func (s *Server) handleInlayHint(req Request) {
 			continue
 		}
 
-		valID := ctx.TargetDoc.getAssignedValue(ctx.TargetDefID)
-		if valID == ast.InvalidNode || int(valID) >= len(ctx.TargetDoc.Tree.Nodes) || ctx.TargetDoc.Tree.Nodes[valID].Kind != ast.KindFunctionExpr {
+		targetDoc, targetDefID, _ := s.resolveAliasTarget(ctx.TargetDoc, ctx.TargetDefID, 0)
+
+		valID := targetDoc.getAssignedValue(targetDefID)
+		if valID == ast.InvalidNode || int(valID) >= len(targetDoc.Tree.Nodes) || targetDoc.Tree.Nodes[valID].Kind != ast.KindFunctionExpr {
 			continue
 		}
 
-		paramOffset := getImplicitSelfOffset(ctx, node, ctx.TargetDoc, ctx.TargetDefID)
+		paramOffset := getImplicitSelfOffset(ctx, node, targetDoc, targetDefID)
 
-		funcNode := ctx.TargetDoc.Tree.Nodes[valID]
+		funcNode := targetDoc.Tree.Nodes[valID]
 
 		for j := uint16(0); j < node.Count; j++ {
 			paramIdx := int(j) + paramOffset
@@ -1631,25 +1663,25 @@ func (s *Server) handleInlayHint(req Request) {
 
 			argNode := doc.Tree.Nodes[argID]
 
-			if funcNode.Extra+uint32(paramIdx) >= uint32(len(ctx.TargetDoc.Tree.ExtraList)) {
+			if funcNode.Extra+uint32(paramIdx) >= uint32(len(targetDoc.Tree.ExtraList)) {
 				continue
 			}
 
-			pID := ctx.TargetDoc.Tree.ExtraList[funcNode.Extra+uint32(paramIdx)]
-			if pID == ast.InvalidNode || int(pID) >= len(ctx.TargetDoc.Tree.Nodes) {
+			pID := targetDoc.Tree.ExtraList[funcNode.Extra+uint32(paramIdx)]
+			if pID == ast.InvalidNode || int(pID) >= len(targetDoc.Tree.Nodes) {
 				continue
 			}
 
-			pNode := ctx.TargetDoc.Tree.Nodes[pID]
+			pNode := targetDoc.Tree.Nodes[pID]
 			if pNode.Kind == ast.KindVararg {
 				continue
 			}
 
-			if pNode.Start > pNode.End || pNode.End > uint32(len(ctx.TargetDoc.Source)) {
+			if pNode.Start > pNode.End || pNode.End > uint32(len(targetDoc.Source)) {
 				continue
 			}
 
-			pName := ctx.TargetDoc.Source[pNode.Start:pNode.End]
+			pName := targetDoc.Source[pNode.Start:pNode.End]
 
 			if bytes.Equal(pName, []byte("self")) {
 				continue

@@ -595,6 +595,44 @@ func (s *Server) resolveSymbolAt(uri string, offset uint32) *SymbolContext {
 	return s.resolveSymbolNode(uri, doc, nodeID)
 }
 
+func (s *Server) resolveAliasTarget(doc *Document, id ast.NodeID, depth int) (targetDoc *Document, targetID ast.NodeID, isAlias bool) {
+	if id == ast.InvalidNode || depth > 10 {
+		return doc, id, false
+	}
+
+	valID := doc.getAssignedValue(id)
+	if valID == ast.InvalidNode {
+		return doc, id, false
+	}
+
+	valNode := doc.Tree.Nodes[valID]
+
+	if valNode.Kind == ast.KindFunctionExpr || valNode.Kind == ast.KindTableExpr {
+		return doc, id, false
+	}
+
+	var referNodeID ast.NodeID
+
+	switch valNode.Kind {
+	case ast.KindIdent:
+		referNodeID = valID
+	case ast.KindMemberExpr:
+		referNodeID = valNode.Right
+	}
+
+	if referNodeID != ast.InvalidNode {
+		refCtx := s.resolveSymbolNode(doc.URI, doc, referNodeID)
+		if refCtx != nil && refCtx.TargetDefID != ast.InvalidNode && refCtx.TargetDoc != nil {
+			tDoc, tID, _ := s.resolveAliasTarget(refCtx.TargetDoc, refCtx.TargetDefID, depth+1)
+			if tID != ast.InvalidNode {
+				return tDoc, tID, true
+			}
+		}
+	}
+
+	return doc, id, false
+}
+
 func (s *Server) resolveSymbolNode(uri string, doc *Document, nodeID ast.NodeID) *SymbolContext {
 	if nodeID == ast.InvalidNode || int(nodeID) >= len(doc.Tree.Nodes) {
 		return nil
