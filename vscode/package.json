@@ -326,7 +326,17 @@
                         "items": {
                             "type": "string"
                         },
-                        "default": ["_", "i", "j", "x", "y", "z", "w", "id", "to"],
+                        "default": [
+                            "_",
+                            "i",
+                            "j",
+                            "x",
+                            "y",
+                            "z",
+                            "w",
+                            "id",
+                            "to"
+                        ],
                         "scope": "resource",
                         "markdownDescription": "List of variable names that are exempt from the minimum length check.",
                         "order": 31
@@ -422,26 +432,45 @@
                         "markdownDescription": "Enable FiveM support. Scopes globals and diagnostics to their respective resources (using `fxmanifest.lua` / `__resource.lua`).",
                         "order": 1
                     },
+                    "lugo.fivem.defaultResource": {
+                        "type": "string",
+                        "default": "",
+                        "scope": "resource",
+                        "markdownDescription": "Default resource name to use for unsaved or external files.",
+                        "order": 2
+                    },
+                    "lugo.fivem.defaultEnvironment": {
+                        "type": "string",
+                        "enum": [
+                            "client",
+                            "server",
+                            "shared"
+                        ],
+                        "default": "shared",
+                        "scope": "resource",
+                        "markdownDescription": "Default environment to use for unsaved or external files.",
+                        "order": 3
+                    },
                     "lugo.fivem.diagnostics.unaccountedFile": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for files that are not referenced in the resource manifest (`fxmanifest.lua`).",
-                        "order": 2
+                        "order": 4
                     },
                     "lugo.fivem.diagnostics.unknownExport": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for calling missing or unknown exports on a FiveM resource.",
-                        "order": 3
+                        "order": 5
                     },
                     "lugo.fivem.diagnostics.unknownResource": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable diagnostics for referencing unknown FiveM resources via the `exports` global.",
-                        "order": 4
+                        "order": 6
                     }
                 }
             }

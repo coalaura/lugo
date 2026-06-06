@@ -1460,6 +1460,16 @@ func (s *Server) getDocResourceRoot(doc *Document) string {
 		}
 	}
 
+	if bestRoot == "" && !doc.IsWorkspace && s.FiveMDefaultResource != "" {
+		for name, res := range s.FiveMResourceByName {
+			if strings.EqualFold(name, s.FiveMDefaultResource) {
+				bestRoot = res.RootURI
+
+				break
+			}
+		}
+	}
+
 	doc.FiveMRoot = bestRoot
 	doc.FiveMResolved = true
 

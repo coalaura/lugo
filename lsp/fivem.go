@@ -264,9 +264,9 @@ func (s *Server) getDocFileEnv(res *FiveMResource, doc *Document) FileEnv {
 
 	var relPath string
 
-	if len(doc.URI) > len(res.RootURI) {
+	if strings.HasPrefix(doc.URI, res.RootURI+"/") {
 		relPath = doc.URI[len(res.RootURI)+1:]
-	} else {
+	} else if doc.URI == res.RootURI {
 		relPath = ""
 	}
 
@@ -275,6 +275,7 @@ func (s *Server) getDocFileEnv(res *FiveMResource, doc *Document) FileEnv {
 	for _, glob := range res.SharedGlobs {
 		if matchGlob(glob, relPath) {
 			env = EnvShared
+
 			break
 		}
 	}
@@ -308,6 +309,10 @@ func (s *Server) getDocFileEnv(res *FiveMResource, doc *Document) FileEnv {
 		} else if isServer {
 			env = EnvServer
 		}
+	}
+
+	if env == EnvUnknown && !doc.IsWorkspace && s.FiveMDefaultResource != "" && strings.EqualFold(res.Name, s.FiveMDefaultResource) {
+		env = s.FiveMDefaultEnv
 	}
 
 	doc.FiveMEnv = env

@@ -24,6 +24,7 @@ const (
 	DefaultMaxParserErrors = 50
 )
 
+// gost:preserve-layout
 type Server struct {
 	Reader *bufio.Reader
 	Writer io.Writer
@@ -119,6 +120,8 @@ type Server struct {
 	FeatureFormatAlerts   bool
 
 	FeatureFiveM             bool
+	FiveMDefaultResource     string
+	FiveMDefaultEnv          FileEnv
 	DiagFiveMUnaccountedFile bool
 	DiagFiveMUnknownExport   bool
 	DiagFiveMUnknownResource bool
@@ -288,6 +291,21 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 	setCfg(&s.FeatureFormatAlerts, opts.FeatureFormatAlerts, nil)
 
 	setCfg(&s.FeatureFiveM, opts.FeatureFiveM, &needsReindex)
+	setCfg(&s.FiveMDefaultResource, opts.FiveMDefaultResource, &needsReindex)
+
+	var defaultEnv FileEnv
+
+	switch opts.FiveMDefaultEnv {
+	case "server":
+		defaultEnv = EnvServer
+	case "client":
+		defaultEnv = EnvClient
+	default:
+		defaultEnv = EnvShared
+	}
+
+	setCfg(&s.FiveMDefaultEnv, defaultEnv, &needsReindex)
+
 	setCfg(&s.DiagFiveMUnaccountedFile, opts.DiagFiveMUnaccountedFile, &needsRepublish)
 	setCfg(&s.DiagFiveMUnknownExport, opts.DiagFiveMUnknownExport, &needsRepublish)
 	setCfg(&s.DiagFiveMUnknownResource, opts.DiagFiveMUnknownResource, &needsRepublish)

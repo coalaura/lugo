@@ -134,6 +134,8 @@ function buildInitializationOptions() {
 		suggestFunctionParams: primaryLugoConfig.get("completion.suggestFunctionParams") !== false,
 
 		featureFiveM: primaryLugoConfig.get("fivem.enabled") === true,
+		fivemDefaultResource: primaryLugoConfig.get("fivem.defaultResource") || "",
+		fivemDefaultEnv: primaryLugoConfig.get("fivem.defaultEnvironment") || "client",
 		diagFiveMUnaccountedFile: primaryLugoConfig.get("fivem.diagnostics.unaccountedFile") !== false,
 		diagFiveMUnknownExport: primaryLugoConfig.get("fivem.diagnostics.unknownExport") !== false,
 		diagFiveMUnknownResource: primaryLugoConfig.get("fivem.diagnostics.unknownResource") !== false,
