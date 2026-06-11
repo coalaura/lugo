@@ -52,8 +52,10 @@ type Resolver struct {
 
 	PendingFields []FieldRef
 
-	scopeStack  []ast.NodeID
-	scopeStarts []int
+	scopeStack   []ast.NodeID
+	scopeStarts  []int
+	activeLocals map[uint64]int
+	prevActive   []int
 
 	DuplicateLocals []ast.NodeID
 	LocalDefs       []ast.NodeID
@@ -76,6 +78,8 @@ func New(tree *ast.Tree) *Resolver {
 		GlobalRefs:      make([]ast.NodeID, 0, 512),
 		scopeStack:      make([]ast.NodeID, 0, 256),
 		scopeStarts:     make([]int, 0, 64),
+		activeLocals:    make(map[uint64]int, 512),
+		prevActive:      make([]int, 0, 256),
 		DuplicateLocals: make([]ast.NodeID, 0, 16),
 		Reassignments:   make([]Reassignment, 0, 128),
 		nameArena:       make([]byte, 0, 2048),
@@ -117,6 +121,18 @@ func (r *Resolver) Reset() {
 		r.scopeStarts = r.scopeStarts[:0]
 	}
 
+	if r.activeLocals == nil {
+		r.activeLocals = make(map[uint64]int, 512)
+	} else {
+		clear(r.activeLocals)
+	}
+
+	if r.prevActive == nil {
+		r.prevActive = make([]int, 0, 256)
+	} else {
+		r.prevActive = r.prevActive[:0]
+	}
+
 	r.DuplicateLocals = r.DuplicateLocals[:0]
 	r.LocalDefs = r.LocalDefs[:0]
 	r.ShadowedOuter = r.ShadowedOuter[:0]
@@ -133,6 +149,8 @@ func (r *Resolver) Cleanup() {
 	r.fieldMap = nil
 	r.scopeStack = nil
 	r.scopeStarts = nil
+	r.activeLocals = nil
+	r.prevActive = nil
 
 	// intentionally not resetting nameArena, FieldDef.ReceiverName slices point to it
 }
@@ -167,7 +185,21 @@ func (r *Resolver) popScope(startScope int) {
 	}
 
 	if startScope >= 0 && startScope <= len(r.scopeStack) {
+		for i := len(r.scopeStack) - 1; i >= startScope; i-- {
+			defID := r.scopeStack[i]
+			name := r.source(defID)
+			hash := utils.HashBytes(name)
+
+			prev := r.prevActive[i]
+			if prev == -1 {
+				delete(r.activeLocals, hash)
+			} else {
+				r.activeLocals[hash] = prev
+			}
+		}
+
 		r.scopeStack = r.scopeStack[:startScope]
+		r.prevActive = r.prevActive[:startScope]
 	}
 }
 
@@ -181,6 +213,8 @@ func (r *Resolver) declare(identID ast.NodeID) {
 	r.LocalDefs = append(r.LocalDefs, identID)
 
 	name := r.source(identID)
+	nameHash := utils.HashBytes(name)
+	stackIdx := len(r.scopeStack)
 
 	// ignore "_" prefix
 	if len(name) > 0 && name[0] != '_' && !(len(name) > 2 && name[0] == '.' && name[1] == '.' && name[2] == '.') {
@@ -190,27 +224,37 @@ func (r *Resolver) declare(identID ast.NodeID) {
 			scopeStart = r.scopeStarts[len(r.scopeStarts)-1]
 		}
 
-		nameLen := uint32(len(name))
-		for i := len(r.scopeStack) - 1; i >= 0; i-- {
-			defID := r.scopeStack[i]
+		currIdx, ok := r.activeLocals[nameHash]
+
+		for ok && currIdx != -1 {
+			defID := r.scopeStack[currIdx]
 			defName := r.source(defID)
 
-			if len(defName) == int(nameLen) {
-				if bytes.Equal(defName, name) {
-					if i >= scopeStart {
-						r.DuplicateLocals = append(r.DuplicateLocals, identID)
-					} else {
-						r.ShadowedOuter = append(r.ShadowedOuter, ShadowPair{
-							Shadowing: identID,
-							Shadowed:  defID,
-						})
-					}
-
-					break
+			if bytes.Equal(defName, name) {
+				if currIdx >= scopeStart {
+					r.DuplicateLocals = append(r.DuplicateLocals, identID)
+				} else {
+					r.ShadowedOuter = append(r.ShadowedOuter, ShadowPair{
+						Shadowing: identID,
+						Shadowed:  defID,
+					})
 				}
+
+				break
 			}
+
+			currIdx = r.prevActive[currIdx]
 		}
 	}
+
+	prevIdx, ok := r.activeLocals[nameHash]
+	if !ok {
+		prevIdx = -1
+	}
+
+	r.prevActive = append(r.prevActive, prevIdx)
+
+	r.activeLocals[nameHash] = stackIdx
 
 	r.scopeStack = append(r.scopeStack, identID)
 }
@@ -263,19 +307,19 @@ func (r *Resolver) resolveReference(identID ast.NodeID, isDef bool) {
 	}
 
 	targetSrc := r.Tree.Source[targetNode.Start:targetNode.End]
-	targetLen := targetNode.End - targetNode.Start
 
-	for i := len(r.scopeStack) - 1; i >= 0; i-- {
-		defID := r.scopeStack[i]
-		defNode := r.Tree.Nodes[defID]
+	nameHash := utils.HashBytes(targetSrc)
+	currIdx, ok := r.activeLocals[nameHash]
 
-		if defNode.End-defNode.Start == targetLen {
-			if bytes.Equal(targetSrc, r.source(defID)) {
-				r.References[identID] = defID
+	for ok && currIdx != -1 {
+		defID := r.scopeStack[currIdx]
+		if bytes.Equal(targetSrc, r.source(defID)) {
+			r.References[identID] = defID
 
-				return
-			}
+			return
 		}
+
+		currIdx = r.prevActive[currIdx]
 	}
 
 	if bytes.Equal(targetSrc, []byte("self")) {
