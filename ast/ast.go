@@ -149,6 +149,11 @@ func (t *Tree) Position(offset uint32) (line, col uint32) {
 
 		colBytes := t.Source[startOffset:safeOffset]
 
+		// striping trailing \r so CRLF files don't count it as a column
+		if len(colBytes) > 0 && colBytes[len(colBytes)-1] == '\r' {
+			colBytes = colBytes[:len(colBytes)-1]
+		}
+
 		var hasNonASCII bool
 
 		for i := range colBytes {
