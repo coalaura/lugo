@@ -149,7 +149,7 @@ func (t *Tree) Position(offset uint32) (line, col uint32) {
 
 		colBytes := t.Source[startOffset:safeOffset]
 
-		// striping trailing \r so CRLF files don't count it as a column
+		// stripping trailing \r so CRLF files don't count it as a column
 		if len(colBytes) > 0 && colBytes[len(colBytes)-1] == '\r' {
 			colBytes = colBytes[:len(colBytes)-1]
 		}
@@ -258,23 +258,27 @@ func (t *Tree) NodeAt(offset uint32) NodeID {
 		}
 
 		node := t.Nodes[curr]
-
 		next := InvalidNode
 
-		check := func(childID NodeID) {
-			if childID != InvalidNode && next == InvalidNode {
-				c := t.Nodes[childID]
-				if offset >= c.Start && offset <= c.End {
-					next = childID
-				}
+		if node.Left != InvalidNode {
+			c := t.Nodes[node.Left]
+			if offset >= c.Start && offset <= c.End {
+				next = node.Left
 			}
 		}
 
-		check(node.Left)
-		check(node.Right)
+		if next == InvalidNode && node.Right != InvalidNode {
+			c := t.Nodes[node.Right]
+			if offset >= c.Start && offset <= c.End {
+				next = node.Right
+			}
+		}
 
-		if node.Kind == KindForIn {
-			check(NodeID(node.Extra))
+		if next == InvalidNode && node.Kind == KindForIn && node.Extra != 0 {
+			c := t.Nodes[node.Extra]
+			if offset >= c.Start && offset <= c.End {
+				next = NodeID(node.Extra)
+			}
 		}
 
 		if next == InvalidNode && node.Count > 0 {
@@ -302,7 +306,14 @@ func (t *Tree) NodeAt(offset uint32) NodeID {
 			} else {
 				// Linear scan for unordered or small extra lists
 				for i := range node.Count {
-					check(t.ExtraList[node.Extra+uint32(i)])
+					node := t.ExtraList[node.Extra+uint32(i)]
+
+					if next == InvalidNode && node != InvalidNode {
+						c := t.Nodes[node]
+						if offset >= c.Start && offset <= c.End {
+							next = node
+						}
+					}
 				}
 			}
 		}
