@@ -1590,6 +1590,8 @@ func (s *Server) isDiagnosticDisabled(doc *Document, line uint32, code string) b
 	return false
 }
 
+// isActualRead checks if a reference is a read. It is effectively O(1) as it
+// terminates at the first non-expression ancestor (typically 1-3 iterations).
 func (s *Server) isActualRead(doc *Document, refID ast.NodeID) bool {
 	curr := refID
 
