@@ -25,6 +25,11 @@ type DeadStoreInfo struct {
 	Coverage     []ast.NodeID
 }
 
+type SafeFixCacheEntry struct {
+	Version uint64
+	Fixes   []SafeFix
+}
+
 func (s *Server) handleCodeAction(req Request) {
 	var params CodeActionParams
 
@@ -2040,6 +2045,18 @@ func (s *Server) handleLinkedEditingRange(req Request) {
 }
 
 func (s *Server) getSafeFixesForDocument(doc *Document) []SafeFix {
+	if c := doc.SafeFixCache; c != nil && c.Version == doc.Version {
+		return c.Fixes
+	}
+
+	fixes := s.computeSafeFixesForDocument(doc)
+
+	doc.SafeFixCache = &SafeFixCacheEntry{Version: doc.Version, Fixes: fixes}
+
+	return fixes
+}
+
+func (s *Server) computeSafeFixesForDocument(doc *Document) []SafeFix {
 	var fixes []SafeFix
 
 	if doc.IsMeta {

@@ -669,6 +669,8 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 
 	rootID := tree.Root
 
+	doc.Version++
+
 	doc.IsMeta = false
 	doc.FiveMResolved = false
 	doc.EnvResolved = false

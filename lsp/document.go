@@ -29,6 +29,7 @@ type Document struct {
 	Errors             []parser.ParseError
 	FiveMLuaExports    []FiveMLuaExport
 	ModTime            time.Time
+	Version            uint64
 	URI                string
 	Path               string
 	LowerPath          string
@@ -41,6 +42,7 @@ type Document struct {
 	Resolver           *semantic.Resolver
 	ExportedNode       ast.NodeID
 	FiveMEnv           FileEnv
+	SafeFixCache       *SafeFixCacheEntry
 	IsMeta             bool
 	IsLibrary          bool
 	IsWorkspace        bool
