@@ -1289,6 +1289,8 @@ func (s *Server) publishDiagnostics(uri string) {
 							matchedAny           bool
 							maxExpectedArgs      int
 							maxExpectedArgsFound bool
+							mismatchMsg          string
+							allMismatched        = true
 						)
 
 						for _, def := range defs {
@@ -1307,6 +1309,13 @@ func (s *Server) publishDiagnostics(uri string) {
 								)
 
 								paramOffset := getImplicitSelfOffset(ctx, node, tDoc, def.NodeID)
+
+								isMismatched, msg := s.checkMethodCallMismatch(ctx, node, doc, tDoc, def.NodeID)
+								if isMismatched {
+									mismatchMsg = msg
+								} else {
+									allMismatched = false
+								}
 
 								if funcNode.Count > 0 {
 									lastParamID := tDoc.Tree.ExtraList[funcNode.Extra+uint32(funcNode.Count-1)]
@@ -1349,7 +1358,14 @@ func (s *Server) publishDiagnostics(uri string) {
 							}
 						}
 
-						if !matchedAny && maxExpectedArgsFound {
+						if allMismatched && mismatchMsg != "" {
+							s.diagBuf = append(s.diagBuf, Diagnostic{
+								Range:    getNodeRange(doc.Tree, nodeID),
+								Severity: SeverityWarning,
+								Code:     "mismatched-method-call",
+								Message:  mismatchMsg,
+							})
+						} else if !matchedAny && maxExpectedArgsFound {
 							expectedArgs := maxExpectedArgs
 							if int(node.Count) > expectedArgs {
 								firstRedundantID := doc.Tree.ExtraList[node.Extra+uint32(expectedArgs)]
@@ -2033,4 +2049,77 @@ func (s *Server) getRootDef(doc *Document, exprID ast.NodeID) ast.NodeID {
 	}
 
 	return ast.InvalidNode
+}
+
+func (s *Server) checkMethodCallMismatch(ctx *SymbolContext, callNode ast.Node, doc *Document, tDoc *Document, defID ast.NodeID) (bool, string) {
+	paramOffset := getImplicitSelfOffset(ctx, callNode, tDoc, defID)
+	if paramOffset == 0 {
+		return false, ""
+	}
+
+	valID := tDoc.getAssignedValue(defID)
+	if valID == ast.InvalidNode || int(valID) >= len(tDoc.Tree.Nodes) {
+		return false, ""
+	}
+
+	funcNode := tDoc.Tree.Nodes[valID]
+	if funcNode.Kind != ast.KindFunctionExpr {
+		return false, ""
+	}
+
+	if paramOffset == 1 {
+		if funcNode.Count > 0 {
+			firstParamID := tDoc.Tree.ExtraList[funcNode.Extra]
+			if int(firstParamID) < len(tDoc.Tree.Nodes) {
+				firstParamNode := tDoc.Tree.Nodes[firstParamID]
+				if firstParamNode.Start <= firstParamNode.End && firstParamNode.End <= uint32(len(tDoc.Source)) {
+					if bytes.Equal(tDoc.Source[firstParamNode.Start:firstParamNode.End], []byte("self")) {
+						return false, ""
+					}
+				}
+			}
+		}
+
+		return true, "Mismatched self: calling a function defined with '.' using ':' syntax."
+	}
+
+	if paramOffset == -1 {
+		if callNode.Count > 0 {
+			firstArgID := doc.Tree.ExtraList[callNode.Extra]
+			if int(firstArgID) < len(doc.Tree.Nodes) {
+				firstArgNode := doc.Tree.Nodes[firstArgID]
+				if firstArgNode.Start <= firstArgNode.End && firstArgNode.End <= uint32(len(doc.Source)) {
+					firstArgText := doc.Source[firstArgNode.Start:firstArgNode.End]
+					if bytes.Equal(firstArgText, []byte("self")) {
+						return false, ""
+					}
+
+					if callNode.Left != ast.InvalidNode && int(callNode.Left) < len(doc.Tree.Nodes) {
+						leftNode := doc.Tree.Nodes[callNode.Left]
+						if leftNode.Kind == ast.KindMemberExpr {
+							recID := leftNode.Left
+							if int(recID) < len(doc.Tree.Nodes) {
+								recNode := doc.Tree.Nodes[recID]
+								if recNode.Start <= recNode.End && recNode.End <= uint32(len(doc.Source)) {
+									recText := doc.Source[recNode.Start:recNode.End]
+									if bytes.Equal(firstArgText, recText) {
+										return false, ""
+									}
+
+									t := doc.InferType(firstArgID)
+									if t.CustomName != "" && strings.EqualFold(t.CustomName, string(recText)) {
+										return false, ""
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		return true, "Mismatched self: calling a method defined with ':' using '.' syntax (missing 'self' argument)."
+	}
+
+	return false, ""
 }

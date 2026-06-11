@@ -2473,6 +2473,11 @@ func (s *Server) getSafeFixesForDocument(doc *Document) []SafeFix {
 								break
 							}
 
+							isMismatched, _ := s.checkMethodCallMismatch(ctx, node, doc, tDoc, def.NodeID)
+							if isMismatched {
+								continue
+							}
+
 							paramOffset := getImplicitSelfOffset(ctx, node, tDoc, def.NodeID)
 
 							expectedArgs := max(int(funcNode.Count)-paramOffset, 0)
