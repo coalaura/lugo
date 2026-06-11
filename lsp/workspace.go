@@ -897,6 +897,14 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 		i = nextIdx
 	}
 
+	if cap(doc.LuaDocCache) >= len(tree.Nodes) {
+		doc.LuaDocCache = doc.LuaDocCache[:len(tree.Nodes)]
+
+		clear(doc.LuaDocCache)
+	} else {
+		doc.LuaDocCache = make([]*LuaDoc, len(tree.Nodes))
+	}
+
 	for _, defID := range res.GlobalDefs {
 		node := tree.Nodes[defID]
 		if node.Start == node.End {
@@ -1153,14 +1161,6 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 		clear(doc.Inferring)
 	} else {
 		doc.Inferring = make([]bool, len(tree.Nodes))
-	}
-
-	if cap(doc.LuaDocCache) >= len(tree.Nodes) {
-		doc.LuaDocCache = doc.LuaDocCache[:len(tree.Nodes)]
-
-		clear(doc.LuaDocCache)
-	} else {
-		doc.LuaDocCache = make([]*LuaDoc, len(tree.Nodes))
 	}
 
 	if cap(doc.ActualReads) >= len(tree.Nodes) {

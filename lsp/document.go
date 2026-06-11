@@ -521,102 +521,30 @@ func (doc *Document) LocalsAt(offset uint32) iter.Seq2[[]byte, ast.NodeID] {
 	}
 }
 
-// ExtractLuaDocFields performs a highly optimized, zero-allocation byte scan
-// for @field annotations in the comments directly above a node.
+// ExtractLuaDocFields yields @field names from the cached LuaDoc for a node.
 func (doc *Document) ExtractLuaDocFields(id ast.NodeID) iter.Seq[[]byte] {
 	return func(yield func([]byte) bool) {
-		fieldToken := []byte("@field")
+		ld := doc.GetLuaDoc(id)
+		if ld == nil {
+			return
+		}
 
-		for c := range doc.IterateCommentsAbove(id) {
-			raw := doc.Source[c.Start:c.End]
-
-			idx := bytes.Index(raw, fieldToken)
-
-			for idx != -1 {
-				rest := raw[idx+6:]
-
-				var j int
-
-				for j < len(rest) && (rest[j] == ' ' || rest[j] == '\t') {
-					j++
-				}
-
-				if bytes.HasPrefix(rest[j:], []byte("public ")) {
-					j += 7
-				} else if bytes.HasPrefix(rest[j:], []byte("private ")) {
-					j += 8
-				} else if bytes.HasPrefix(rest[j:], []byte("protected ")) {
-					j += 10
-				}
-
-				for j < len(rest) && (rest[j] == ' ' || rest[j] == '\t') {
-					j++
-				}
-
-				startName := j
-
-				for j < len(rest) && rest[j] != ' ' && rest[j] != '\t' && rest[j] != '\n' && rest[j] != '\r' {
-					j++
-				}
-
-				if j > startName {
-					name := rest[startName:j]
-					if len(name) > 0 && name[len(name)-1] == '?' {
-						name = name[:len(name)-1]
-					}
-
-					if !yield(name) {
-						return
-					}
-				}
-
-				next := bytes.Index(rest, fieldToken)
-				if next == -1 {
-					break
-				}
-
-				idx += 6 + next
+		for i := range ld.Fields {
+			if !yield([]byte(ld.Fields[i].Name)) {
+				return
 			}
 		}
 	}
 }
 
-// HasDeprecatedTag performs a fast, zero-allocation byte scan for @deprecated comments directly above a node.
+// HasDeprecatedTag reports @deprecated state from the cached LuaDoc for a node.
 func (doc *Document) HasDeprecatedTag(id ast.NodeID) (bool, string) {
-	depToken := []byte("@deprecated")
-
-	var (
-		found bool
-		msg   string
-	)
-
-	for c := range doc.IterateCommentsAbove(id) {
-		raw := doc.Source[c.Start:c.End]
-
-		_, after, ok := bytes.Cut(raw, depToken)
-		if ok {
-			rest := after
-
-			endIdx := bytes.IndexByte(rest, '\n')
-			if endIdx == -1 {
-				endIdx = len(rest)
-			}
-
-			doc.Server.sharedDepBuf = doc.Server.sharedDepBuf[:0]
-
-			msgBytes := cleanLuaCommentBytes(doc.Server.sharedDepBuf, rest[:endIdx])
-
-			msg = string(bytes.TrimSpace(msgBytes))
-
-			found = true
-
-			doc.Server.sharedDepBuf = msgBytes
-
-			break
-		}
+	ld := doc.GetLuaDoc(id)
+	if ld == nil {
+		return false, ""
 	}
 
-	return found, msg
+	return ld.IsDeprecated, ld.DeprecatedMsg
 }
 
 func cleanLuaCommentBytes(dst, raw []byte) []byte {
