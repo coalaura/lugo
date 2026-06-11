@@ -962,7 +962,7 @@ func (s *Server) getFiveMExportResource(doc *Document, nodeID ast.NodeID) string
 
 						if rightNode.Kind == ast.KindString {
 							if rightNode.Start <= rightNode.End && rightNode.End <= uint32(len(doc.Source)) {
-								return strings.ToLower(unquoteLuaString(string(doc.Source[rightNode.Start:rightNode.End])))
+								return strings.ToLower(utils.UnquoteLuaString(string(doc.Source[rightNode.Start:rightNode.End])))
 							}
 						}
 					}

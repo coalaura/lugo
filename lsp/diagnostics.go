@@ -219,7 +219,7 @@ func (s *Server) publishDiagnostics(uri string) {
 						case ast.KindIndexExpr:
 							rightNode := doc.Tree.Nodes[node.Right]
 							if rightNode.Kind == ast.KindString {
-								resName = unquoteLuaString(string(doc.Source[rightNode.Start:rightNode.End]))
+								resName = utils.UnquoteLuaString(string(doc.Source[rightNode.Start:rightNode.End]))
 								errNode = node.Right
 							}
 						}

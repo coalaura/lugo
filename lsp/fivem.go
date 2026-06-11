@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/coalaura/lugo/ast"
+	"github.com/coalaura/lugo/utils"
 )
 
 type FileEnv int
@@ -76,35 +77,6 @@ func (r *FiveMResource) Equal(other *FiveMResource) bool {
 	}
 
 	return true
-}
-
-func unquoteLuaString(s string) string {
-	s = strings.TrimSpace(s)
-
-	if len(s) >= 2 && (s[0] == '"' || s[0] == '\'') {
-		if s[len(s)-1] == s[0] {
-			return s[1 : len(s)-1]
-		}
-
-		return s[1:]
-	}
-
-	if strings.HasPrefix(s, "[") {
-		idx := strings.IndexByte(s[1:], '[')
-		if idx != -1 {
-			start := 2 + idx
-			if start < len(s) && s[start] == '\n' {
-				start++
-			}
-
-			end := len(s) - (2 + idx)
-			if start <= end {
-				return s[start:end]
-			}
-		}
-	}
-
-	return s
 }
 
 func (s *Server) parseFiveMManifest(doc *Document) *FiveMResource {
@@ -179,7 +151,7 @@ func (s *Server) parseFiveMManifest(doc *Document) *FiveMResource {
 
 					if argNode.Kind == ast.KindString {
 						if argNode.Start <= argNode.End && argNode.End <= uint32(len(doc.Source)) {
-							strVal := unquoteLuaString(string(doc.Source[argNode.Start:argNode.End]))
+							strVal := utils.UnquoteLuaString(string(doc.Source[argNode.Start:argNode.End]))
 							*targetExports = append(*targetExports, strVal)
 						}
 					} else if argNode.Kind == ast.KindTableExpr {
@@ -196,7 +168,7 @@ func (s *Server) parseFiveMManifest(doc *Document) *FiveMResource {
 							fieldNode := doc.Tree.Nodes[fieldID]
 							if fieldNode.Kind == ast.KindString {
 								if fieldNode.Start <= fieldNode.End && fieldNode.End <= uint32(len(doc.Source)) {
-									strVal := unquoteLuaString(string(doc.Source[fieldNode.Start:fieldNode.End]))
+									strVal := utils.UnquoteLuaString(string(doc.Source[fieldNode.Start:fieldNode.End]))
 									*targetExports = append(*targetExports, strVal)
 								}
 							}
@@ -218,7 +190,7 @@ func (s *Server) parseFiveMManifest(doc *Document) *FiveMResource {
 
 					if argNode.Kind == ast.KindString {
 						if argNode.Start <= argNode.End && argNode.End <= uint32(len(doc.Source)) {
-							strVal := unquoteLuaString(string(doc.Source[argNode.Start:argNode.End]))
+							strVal := utils.UnquoteLuaString(string(doc.Source[argNode.Start:argNode.End]))
 							if strings.HasPrefix(strVal, "@") {
 								*targetCross = append(*targetCross, strVal)
 							} else {
@@ -239,7 +211,7 @@ func (s *Server) parseFiveMManifest(doc *Document) *FiveMResource {
 							fieldNode := doc.Tree.Nodes[fieldID]
 							if fieldNode.Kind == ast.KindString {
 								if fieldNode.Start <= fieldNode.End && fieldNode.End <= uint32(len(doc.Source)) {
-									strVal := unquoteLuaString(string(doc.Source[fieldNode.Start:fieldNode.End]))
+									strVal := utils.UnquoteLuaString(string(doc.Source[fieldNode.Start:fieldNode.End]))
 									if strings.HasPrefix(strVal, "@") {
 										*targetCross = append(*targetCross, strVal)
 									} else {

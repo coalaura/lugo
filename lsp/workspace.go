@@ -715,7 +715,7 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 							arg2ID := tree.ExtraList[node.Extra+1]
 
 							if int(arg1ID) < len(tree.Nodes) && tree.Nodes[arg1ID].Kind == ast.KindString {
-								exportName := unquoteLuaString(string(doc.Source[tree.Nodes[arg1ID].Start:tree.Nodes[arg1ID].End]))
+								exportName := utils.UnquoteLuaString(string(doc.Source[tree.Nodes[arg1ID].Start:tree.Nodes[arg1ID].End]))
 
 								doc.FiveMLuaExports = append(doc.FiveMLuaExports, FiveMLuaExport{
 									Name:   exportName,

@@ -900,7 +900,7 @@ func (s *Server) handleCompletion(req Request) {
 			if bytes.HasPrefix(recName, []byte("exports[")) && bytes.HasSuffix(recName, []byte("]")) {
 				inner := recName[8 : len(recName)-1]
 
-				exportRes = unquoteLuaString(string(inner))
+				exportRes = utils.UnquoteLuaString(string(inner))
 			} else if bytes.HasPrefix(recName, []byte("exports.")) {
 				exportRes = string(recName[8:])
 			}
