@@ -247,7 +247,13 @@ func (f *Formatter) Format(doc *Document, formatRange *Range) []TextEdit {
 						currStmtKind := f.getStmtKind(tokens, targetStmtIdx)
 
 						if currStmtKind != StmtUnknown {
-							if f.wantsBlankLine(lastStmtKind, currStmtKind) {
+							wantsBlank := f.wantsBlankLine(lastStmtKind, currStmtKind)
+
+							if prevStmtEnd == token.End || prevStmtEnd == token.Until {
+								wantsBlank = true
+							}
+
+							if wantsBlank {
 								isJustAfterBlockOpener := prevStmtEnd == token.Do || prevStmtEnd == token.Then || prevStmtEnd == token.Repeat || prevStmtEnd == token.Else || prevStmtEnd == token.ElseIf || prevStmtEnd == token.LBrace
 
 								if prevStmtEnd == token.RParen && prevNonCommentIdx != -1 {
