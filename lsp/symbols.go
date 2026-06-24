@@ -1168,47 +1168,129 @@ func (s *Server) getReferences(ctx *SymbolContext, includeDeclaration bool) []Lo
 
 func (s *Server) iterateGlobalReferences(ctx *SymbolContext) iter.Seq[GlobalReference] {
 	return func(yield func(GlobalReference) bool) {
-		if !ctx.IsGlobal {
-			return
-		}
-
-		for dUri, dDoc := range s.Documents {
-			if !s.canSeeSymbol(dDoc, ctx.TargetDoc) {
-				continue
-			}
-
-			if ctx.GKey.ReceiverHash == 0 {
-				for _, id := range dDoc.Resolver.GlobalDefs {
-					if utils.HashBytes(dDoc.Source[dDoc.Tree.Nodes[id].Start:dDoc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
-						if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: id}) {
-							return
-						}
-					}
+		if ctx.IsGlobal {
+			for dUri, dDoc := range s.Documents {
+				if !s.canSeeSymbol(dDoc, ctx.TargetDoc) {
+					continue
 				}
 
-				for _, id := range dDoc.Resolver.GlobalRefs {
-					if utils.HashBytes(dDoc.Source[dDoc.Tree.Nodes[id].Start:dDoc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
-						if dDoc.Resolver.References[id] == ast.InvalidNode {
+				if ctx.GKey.ReceiverHash == 0 {
+					for _, id := range dDoc.Resolver.GlobalDefs {
+						if utils.HashBytes(dDoc.Source[dDoc.Tree.Nodes[id].Start:dDoc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
 							if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: id}) {
 								return
 							}
 						}
 					}
-				}
-			} else {
-				for _, fd := range dDoc.Resolver.FieldDefs {
-					if fd.ReceiverHash == ctx.GKey.ReceiverHash && fd.PropHash == ctx.GKey.PropHash {
-						if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: fd.NodeID}) {
-							return
+
+					for _, id := range dDoc.Resolver.GlobalRefs {
+						if utils.HashBytes(dDoc.Source[dDoc.Tree.Nodes[id].Start:dDoc.Tree.Nodes[id].End]) == ctx.GKey.PropHash {
+							if dDoc.Resolver.References[id] == ast.InvalidNode {
+								if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: id}) {
+									return
+								}
+							}
+						}
+					}
+				} else {
+					for _, fd := range dDoc.Resolver.FieldDefs {
+						if fd.ReceiverHash == ctx.GKey.ReceiverHash && fd.PropHash == ctx.GKey.PropHash {
+							if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: fd.NodeID}) {
+								return
+							}
+						}
+					}
+
+					for _, pf := range dDoc.Resolver.PendingFields {
+						if pf.ReceiverHash == ctx.GKey.ReceiverHash && pf.PropHash == ctx.GKey.PropHash {
+							if dDoc.Resolver.References[pf.PropNodeID] == ast.InvalidNode {
+								if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: pf.PropNodeID}) {
+									return
+								}
+							}
 						}
 					}
 				}
+			}
+		}
 
-				for _, pf := range dDoc.Resolver.PendingFields {
-					if pf.ReceiverHash == ctx.GKey.ReceiverHash && pf.PropHash == ctx.GKey.PropHash {
-						if dDoc.Resolver.References[pf.PropNodeID] == ast.InvalidNode {
-							if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: pf.PropNodeID}) {
-								return
+		// Cross-Resource FiveM Export References
+		if s.FeatureFiveM && ctx.TargetDoc != nil {
+			exportRes := s.getDocResourceRoot(ctx.TargetDoc)
+			if exportRes != "" {
+				var resName string
+
+				resObj := s.FiveMResources[exportRes]
+				if resObj != nil {
+					resName = resObj.Name
+				} else {
+					idx := strings.LastIndexByte(exportRes, '/')
+					if idx != -1 {
+						resName = exportRes[idx+1:]
+					} else {
+						resName = exportRes
+					}
+				}
+
+				if resName != "" {
+					var exportNames []string
+
+					if resObj != nil {
+						for _, exp := range resObj.ClientExports {
+							if exp == ctx.IdentName {
+								exportNames = append(exportNames, exp)
+							}
+						}
+
+						for _, exp := range resObj.ServerExports {
+							if exp == ctx.IdentName {
+								exportNames = append(exportNames, exp)
+							}
+						}
+					}
+
+					for _, d := range s.Documents {
+						if s.getDocResourceRoot(d) == exportRes {
+							for _, exp := range d.FiveMLuaExports {
+								var refMatch bool
+
+								if int(exp.NodeID) < len(d.Resolver.References) {
+									refMatch = d.Resolver.References[exp.NodeID] == ctx.TargetDefID
+								}
+
+								valID := d.getAssignedValue(exp.NodeID)
+
+								if valID == ctx.TargetDefID || refMatch || exp.Name == ctx.IdentName {
+									if !slices.Contains(exportNames, exp.Name) {
+										exportNames = append(exportNames, exp.Name)
+									}
+								}
+							}
+						}
+					}
+
+					for _, expName := range exportNames {
+						var sb strings.Builder
+
+						sb.WriteString("exports.")
+						sb.WriteString(resName)
+
+						expRecHash := utils.HashBytes([]byte(sb.String()))
+						expPropHash := utils.HashBytes([]byte(expName))
+
+						for dUri, dDoc := range s.Documents {
+							if dDoc == ctx.TargetDoc {
+								continue // Same document handled by normal reference tracking if applicable
+							}
+
+							for _, pf := range dDoc.Resolver.PendingFields {
+								if pf.ReceiverHash == expRecHash && pf.PropHash == expPropHash {
+									if dDoc.Resolver.References[pf.PropNodeID] == ast.InvalidNode {
+										if !yield(GlobalReference{Doc: dDoc, URI: dUri, NodeID: pf.PropNodeID}) {
+											return
+										}
+									}
+								}
 							}
 						}
 					}

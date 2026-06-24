@@ -351,6 +351,12 @@ func (r *Resolver) GetReceiverContext(recID ast.NodeID) (ast.NodeID, uint64, []b
 			break
 		} else if node.Kind == ast.KindMemberExpr {
 			curr = node.Left
+		} else if node.Kind == ast.KindIndexExpr {
+			if node.Right != ast.InvalidNode && r.Tree.Nodes[node.Right].Kind == ast.KindString {
+				curr = node.Left
+			} else {
+				return ast.InvalidNode, 0, nil
+			}
 		} else {
 			return ast.InvalidNode, 0, nil
 		}
@@ -375,9 +381,16 @@ func (r *Resolver) getReceiverContextArena(recID ast.NodeID) (ast.NodeID, uint64
 
 		if node.Kind == ast.KindIdent {
 			rootDef = r.References[curr]
+
 			break
 		} else if node.Kind == ast.KindMemberExpr {
 			curr = node.Left
+		} else if node.Kind == ast.KindIndexExpr {
+			if node.Right != ast.InvalidNode && r.Tree.Nodes[node.Right].Kind == ast.KindString {
+				curr = node.Left
+			} else {
+				return ast.InvalidNode, 0, nil
+			}
 		} else {
 			return ast.InvalidNode, 0, nil
 		}
@@ -408,6 +421,36 @@ func (r *Resolver) buildMemberName(id ast.NodeID, buf []byte) []byte {
 		buf = append(buf, '.')
 
 		buf = r.buildMemberName(node.Right, buf)
+	case ast.KindIndexExpr:
+		if node.Right != ast.InvalidNode && r.Tree.Nodes[node.Right].Kind == ast.KindString {
+			buf = r.buildMemberName(node.Left, buf)
+
+			buf = append(buf, '.')
+
+			strSrc := bytes.TrimSpace(r.source(node.Right))
+			if len(strSrc) >= 2 && (strSrc[0] == '"' || strSrc[0] == '\'') {
+				if strSrc[len(strSrc)-1] == strSrc[0] {
+					buf = append(buf, strSrc[1:len(strSrc)-1]...)
+				} else {
+					buf = append(buf, strSrc[1:]...)
+				}
+			} else if bytes.HasPrefix(strSrc, []byte("[")) {
+				idx := bytes.IndexByte(strSrc[1:], '[')
+				if idx != -1 {
+					start := 2 + idx
+					if start < len(strSrc) && strSrc[start] == '\n' {
+						start++
+					}
+
+					end := len(strSrc) - (2 + idx)
+					if start <= end {
+						buf = append(buf, strSrc[start:end]...)
+					}
+				}
+			} else {
+				buf = append(buf, strSrc...)
+			}
+		}
 	}
 
 	return buf
