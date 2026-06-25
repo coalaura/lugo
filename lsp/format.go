@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/coalaura/lugo/ast"
 	"github.com/coalaura/lugo/lexer"
 	"github.com/coalaura/lugo/token"
 )
@@ -36,6 +37,7 @@ const (
 	StmtUnknown StmtKind = iota
 	StmtLocal
 	StmtAssign
+	StmtGlobalAssign
 	StmtCall
 	StmtControl
 	StmtFunction
@@ -244,7 +246,7 @@ func (f *Formatter) Format(doc *Document, formatRange *Range) []TextEdit {
 					}
 
 					if f.isStatementStart(prevStmtEnd) {
-						currStmtKind := f.getStmtKind(tokens, targetStmtIdx)
+						currStmtKind := f.getStmtKind(doc, tokens, targetStmtIdx)
 
 						if currStmtKind != StmtUnknown {
 							wantsBlank := f.wantsBlankLine(lastStmtKind, currStmtKind)
@@ -605,7 +607,7 @@ func (f *Formatter) isComplexTable(tokens []token.Token, startIndex int) bool {
 	return false
 }
 
-func (f *Formatter) getStmtKind(tokens []token.Token, startIndex int) StmtKind {
+func (f *Formatter) getStmtKind(doc *Document, tokens []token.Token, startIndex int) StmtKind {
 	tok := tokens[startIndex]
 
 	switch tok.Kind {
@@ -640,6 +642,24 @@ func (f *Formatter) getStmtKind(tokens []token.Token, startIndex int) StmtKind {
 				depth--
 			} else if depth == 0 {
 				if tokenKind == token.Assign || tokenKind == token.Comma {
+					// Check if the root identifier is a global
+					if doc != nil && tokens[startIndex].Kind == token.Ident {
+						nodeID := doc.Tree.NodeAt(tokens[startIndex].Start)
+
+						for nodeID != ast.InvalidNode {
+							node := doc.Tree.Nodes[nodeID]
+							if node.Start == tokens[startIndex].Start && node.End == tokens[startIndex].End && node.Kind == ast.KindIdent {
+								if doc.Resolver.References[nodeID] == ast.InvalidNode {
+									return StmtGlobalAssign
+								}
+
+								break
+							}
+
+							nodeID = node.Parent
+						}
+					}
+
 					return StmtAssign
 				}
 
@@ -669,8 +689,13 @@ func (f *Formatter) wantsBlankLine(prev, curr StmtKind) bool {
 		return false
 	}
 
-	// Group locals and assignments together
+	// Group locals and regular assignments together
 	if (prev == StmtLocal || prev == StmtAssign) && (curr == StmtLocal || curr == StmtAssign) {
+		return false
+	}
+
+	// Group global assignments together
+	if prev == StmtGlobalAssign && curr == StmtGlobalAssign {
 		return false
 	}
 
