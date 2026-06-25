@@ -251,6 +251,29 @@ func (f *Formatter) Format(doc *Document, formatRange *Range) []TextEdit {
 
 							if prevStmtEnd == token.End || prevStmtEnd == token.Until {
 								wantsBlank = true
+							} else if prevStmtEnd == token.RParen || prevStmtEnd == token.RBrace {
+								depth := 1
+								openTok := token.LParen
+
+								if prevStmtEnd == token.RBrace {
+									openTok = token.LBrace
+								}
+
+								for j := prevNonCommentIdx - 1; j >= 0; j-- {
+									k := tokens[j].Kind
+									if k == prevStmtEnd {
+										depth++
+									} else if k == openTok {
+										depth--
+										if depth == 0 {
+											if bytes.IndexByte(source[tokens[j].End:tokens[prevNonCommentIdx].Start], '\n') != -1 {
+												wantsBlank = true
+											}
+
+											break
+										}
+									}
+								}
 							}
 
 							if wantsBlank {
