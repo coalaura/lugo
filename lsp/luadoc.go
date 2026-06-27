@@ -271,9 +271,10 @@ func parseLuaDoc(comments []byte, enableAlerts bool) LuaDoc {
 			comments = comments[idx+1:]
 		}
 
-		line = bytes.TrimSpace(line)
+		rightTrimmedLine := bytes.TrimRight(line, " \t\r")
+		trimmedLine := bytes.TrimLeft(rightTrimmedLine, " \t")
 
-		if after, ok := bytes.CutPrefix(line, tagParam); ok {
+		if after, ok := bytes.CutPrefix(trimmedLine, tagParam); ok {
 			activeTag = "param"
 
 			rest := bytes.TrimSpace(after)
@@ -304,7 +305,7 @@ func parseLuaDoc(comments []byte, enableAlerts bool) LuaDoc {
 
 				doc.Params = append(doc.Params, LuaDocParam{Name: nameStr})
 			}
-		} else if after, ok := bytes.CutPrefix(line, tagReturn); ok {
+		} else if after, ok := bytes.CutPrefix(trimmedLine, tagReturn); ok {
 			activeTag = "return"
 
 			typeBytes, descBytes := extractTypeDesc(bytes.TrimSpace(after))
@@ -313,7 +314,7 @@ func parseLuaDoc(comments []byte, enableAlerts bool) LuaDoc {
 			descBytes = bytes.TrimPrefix(descBytes, hashPrefix)
 
 			doc.Returns = append(doc.Returns, LuaDocReturn{Type: string(typeBytes), Desc: string(descBytes)})
-		} else if after, ok := bytes.CutPrefix(line, tagField); ok {
+		} else if after, ok := bytes.CutPrefix(trimmedLine, tagField); ok {
 			activeTag = "field"
 
 			rest := bytes.TrimSpace(after)
@@ -352,25 +353,25 @@ func parseLuaDoc(comments []byte, enableAlerts bool) LuaDoc {
 
 				doc.Fields = append(doc.Fields, LuaDocField{Name: nameStr})
 			}
-		} else if after, ok := bytes.CutPrefix(line, tagDeprecated); ok {
+		} else if after, ok := bytes.CutPrefix(trimmedLine, tagDeprecated); ok {
 			activeTag = ""
 
 			doc.IsDeprecated = true
 			doc.DeprecatedMsg = string(bytes.TrimSpace(after))
-		} else if after, ok := bytes.CutPrefix(line, tagClass); ok {
+		} else if after, ok := bytes.CutPrefix(trimmedLine, tagClass); ok {
 			activeTag = ""
 
 			name, parent, desc := extractNameParent(after)
 			if len(name) > 0 {
 				doc.Class = &LuaDocClass{Name: string(name), Parent: string(parent), Desc: string(desc)}
 			}
-		} else if after, ok := bytes.CutPrefix(line, tagType); ok {
+		} else if after, ok := bytes.CutPrefix(trimmedLine, tagType); ok {
 			activeTag = ""
 
 			typeBytes, descBytes := extractTypeDesc(bytes.TrimSpace(after))
 
 			doc.Type = &LuaDocType{Type: string(typeBytes), Desc: string(descBytes)}
-		} else if after, ok := bytes.CutPrefix(line, tagAlias); ok {
+		} else if after, ok := bytes.CutPrefix(trimmedLine, tagAlias); ok {
 			activeTag = ""
 
 			rest := bytes.TrimSpace(after)
@@ -386,7 +387,7 @@ func parseLuaDoc(comments []byte, enableAlerts bool) LuaDoc {
 			} else {
 				doc.Alias = &LuaDocAlias{Name: string(rest)}
 			}
-		} else if after, ok := bytes.CutPrefix(line, tagGeneric); ok {
+		} else if after, ok := bytes.CutPrefix(trimmedLine, tagGeneric); ok {
 			activeTag = ""
 
 			rest := bytes.TrimSpace(after)
@@ -397,52 +398,52 @@ func parseLuaDoc(comments []byte, enableAlerts bool) LuaDoc {
 					doc.Generics = append(doc.Generics, LuaDocGeneric{Name: string(name), Parent: string(parent)})
 				}
 			}
-		} else if after, ok := bytes.CutPrefix(line, tagOverload); ok {
+		} else if after, ok := bytes.CutPrefix(trimmedLine, tagOverload); ok {
 			activeTag = ""
 
 			doc.Overloads = append(doc.Overloads, string(bytes.TrimSpace(after)))
-		} else if after, ok := bytes.CutPrefix(line, tagSee); ok {
+		} else if after, ok := bytes.CutPrefix(trimmedLine, tagSee); ok {
 			activeTag = ""
 
 			doc.See = append(doc.See, string(bytes.TrimSpace(after)))
-		} else if after, ok := bytes.CutPrefix(line, tagExport); ok {
+		} else if after, ok := bytes.CutPrefix(trimmedLine, tagExport); ok {
 			activeTag = ""
 
 			doc.Export = string(bytes.TrimSpace(after))
 		} else {
-			if len(line) > 0 {
-				if line[0] != '@' { // Ignore @meta, @diagnostic, etc.
+			if len(trimmedLine) > 0 {
+				if trimmedLine[0] != '@' { // Ignore @meta, @diagnostic, etc.
 					switch activeTag {
 					case "param":
 						if doc.Params[len(doc.Params)-1].Desc != "" {
-							doc.Params[len(doc.Params)-1].Desc += "\n" + string(line)
+							doc.Params[len(doc.Params)-1].Desc += "\n" + string(rightTrimmedLine)
 						} else {
-							doc.Params[len(doc.Params)-1].Desc = string(line)
+							doc.Params[len(doc.Params)-1].Desc = string(rightTrimmedLine)
 						}
 					case "return":
 						if doc.Returns[len(doc.Returns)-1].Desc != "" {
-							doc.Returns[len(doc.Returns)-1].Desc += "\n" + string(line)
+							doc.Returns[len(doc.Returns)-1].Desc += "\n" + string(rightTrimmedLine)
 						} else {
-							doc.Returns[len(doc.Returns)-1].Desc = string(line)
+							doc.Returns[len(doc.Returns)-1].Desc = string(rightTrimmedLine)
 						}
 					case "field":
 						if doc.Fields[len(doc.Fields)-1].Desc != "" {
-							doc.Fields[len(doc.Fields)-1].Desc += "\n" + string(line)
+							doc.Fields[len(doc.Fields)-1].Desc += "\n" + string(rightTrimmedLine)
 						} else {
-							doc.Fields[len(doc.Fields)-1].Desc = string(line)
+							doc.Fields[len(doc.Fields)-1].Desc = string(rightTrimmedLine)
 						}
 					default:
-						descLines = append(descLines, line)
+						descLines = append(descLines, rightTrimmedLine)
 					}
 				} else {
 					activeTag = ""
 
-					descLines = append(descLines, line)
+					descLines = append(descLines, rightTrimmedLine)
 				}
 			} else {
 				activeTag = ""
 
-				descLines = append(descLines, line) // Preserve empty lines for paragraph gaps
+				descLines = append(descLines, nil) // Preserve empty lines for paragraph gaps
 			}
 		}
 	}

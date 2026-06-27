@@ -550,6 +550,78 @@ func (doc *Document) HasDeprecatedTag(id ast.NodeID) (bool, string) {
 }
 
 func cleanLuaCommentBytes(dst, raw []byte) []byte {
+	isBlock := bytes.HasPrefix(raw, []byte("--["))
+
+	var (
+		blockPrefixLen int
+		blockSuffixLen int
+	)
+
+	if isBlock {
+		blockPrefixLen = 3
+
+		for blockPrefixLen < len(raw) && raw[blockPrefixLen] == '=' {
+			blockPrefixLen++
+		}
+
+		if blockPrefixLen < len(raw) && raw[blockPrefixLen] == '[' {
+			blockPrefixLen++
+		} else {
+			isBlock = false
+		}
+
+		if isBlock {
+			blockSuffixLen = blockPrefixLen - 2
+		}
+	}
+
+	minIndent := -1
+
+	if isBlock {
+		temp := raw
+
+		var lineNum int
+
+		for len(temp) > 0 {
+			var line []byte
+
+			idx := bytes.IndexByte(temp, '\n')
+			if idx == -1 {
+				line = temp
+				temp = nil
+			} else {
+				line = temp[:idx]
+				temp = temp[idx+1:]
+			}
+
+			lineNum++
+			if lineNum == 1 {
+				continue
+			}
+
+			line = bytes.TrimRight(line, " \t\r")
+			if len(line) == 0 {
+				continue
+			}
+
+			var indent int
+
+			for indent < len(line) && (line[indent] == ' ' || line[indent] == '\t') {
+				indent++
+			}
+
+			if minIndent == -1 || indent < minIndent {
+				minIndent = indent
+			}
+		}
+
+		if minIndent == -1 {
+			minIndent = 0
+		}
+	}
+
+	var lineNum int
+
 	for len(raw) > 0 {
 		var line []byte
 
@@ -562,24 +634,58 @@ func cleanLuaCommentBytes(dst, raw []byte) []byte {
 			raw = raw[idx+1:]
 		}
 
-		line = bytes.TrimSpace(line)
+		lineNum++
+		line = bytes.TrimRight(line, " \t\r")
 
-		if bytes.HasPrefix(line, []byte("--[[")) {
-			line = line[4:]
-		} else if bytes.HasPrefix(line, []byte("---")) {
-			line = line[3:]
-		} else if bytes.HasPrefix(line, []byte("--")) {
-			line = line[2:]
-		}
+		if isBlock {
+			if lineNum == 1 {
+				if len(line) >= blockPrefixLen {
+					line = line[blockPrefixLen:]
+				}
+			} else {
+				var strip int
 
-		if bytes.HasSuffix(line, []byte("--]]")) {
-			line = line[:len(line)-4]
-		} else if bytes.HasSuffix(line, []byte("]]")) {
-			line = line[:len(line)-2]
-		}
+				for strip < len(line) && strip < minIndent && (line[strip] == ' ' || line[strip] == '\t') {
+					strip++
+				}
 
-		if len(line) > 0 && line[0] == ' ' {
-			line = line[1:]
+				line = line[strip:]
+			}
+
+			if len(raw) == 0 {
+				if bytes.HasSuffix(line, []byte("--]]")) && blockSuffixLen == 2 {
+					line = line[:len(line)-4]
+				} else if len(line) >= blockSuffixLen {
+					suffix := line[len(line)-blockSuffixLen:]
+					if suffix[0] == ']' && suffix[len(suffix)-1] == ']' {
+						valid := true
+
+						for k := 1; k < len(suffix)-1; k++ {
+							if suffix[k] != '=' {
+								valid = false
+
+								break
+							}
+						}
+
+						if valid && len(suffix) == blockSuffixLen {
+							line = line[:len(line)-blockSuffixLen]
+						}
+					}
+				}
+			}
+		} else {
+			line = bytes.TrimSpace(line)
+
+			if bytes.HasPrefix(line, []byte("---")) {
+				line = line[3:]
+			} else if bytes.HasPrefix(line, []byte("--")) {
+				line = line[2:]
+			}
+
+			if len(line) > 0 && line[0] == ' ' {
+				line = line[1:]
+			}
 		}
 
 		dst = append(dst, line...)
