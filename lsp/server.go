@@ -66,6 +66,7 @@ type Server struct {
 	visibilityCache  map[*Document]bool
 	sharedCommentBuf []byte
 	sharedDepBuf     []byte
+	semanticVersion  uint64
 
 	Version               string
 	RootURI               string

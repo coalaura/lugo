@@ -1149,21 +1149,11 @@ func (s *Server) finalizeDocumentUpdate(uri string, source []byte, tree *ast.Tre
 		}
 	}
 
-	if cap(doc.TypeCache) >= len(tree.Nodes) {
-		doc.TypeCache = doc.TypeCache[:len(tree.Nodes)]
+	s.semanticVersion++
 
-		clear(doc.TypeCache)
-	} else {
-		doc.TypeCache = make([]TypeSet, len(tree.Nodes))
-	}
+	doc.resetTypeCache()
 
-	if cap(doc.Inferring) >= len(tree.Nodes) {
-		doc.Inferring = doc.Inferring[:len(tree.Nodes)]
-
-		clear(doc.Inferring)
-	} else {
-		doc.Inferring = make([]bool, len(tree.Nodes))
-	}
+	doc.TypeCacheVersion = s.semanticVersion
 
 	if cap(doc.ActualReads) >= len(tree.Nodes) {
 		doc.ActualReads = doc.ActualReads[:len(tree.Nodes)]

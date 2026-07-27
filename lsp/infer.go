@@ -161,24 +161,56 @@ func (typeSet TypeSet) Format() string {
 	return strings.Join(parts, " | ")
 }
 
+func (doc *Document) resetTypeCache() {
+	nodeCount := len(doc.Tree.Nodes)
+
+	if cap(doc.TypeCache) >= nodeCount {
+		doc.TypeCache = doc.TypeCache[:nodeCount]
+
+		clear(doc.TypeCache)
+	} else {
+		doc.TypeCache = make([]TypeSet, nodeCount)
+	}
+
+	if cap(doc.Inferring) >= nodeCount {
+		doc.Inferring = doc.Inferring[:nodeCount]
+
+		clear(doc.Inferring)
+	} else {
+		doc.Inferring = make([]bool, nodeCount)
+	}
+}
+
 // InferType infers the type of a given AST node lazily and caches it.
 func (doc *Document) InferType(id ast.NodeID) TypeSet {
-	if id == ast.InvalidNode || int(id) >= len(doc.Tree.Nodes) {
+	if id == ast.InvalidNode || uint(id) >= uint(len(doc.Tree.Nodes)) {
 		return TypeSet{}
 	}
 
-	if int(id) >= len(doc.TypeCache) {
-		if int(id) < cap(doc.TypeCache) {
-			doc.TypeCache = doc.TypeCache[:len(doc.Tree.Nodes)]
-			doc.Inferring = doc.Inferring[:len(doc.Tree.Nodes)]
+	if doc.Server != nil && doc.TypeCacheVersion != doc.Server.semanticVersion {
+		doc.resetTypeCache()
+		doc.TypeCacheVersion = doc.Server.semanticVersion
+	}
+
+	nodeCount := len(doc.Tree.Nodes)
+
+	if len(doc.TypeCache) < nodeCount {
+		if cap(doc.TypeCache) >= nodeCount {
+			doc.TypeCache = doc.TypeCache[:nodeCount]
 		} else {
-			newTypeCache := make([]TypeSet, len(doc.Tree.Nodes))
+			newTypeCache := make([]TypeSet, nodeCount)
 
 			copy(newTypeCache, doc.TypeCache)
 
 			doc.TypeCache = newTypeCache
+		}
+	}
 
-			newInferring := make([]bool, len(doc.Tree.Nodes))
+	if len(doc.Inferring) < nodeCount {
+		if cap(doc.Inferring) >= nodeCount {
+			doc.Inferring = doc.Inferring[:nodeCount]
+		} else {
+			newInferring := make([]bool, nodeCount)
 
 			copy(newInferring, doc.Inferring)
 
@@ -814,12 +846,12 @@ func (doc *Document) findFieldInTable(tableID ast.NodeID, fieldName string) ast.
 }
 
 func (doc *Document) getDefForValue(valID ast.NodeID) ast.NodeID {
-	if valID == ast.InvalidNode {
+	if valID == ast.InvalidNode || uint(valID) >= uint(len(doc.Tree.Nodes)) {
 		return ast.InvalidNode
 	}
 
 	parentID := doc.Tree.Nodes[valID].Parent
-	if parentID == ast.InvalidNode {
+	if parentID == ast.InvalidNode || uint(parentID) >= uint(len(doc.Tree.Nodes)) {
 		return ast.InvalidNode
 	}
 

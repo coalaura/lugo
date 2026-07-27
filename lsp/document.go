@@ -30,6 +30,7 @@ type Document struct {
 	FiveMLuaExports    []FiveMLuaExport
 	ModTime            time.Time
 	Version            uint64
+	TypeCacheVersion   uint64
 	URI                string
 	Path               string
 	LowerPath          string
@@ -162,12 +163,12 @@ func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {
 			return ast.InvalidNode
 		case ast.KindNameList:
 			grandParentID := doc.Tree.Nodes[parentID].Parent
-			if grandParentID == ast.InvalidNode {
+			if grandParentID == ast.InvalidNode || uint(grandParentID) >= uint(len(doc.Tree.Nodes)) {
 				return ast.InvalidNode
 			}
 
 			grandParentNode := doc.Tree.Nodes[grandParentID]
-			if grandParentNode.Kind != ast.KindLocalAssign || grandParentNode.Right == ast.InvalidNode {
+			if grandParentNode.Kind != ast.KindLocalAssign || grandParentNode.Right == ast.InvalidNode || uint(grandParentNode.Right) >= uint(len(doc.Tree.Nodes)) {
 				return ast.InvalidNode
 			}
 
@@ -184,12 +185,12 @@ func (doc *Document) getAssignedValue(id ast.NodeID) ast.NodeID {
 			return doc.Tree.ExtraList[rhsNode.Extra+uint32(idx)]
 		case ast.KindExprList:
 			grandParentID := doc.Tree.Nodes[parentID].Parent
-			if grandParentID == ast.InvalidNode {
+			if grandParentID == ast.InvalidNode || uint(grandParentID) >= uint(len(doc.Tree.Nodes)) {
 				return ast.InvalidNode
 			}
 
 			grandParentNode := doc.Tree.Nodes[grandParentID]
-			if grandParentNode.Kind != ast.KindAssign || grandParentNode.Left != parentID || grandParentNode.Right == ast.InvalidNode {
+			if grandParentNode.Kind != ast.KindAssign || grandParentNode.Left != parentID || grandParentNode.Right == ast.InvalidNode || uint(grandParentNode.Right) >= uint(len(doc.Tree.Nodes)) {
 				return ast.InvalidNode
 			}
 

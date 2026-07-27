@@ -26,8 +26,9 @@ type DeadStoreInfo struct {
 }
 
 type SafeFixCacheEntry struct {
-	Version uint64
-	Fixes   []SafeFix
+	Version         uint64
+	SemanticVersion uint64
+	Fixes           []SafeFix
 }
 
 func (s *Server) handleCodeAction(req Request) {
@@ -2045,13 +2046,17 @@ func (s *Server) handleLinkedEditingRange(req Request) {
 }
 
 func (s *Server) getSafeFixesForDocument(doc *Document) []SafeFix {
-	if c := doc.SafeFixCache; c != nil && c.Version == doc.Version {
+	if c := doc.SafeFixCache; c != nil && c.Version == doc.Version && c.SemanticVersion == s.semanticVersion {
 		return c.Fixes
 	}
 
 	fixes := s.computeSafeFixesForDocument(doc)
 
-	doc.SafeFixCache = &SafeFixCacheEntry{Version: doc.Version, Fixes: fixes}
+	doc.SafeFixCache = &SafeFixCacheEntry{
+		Version:         doc.Version,
+		SemanticVersion: s.semanticVersion,
+		Fixes:           fixes,
+	}
 
 	return fixes
 }
