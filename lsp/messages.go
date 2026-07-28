@@ -108,7 +108,8 @@ type InitializationOptions struct {
 	BannedSymbols   map[string]string `json:"bannedSymbols,omitempty"`
 	MaxFileSizeMB   int               `json:"maxFileSizeMB"`
 
-	ParserMaxErrors int `json:"parserMaxErrors"`
+	CrashReports    bool `json:"crashReports"`
+	ParserMaxErrors int  `json:"parserMaxErrors"`
 
 	DiagUndefinedGlobals      bool     `json:"diagUndefinedGlobals"`
 	DiagImplicitGlobals       bool     `json:"diagImplicitGlobals"`

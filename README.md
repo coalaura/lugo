@@ -177,3 +177,11 @@ Available via the VS Code Command Palette (`Ctrl+Shift+P`):
 * **Lugo: Apply Safe Fixes (Current File):** Automatically clean up unused variables, parameters and assignments in the active file without breaking side-effects.
 * **Lugo: Apply Safe Fixes (Workspace):** Apply all safe fixes across the entire workspace.
 * **Lugo: Ignore Diagnostic:** Instantly adds a `---@diagnostic disable-next-line` (or `disable-file`) comment for the selected rule (Triggered via Quick Fix Code Actions).
+
+## Crash Reporting
+
+Lugo can optionally report unexpected crashes (panics) to help improve stability. Reporting is **off by default** unless VS Code telemetry is enabled:
+
+* **Telemetry-gated:** Crash reports are only sent when VS Code telemetry is turned on (`telemetry.telemetryLevel` is not `off`). Changing telemetry settings updates Lugo immediately - no restart required.
+* **Panic-only:** Nothing is sent during normal use. Reports are emitted only if the language server hits an unrecoverable panic.
+* **Privacy-first:** No personally identifiable information is collected. Stack traces may include local request metadata (e.g. the LSP method being handled) to aid debugging, but source code, file paths and workspace contents are never uploaded.

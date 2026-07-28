@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"maps"
 	"os"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/coalaura/lugo/ast"
 	"github.com/coalaura/lugo/parser"
+	"github.com/coalaura/lugo/reporting"
 	"github.com/coalaura/plain"
 )
 
@@ -26,9 +26,10 @@ const (
 
 // gost:preserve-layout
 type Server struct {
-	Reader *bufio.Reader
-	Writer io.Writer
-	Log    *plain.Plain
+	Reader   *bufio.Reader
+	Writer   io.Writer
+	Log      *plain.Plain
+	Reporter *reporting.Reporter
 
 	// Workspace State
 	Documents           map[string]*Document
@@ -133,10 +134,13 @@ type Server struct {
 }
 
 func NewServer(version string) *Server {
+	reporter, _ := reporting.NewReporter(version)
+
 	return &Server{
-		Version: version,
-		Reader:  bufio.NewReader(os.Stdin),
-		Writer:  os.Stdout,
+		Version:  version,
+		Reader:   bufio.NewReader(os.Stdin),
+		Writer:   os.Stdout,
+		Reporter: reporter,
 
 		// Workspace State
 		Documents:           make(map[string]*Document),
@@ -230,6 +234,10 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 
 	if maxSize <= 0 {
 		maxSize = DefaultMaxFileSize
+	}
+
+	if s.Reporter != nil {
+		s.Reporter.SetEnabled(opts.CrashReports)
 	}
 
 	setCfg(&s.MaxFileSize, maxSize, &needsReindex)
@@ -386,29 +394,32 @@ func (s *Server) setLibraryPaths(paths []string) bool {
 	return true
 }
 
+func (s *Server) recover(state func() map[string]any) {
+	err := recover()
+	if err == nil {
+		return
+	}
+
+	stack := debug.Stack()
+
+	if s.Reporter != nil {
+		s.Reporter.Recover(err, state())
+	}
+
+	s.Log.Errorf("%v\n%s\n", err, string(stack))
+
+	// fail-fast
+	os.Exit(1)
+}
+
 func (s *Server) handleMessage(req Request) {
-	defer func() {
-		if r := recover(); r != nil {
-			stack := debug.Stack()
-
-			s.Log.Errorf("CRITICAL PANIC in method %s: %v\n%s\n", req.Method, r, string(stack))
-
-			// Attempt to notify the client before we die
-			if req.ID != 0 {
-				WriteMessage(s.Writer, Response{
-					RPC: "2.0",
-					ID:  req.ID,
-					Error: ResponseError{
-						Code:    -32603, // InternalError
-						Message: fmt.Sprintf("Lugo LSP crashed critically: %v", r),
-					},
-				})
-			}
-
-			// Fail-fast
-			os.Exit(1)
+	defer s.recover(func() map[string]any {
+		return map[string]any{
+			"rpc":    req.RPC,
+			"method": req.Method,
+			"id":     req.ID,
 		}
-	}()
+	})
 
 	s.Log.Debugf("Received method: %s\n", req.Method)
 

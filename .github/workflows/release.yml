@@ -102,7 +102,7 @@ jobs:
         go build \
           -trimpath \
           -buildvcs=false \
-          -ldflags "-s -w -X 'main.Version=${{ github.ref_name }}' $LDFLAGS" \
+          -ldflags "-s -w -X 'main.Version=${{ github.ref_name }}' -X 'github.com/coalaura/lugo/reporting.SentryDSN=${{ secrets.SENTRY_DSN }}' $LDFLAGS" \
           -o "$OUT_RELEASE" .
           
         cp "$OUT_RELEASE" "$OUT_EXT"

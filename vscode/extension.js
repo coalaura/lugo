@@ -19,7 +19,7 @@ async function restartClient(context) {
 		}
 
 		await startClient(context);
-	} catch {}
+	} catch { }
 
 	restarting = false;
 }
@@ -90,6 +90,7 @@ function buildInitializationOptions() {
 		bannedSymbols: bannedSymbols,
 		maxFileSizeMB: primaryLugoConfig.get("workspace.maxFileSizeMB") ?? 4,
 
+		crashReports: crashReportsAllowed(),
 		parserMaxErrors: primaryLugoConfig.get("parser.maxErrors") ?? 50,
 
 		diagUndefinedGlobals: primaryLugoConfig.get("diagnostics.undefinedGlobals") !== false,
@@ -156,6 +157,18 @@ function scheduleConfigUpdate() {
 	}, 1000);
 }
 
+function crashReportsAllowed() {
+	if (!vscode.env.isTelemetryEnabled) {
+		return false;
+	}
+
+	if (vscode.env.telemetryLevel === "off") {
+		return false;
+	}
+
+	return true;
+}
+
 async function activate(context) {
 	const stdProvider = {
 		provideTextDocumentContent: uri => {
@@ -180,6 +193,12 @@ async function activate(context) {
 			if (e.affectsConfiguration("lugo") || e.affectsConfiguration("files.exclude") || e.affectsConfiguration("search.exclude")) {
 				scheduleConfigUpdate();
 			}
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.env.onDidChangeTelemetryEnabled(() => {
+			scheduleConfigUpdate();
 		})
 	);
 
