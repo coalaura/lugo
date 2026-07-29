@@ -133,6 +133,7 @@ function buildInitializationOptions() {
 		featureFormatting: primaryLugoConfig.get("features.formatting") !== false,
 		formatOpinionated: primaryLugoConfig.get("features.formatOpinionated") === true,
 		formatMaxLineLength: primaryLugoConfig.get("features.formatMaxLineLength") ?? 120,
+		formatCallParens: primaryLugoConfig.get("features.formatCallParens") !== false,
 		suggestFunctionParams: primaryLugoConfig.get("completion.suggestFunctionParams") !== false,
 
 		featureFiveM: primaryLugoConfig.get("fivem.enabled") === true,

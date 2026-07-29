@@ -425,6 +425,13 @@
                         "scope": "resource",
                         "markdownDescription": "Maximum line length the formatter aims for. Tables and argument lists that would exceed it are broken up one entry per line. Set to `-1` to never break by length.",
                         "order": 11
+                    },
+                    "lugo.features.formatCallParens": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Add parentheses to calls that use the string/table sugar (e.g. `RegisterNetEvent\"gX\"` becomes `RegisterNetEvent(\"gX\")`).",
+                        "order": 12
                     }
                 }
             },

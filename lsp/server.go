@@ -119,6 +119,7 @@ type Server struct {
 	FeatureFormatting     bool
 	FormatOpinionated     bool
 	FormatMaxLineLength   int
+	FormatCallParens      bool
 	SuggestFunctionParams bool
 	FeatureFormatAlerts   bool
 
@@ -308,6 +309,7 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 	}
 
 	setCfg(&s.FormatMaxLineLength, maxLineLength, nil)
+	setCfg(&s.FormatCallParens, opts.FormatCallParens, nil)
 	setCfg(&s.SuggestFunctionParams, opts.SuggestFunctionParams, nil)
 	setCfg(&s.FeatureFormatAlerts, opts.FeatureFormatAlerts, nil)
 

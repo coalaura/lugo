@@ -13,11 +13,17 @@ import (
 const DefaultMaxLineLength = 120
 
 type Formatter struct {
-	IndentSize    int
-	MaxLineLength int
-	UseTabs       bool
-	Opinionated   bool
+	IndentSize       int
+	MaxLineLength    int
+	UseTabs          bool
+	Opinionated      bool
+	InsertCallParens bool
 }
+
+const (
+	flagParenOpen uint8 = 1 << iota
+	flagParenClose
+)
 
 const (
 	ScopeBlock = iota
@@ -31,6 +37,7 @@ type Scope struct {
 	Open       int
 	BaseIndent int
 	Indent     int
+	HugAt      int32 // token index of a child table that must absorb this scope's break
 	Broken     bool
 }
 
@@ -51,6 +58,8 @@ type FormatGroup struct {
 	Open      int32
 	Close     int32
 	Width     int32
+	HugOpen   int32 // token index of a trailing table constructor, -1 if none
+	HugPrefix int32 // rendered width from Open through HugOpen inclusive
 	Kind      uint8
 	Broke     bool
 	Multiline bool
@@ -62,10 +71,11 @@ func NewFormatter(indentSize int, useTabs bool, opinionated bool) *Formatter {
 	}
 
 	return &Formatter{
-		IndentSize:    indentSize,
-		MaxLineLength: DefaultMaxLineLength,
-		UseTabs:       useTabs,
-		Opinionated:   opinionated,
+		IndentSize:       indentSize,
+		MaxLineLength:    DefaultMaxLineLength,
+		UseTabs:          useTabs,
+		Opinionated:      opinionated,
+		InsertCallParens: true,
 	}
 }
 
@@ -80,6 +90,7 @@ func (s *Server) formatDocument(uri string, options FormattingOptions, formatRan
 	formatter := NewFormatter(options.TabSize, !options.InsertSpaces, s.FormatOpinionated)
 
 	formatter.MaxLineLength = s.FormatMaxLineLength
+	formatter.InsertCallParens = s.FormatCallParens
 
 	edits := formatter.Format(doc, formatRange)
 
@@ -148,7 +159,7 @@ func (f *Formatter) Format(doc *Document, formatRange *Range) []TextEdit {
 		return nil
 	}
 
-	groups, groupAt := f.analyze(tokens, source)
+	groups, groupAt, flags := f.analyze(tokens, source, f.InsertCallParens && len(doc.Errors) == 0)
 
 	var (
 		rangeStart uint32
@@ -166,6 +177,8 @@ func (f *Formatter) Format(doc *Document, formatRange *Range) []TextEdit {
 	)
 
 	stack := make([]Scope, 1, 64) // index 0 is implicit file level block
+
+	stack[0].HugAt = -1
 
 	var (
 		prevTok           token.Token
@@ -327,6 +340,27 @@ func (f *Formatter) Format(doc *Document, formatRange *Range) []TextEdit {
 
 		gapBuilder.Reset()
 
+		closePending := prevIdx >= 0 && flags[prevIdx]&flagParenClose != 0
+		openPending := flags[i]&flagParenOpen != 0
+
+		effLeft := prevTok.Kind
+
+		if closePending {
+			gapBuilder.WriteByte(')')
+
+			col++
+
+			effLeft = token.RParen
+		}
+
+		if openPending {
+			gapBuilder.WriteByte('(')
+
+			col++
+
+			effLeft = token.LParen // needsSpace never puts a space after '('
+		}
+
 		for range nl {
 			gapBuilder.WriteByte('\n')
 		}
@@ -349,11 +383,11 @@ func (f *Formatter) Format(doc *Document, formatRange *Range) []TextEdit {
 					gapBuilder.WriteByte(' ')
 				}
 			}
-		} else if f.needsSpace(prevTok.Kind, tok.Kind, prevPrev) {
+		} else if f.needsSpace(effLeft, tok.Kind, prevPrev) {
 			gapBuilder.WriteByte(' ')
 
 			col++
-		} else if (prevTok.Kind == token.LBrace || tok.Kind == token.RBrace) && bytes.IndexByte(gap, ' ') != -1 {
+		} else if (effLeft == token.LBrace || tok.Kind == token.RBrace) && bytes.IndexByte(gap, ' ') != -1 {
 			gapBuilder.WriteByte(' ')
 
 			col++
@@ -396,6 +430,7 @@ func (f *Formatter) Format(doc *Document, formatRange *Range) []TextEdit {
 				stack = append(stack, Scope{
 					Kind: ScopeBlock, Open: i,
 					BaseIndent: lineIndent, Indent: lineIndent + 1,
+					HugAt: -1,
 				})
 			}
 		case token.LParen, token.LBrace, token.LBrack:
@@ -408,10 +443,17 @@ func (f *Formatter) Format(doc *Document, formatRange *Range) []TextEdit {
 				kind = ScopeBrack
 			}
 
+			broken, hugAt := f.layout(groups, groupAt, i, kind, startCol)
+
+			if stack[len(stack)-1].HugAt == int32(i) {
+				broken = true
+				hugAt = -1
+			}
+
 			stack = append(stack, Scope{
 				Kind: kind, Open: i,
 				BaseIndent: lineIndent, Indent: lineIndent + 1,
-				Broken: f.shouldBreak(groups, groupAt, i, kind, startCol),
+				HugAt: hugAt, Broken: broken,
 			})
 		}
 
@@ -429,6 +471,10 @@ func (f *Formatter) Format(doc *Document, formatRange *Range) []TextEdit {
 	gapEnd := uint32(len(source))
 	origGap := source[gapStart:gapEnd]
 	newGap := []byte("\n")
+
+	if prevIdx >= 0 && flags[prevIdx]&flagParenClose != 0 {
+		newGap = []byte(")\n")
+	}
 
 	if !bytes.Equal(origGap, newGap) {
 		inRange := true
@@ -471,12 +517,13 @@ func (f *Formatter) isKeywordAsIdentifier(tokens []token.Token, i int) bool {
 	return false
 }
 
-func (f *Formatter) analyze(tokens []token.Token, source []byte) ([]FormatGroup, []int32) {
+func (f *Formatter) analyze(tokens []token.Token, source []byte, insertParens bool) ([]FormatGroup, []int32, []uint8) {
 	var (
 		groups  = make([]FormatGroup, 0, len(tokens)/8+8)
 		groupAt = make([]int32, len(tokens))
 		cum     = make([]int32, len(tokens)+1)
 		spaces  = make([]uint8, len(tokens))
+		flags   = make([]uint8, len(tokens))
 		stack   = make([]int32, 0, 32)
 	)
 
@@ -521,6 +568,17 @@ func (f *Formatter) analyze(tokens []token.Token, source []byte) ([]FormatGroup,
 			}
 		}
 
+		var extra int32
+
+		if insertParens && (tok.Kind == token.String || tok.Kind == token.LBrace) && isCallSugarTarget(prevNC) {
+			flags[i] |= flagParenOpen
+			extra = 2
+
+			if tok.Kind == token.String {
+				flags[i] |= flagParenClose
+			}
+		}
+
 		var space uint8
 
 		if i > 0 && f.needsSpace(prevTok.Kind, tok.Kind, prevPrev) {
@@ -528,7 +586,7 @@ func (f *Formatter) analyze(tokens []token.Token, source []byte) ([]FormatGroup,
 		}
 
 		spaces[i] = space
-		cum[i+1] = cum[i] + int32(space) + width
+		cum[i+1] = cum[i] + int32(space) + width + extra
 
 		if i > 0 && bytes.IndexByte(source[prevTok.End:tok.Start], '\n') != -1 {
 			mark(false)
@@ -551,7 +609,7 @@ func (f *Formatter) analyze(tokens []token.Token, source []byte) ([]FormatGroup,
 
 			groupAt[i] = int32(len(groups))
 
-			groups = append(groups, FormatGroup{Open: int32(i), Close: -1, Kind: uint8(kind)})
+			groups = append(groups, FormatGroup{Open: int32(i), Close: -1, HugOpen: -1, Kind: uint8(kind)})
 			stack = append(stack, groupAt[i])
 		case token.RParen, token.RBrace, token.RBrack:
 			kind := ScopeParen
@@ -572,9 +630,27 @@ func (f *Formatter) analyze(tokens []token.Token, source []byte) ([]FormatGroup,
 
 				g.Close = int32(i)
 				g.Width = cum[i+1] - cum[g.Open] - int32(spaces[g.Open])
+				groupAt[i] = stack[j] // closers map back to their group too
+
+				if flags[g.Open]&flagParenOpen != 0 {
+					flags[i] |= flagParenClose
+				}
 
 				if g.Kind == ScopeBrace && g.Broke {
 					g.Multiline = true
+				}
+
+				// A call ending in "...})" can hug: the trailing table absorbs the
+				// break instead of the whole argument list exploding
+				if g.Kind == ScopeParen && i > 0 && tokens[i-1].Kind == token.RBrace {
+					if bi := groupAt[i-1]; bi >= 0 {
+						brace := groups[bi]
+
+						if brace.Open > g.Open && brace.Close > brace.Open+1 {
+							g.HugOpen = brace.Open
+							g.HugPrefix = cum[brace.Open+1] - cum[g.Open] - int32(spaces[g.Open])
+						}
+					}
 				}
 
 				if g.Multiline && j > 0 {
@@ -595,25 +671,34 @@ func (f *Formatter) analyze(tokens []token.Token, source []byte) ([]FormatGroup,
 		}
 	}
 
-	return groups, groupAt
+	return groups, groupAt, flags
 }
 
-func (f *Formatter) shouldBreak(groups []FormatGroup, groupAt []int32, index, kind, col int) bool {
+func (f *Formatter) layout(groups []FormatGroup, groupAt []int32, index, kind, col int) (broken bool, hugAt int32) {
 	gi := groupAt[index]
 	if gi < 0 {
-		return false
+		return false, -1
 	}
 
 	g := groups[gi]
 	if g.Close < 0 {
-		return false // unbalanced source, leave it alone
+		return false, -1 // unbalanced source, leave it alone
 	}
 
 	if g.Multiline {
-		return kind == ScopeBrace
+		return kind == ScopeBrace, -1
 	}
 
-	return f.MaxLineLength > 0 && col+int(g.Width) > f.MaxLineLength
+	if f.MaxLineLength <= 0 || col+int(g.Width) <= f.MaxLineLength {
+		return false, -1
+	}
+
+	// foo("a", {\n\t...\n}) reads better than exploding foo's argument list (if it fits)
+	if kind == ScopeParen && g.HugOpen >= 0 && col+int(g.HugPrefix) <= f.MaxLineLength {
+		return false, g.HugOpen
+	}
+
+	return true, -1
 }
 
 func (f *Formatter) lineIndent(stack []Scope, tokens []token.Token, index, prevNonComment int) int {
@@ -973,4 +1058,13 @@ func advanceColumn(col int, source []byte, tok token.Token) int {
 	}
 
 	return col + int(tok.End-tok.Start)
+}
+
+func isCallSugarTarget(k token.Kind) bool {
+	switch k {
+	case token.Ident, token.RParen, token.RBrack, token.RBrace, token.String:
+		return true
+	}
+
+	return false
 }
