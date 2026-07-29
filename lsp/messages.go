@@ -149,6 +149,7 @@ type InitializationOptions struct {
 	FeatureCodeLens       bool `json:"featureCodeLens"`
 	FeatureFormatting     bool `json:"featureFormatting"`
 	FormatOpinionated     bool `json:"formatOpinionated"`
+	FormatMaxLineLength   int  `json:"formatMaxLineLength"`
 	SuggestFunctionParams bool `json:"suggestFunctionParams"`
 	FeatureFormatAlerts   bool `json:"featureFormatAlerts"`
 

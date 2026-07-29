@@ -397,26 +397,34 @@
                         "markdownDescription": "Format special comment tags (e.g., `NOTE:`, `TODO:`) with emojis and bold text in hovers.",
                         "order": 7
                     },
+                    "lugo.completion.suggestFunctionParams": {
+                        "type": "boolean",
+                        "default": true,
+                        "scope": "resource",
+                        "markdownDescription": "Automatically insert function parameters as snippets when autocompleting a function call.",
+                        "order": 8
+                    },
                     "lugo.features.formatting": {
                         "type": "boolean",
                         "default": true,
                         "scope": "resource",
                         "markdownDescription": "Enable the built-in Lua formatter for inline format fixing and document formatting.",
-                        "order": 8
+                        "order": 9
                     },
                     "lugo.features.formatOpinionated": {
                         "type": "boolean",
                         "default": false,
                         "scope": "resource",
                         "markdownDescription": "Apply opinionated formatting tweaks (e.g., forcing blank lines between unrelated statements, before returns).",
-                        "order": 9
-                    },
-                    "lugo.completion.suggestFunctionParams": {
-                        "type": "boolean",
-                        "default": true,
-                        "scope": "resource",
-                        "markdownDescription": "Automatically insert function parameters as snippets when autocompleting a function call.",
                         "order": 10
+                    },
+                    "lugo.features.formatMaxLineLength": {
+                        "type": "integer",
+                        "default": 120,
+                        "minimum": -1,
+                        "scope": "resource",
+                        "markdownDescription": "Maximum line length the formatter aims for. Tables and argument lists that would exceed it are broken up one entry per line. Set to `-1` to never break by length.",
+                        "order": 11
                     }
                 }
             },

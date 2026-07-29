@@ -118,6 +118,7 @@ type Server struct {
 	FeatureCodeLens       bool
 	FeatureFormatting     bool
 	FormatOpinionated     bool
+	FormatMaxLineLength   int
 	SuggestFunctionParams bool
 	FeatureFormatAlerts   bool
 
@@ -163,8 +164,9 @@ func NewServer(version string) *Server {
 		sharedDepBuf:     make([]byte, 0, 128),
 
 		// Configuration Defaults
-		MaxParseErrors: DefaultMaxParserErrors,
-		MaxFileSize:    DefaultMaxFileSize,
+		MaxParseErrors:      DefaultMaxParserErrors,
+		MaxFileSize:         DefaultMaxFileSize,
+		FormatMaxLineLength: DefaultMaxLineLength,
 	}
 }
 
@@ -296,6 +298,16 @@ func (s *Server) applyInitializationOptions(opts InitializationOptions) (needsRe
 	setCfg(&s.FeatureCodeLens, opts.FeatureCodeLens, nil)
 	setCfg(&s.FeatureFormatting, opts.FeatureFormatting, nil)
 	setCfg(&s.FormatOpinionated, opts.FormatOpinionated, nil)
+
+	maxLineLength := opts.FormatMaxLineLength
+
+	if maxLineLength == 0 {
+		maxLineLength = DefaultMaxLineLength
+	} else if maxLineLength < 0 {
+		maxLineLength = 0
+	}
+
+	setCfg(&s.FormatMaxLineLength, maxLineLength, nil)
 	setCfg(&s.SuggestFunctionParams, opts.SuggestFunctionParams, nil)
 	setCfg(&s.FeatureFormatAlerts, opts.FeatureFormatAlerts, nil)
 
